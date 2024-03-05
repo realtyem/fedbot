@@ -1,0 +1,9 @@
+maubot: 0.1.0
+id: net.littlevortex.federationbot
+version: 0.0.4
+modules:
+  - federationbot
+main_class: FederationBot
+config: true
+extra_files:
+  - base-config.yaml

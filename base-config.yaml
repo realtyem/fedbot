@@ -1,0 +1,8 @@
+# User allowed to use this bot
+whitelist:
+  - "@user:doesntexist.com"
+
+# To make requests to other homeservers, we need to act like we are a server ourselves
+# We will need our homeserver's signing key to sign those requests.
+server_signing_keys:
+  "server_name": "key data from signing_key file"

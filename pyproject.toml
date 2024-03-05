@@ -1,0 +1,10 @@
+[tool.isort]
+profile = "black"
+force_to_top = "typing"
+from_first = true
+combine_as_imports = true
+line_length = 88
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
