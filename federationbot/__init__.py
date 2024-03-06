@@ -595,48 +595,6 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        room_id = None
-        # A display nicety
-        origin_server_ts: Optional[int] = None
-
-        # if not event_id:
-        #     room_id = await self._resolve_room_id_or_alias(
-        #         room_id_or_alias, command_event, origin_server
-        #     )
-        #     if not room_id:
-        #         # Don't need to actually display an error, that's handled in the above
-        #         # function
-        #         return
-        #
-        #     # No event id was supplied, find out what the last event in the room was
-        #     now = int(time.time() * 1000)
-        #     ts_response = (
-        #         await self.federation_handler.get_timestamp_to_event_from_server(
-        #             origin_server=origin_server,
-        #             destination_server=destination_server,
-        #             room_id=room_id,
-        #             utc_time_at_ms=now,
-        #         )
-        #     )
-        #     if isinstance(ts_response, FederationErrorResponse):
-        #         await command_event.respond(
-        #             "Something went wrong while getting last event in room("
-        #             f"{ts_response.reason}"
-        #             "). Please supply an event_id instead at the place in time of query"
-        #         )
-        #         return
-        #     else:
-        #         event_id = ts_response.response_dict.get("event_id", None)
-        #         origin_server_ts = ts_response.response_dict.get(
-        #             "origin_server_ts", None
-        #         )
-        # else:
-        #     event_result = await self.federation_handler.get_events_from_server(origin_server, destination_server, [event_id])
-        #     event = event_result.get(event_id, None)
-        #     if event:
-        #         room_id = event.room_id
-        #         if isinstance(event, Event):
-        #             origin_server_ts = event.origin_server_ts
         discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
         if not discovered_info:
             # The user facing error message was already sent
@@ -647,7 +605,7 @@ class FederationBot(Plugin):
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                " \n  * which took place at: "
+                "\n  * which took place at: "
                 f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
@@ -1231,45 +1189,11 @@ class FederationBot(Plugin):
             )
             return
 
-        # A display nicety
-        origin_server_ts: Optional[int] = None
-
         if server_to_request_from:
             destination_server = server_to_request_from
         else:
             destination_server = origin_server
 
-        # room_id = await self._resolve_room_id_or_alias(
-        #     room_id_or_alias, command_event, origin_server
-        # )
-        # if not room_id:
-        #     # Don't need to actually display an error, that's handled in the above
-        #     # function
-        #     return
-        #
-        # if not event_id:
-        #     # No event id was supplied, find out what the last event in the room was
-        #     now = int(time.time() * 1000)
-        #     ts_response = (
-        #         await self.federation_handler.get_timestamp_to_event_from_server(
-        #             origin_server=origin_server,
-        #             destination_server=destination_server,
-        #             room_id=room_id,
-        #             utc_time_at_ms=now,
-        #         )
-        #     )
-        #     if isinstance(ts_response, FederationErrorResponse):
-        #         await command_event.respond(
-        #             "Something went wrong while getting last event in room("
-        #             f"{ts_response.reason}"
-        #             "). Please supply an event_id instead at the place in time of query"
-        #         )
-        #         return
-        #     else:
-        #         event_id = ts_response.response_dict.get("event_id", None)
-        #         origin_server_ts = ts_response.response_dict.get(
-        #             "origin_server_ts", None
-        #         )
         discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
         if not discovered_info:
             # The user facing error message was already sent
@@ -1280,15 +1204,16 @@ class FederationBot(Plugin):
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                " \n which took place at: "
+                "\n  * which took place at: "
                 f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
             special_time_formatting = ""
         await command_event.respond(
-            f"Retrieving state for \n Room: {room_id_or_alias or room_id}\n"
-            f"at Event ID: {event_id}{special_time_formatting}\n"
-            f"From {destination_server} using {origin_server}"
+            f"Retrieving State for:\n"
+            f"* Room: {room_id_or_alias or room_id}\n"
+            f"* at Event ID: {event_id}{special_time_formatting}\n"
+            f"* From {destination_server} using {origin_server}"
         )
 
         # This will be assigned by now
@@ -2201,45 +2126,17 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        room_id = await self._resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
-        )
-        if not room_id:
-            # Don't need to actually display an error, that's handled in the above
-            # function
+        discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
+        if not discovered_info:
+            # The user facing error message was already sent
             return
 
-        # A display nicety
-        origin_server_ts: Optional[int] = None
-
-        if not event_id:
-            # No event id was supplied, find out what the last event in the room was
-            now = int(time.time() * 1000)
-            ts_response = (
-                await self.federation_handler.get_timestamp_to_event_from_server(
-                    origin_server=origin_server,
-                    destination_server=destination_server,
-                    room_id=room_id,
-                    utc_time_at_ms=now,
-                )
-            )
-            if isinstance(ts_response, FederationErrorResponse):
-                await command_event.respond(
-                    "Something went wrong while getting last event in room("
-                    f"{ts_response.reason}"
-                    "). Please supply an event_id instead at the place in time of query"
-                )
-                return
-            else:
-                event_id = ts_response.response_dict.get("event_id", None)
-                origin_server_ts = ts_response.response_dict.get(
-                    "origin_server_ts", None
-                )
+        room_id, event_id, origin_server_ts = discovered_info
 
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                " \n which took place at: "
+                "\n  * which took place at: "
                 f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
@@ -2345,6 +2242,8 @@ class FederationBot(Plugin):
         event_id: Optional[str],
         server_to_request_from: Optional[str] = None,
     ) -> None:
+        # Unlike some of the other commands, this one *requires* an event_id passed in.
+
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -2364,39 +2263,25 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        if not room_id_or_alias:
-            # No event id was supplied, find out what the last event in the room was
-            (
-                event_response,
-                event_list,
-            ) = await self.federation_handler.get_event_from_server(
-                origin_server=origin_server,
-                destination_server=destination_server,
-                event_id=event_id,
-            )
-            if isinstance(event_response, FederationErrorResponse):
-                await command_event.respond(
-                    "Something went wrong while getting data for event("
-                    f"{event_response.reason}"
-                    "). Please supply a room_id/alias instead"
-                )
-                return
-            else:
-                assert len(event_list) < 2
-                room_id = event_list[0].room_id
+        discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
+        if not discovered_info:
+            # The user facing error message was already sent
+            return
 
-        else:
-            room_id = await self._resolve_room_id_or_alias(
-                room_id_or_alias, command_event, origin_server
+        room_id, event_id, origin_server_ts = discovered_info
+
+        if origin_server_ts:
+            # A nice little addition for the status updated before the command runs
+            special_time_formatting = (
+                "\n  * which took place at: "
+                f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
-            if not room_id:
-                # Don't need to actually display an error, that's handled in the above
-                # function
-                return
+        else:
+            special_time_formatting = ""
 
         await command_event.respond(
             "Retrieving the chain of Auth Events for:\n"
-            f"* Event ID: {event_id}\n"
+            f"* Event ID: {event_id}{special_time_formatting}\n"
             f"* in Room: {room_id_or_alias or room_id}\n"
             f"* From {destination_server} using {origin_server}"
         )
