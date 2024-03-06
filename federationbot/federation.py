@@ -545,7 +545,7 @@ class FederationHandler:
             await event_queue.put(event_id)
 
         tasks = []
-        for i in range(max(len(events_list), 10)):
+        for i in range(min(len(events_list), 10)):
             task = asyncio.create_task(_get_event_worker(event_queue))
             tasks.append(task)
 
