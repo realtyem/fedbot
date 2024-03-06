@@ -483,7 +483,6 @@ class FederationHandler:
     async def get_events_from_server(
         self, origin_server: str, destination_server: str, events_list: Sequence[str]
     ) -> Dict[str, EventBase]:
-        # TODO: WIP
         # Keep both the response and the actual event, if there was an error it will be
         # in the response and the event won't exist here
         event_to_event_base: Dict[str, EventBase] = {}
@@ -507,29 +506,12 @@ class FederationHandler:
                         {"error": "Request Timed Out", "errcode": "Timeout err"},
                     )
                     event_to_event_base[worker_event_id] = error_event
-                    # FederationErrorResponse(
-                    #     status_code=0,
-                    #     status_reason="Timed out waiting for response",
-                    #     response_dict={},
-                    #     server_result=ServerResultError(
-                    #         error_reason="Timeout err", diag_info=DiagnosticInfo(True)
-                    #     ),
-                    # )
                 except Exception as e:
                     error_event = EventError(
                         EventID(worker_event_id),
                         {"error": f"{e}", "errcode": "Plugin error"},
                     )
                     event_to_event_base[worker_event_id] = error_event
-                    # FederationErrorResponse(
-                    #     status_code=0,
-                    #     status_reason="Plugin Error",
-                    #     response_dict={},
-                    #     server_result=ServerResultError(
-                    #         error_reason=f"Plugin err: {e}",
-                    #         diag_info=DiagnosticInfo(True),
-                    #     ),
-                    # )
 
                 else:
                     for event_base_entry in event_base_list:
@@ -549,9 +531,7 @@ class FederationHandler:
             task = asyncio.create_task(_get_event_worker(event_queue))
             tasks.append(task)
 
-        started_at = time.time()
         await event_queue.join()
-        total_time = time.time() - started_at
 
         # Cancel our worker tasks.
         for task in tasks:
