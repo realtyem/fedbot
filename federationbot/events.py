@@ -127,7 +127,16 @@ class EventBase:
         return summary
 
     def to_extras_summary(self) -> str:
+        """
+        Short single line summary used for displaying data about the Event. Generally
+        used by the render for event_auth and backfill commands.
+        Returns: string populated by subclasses
+
+        """
         return ""
+
+    def to_short_type_summary(self) -> str:
+        return self.event_type
 
     def to_pretty_summary(
         self,
@@ -260,6 +269,9 @@ class EventError(EventBase):
         # super().__init__(event_id, data)
         self.error = data.get("error", "Unknown Error")
         self.errcode = data.get("errcode", "Unknown Error")
+
+    def to_short_type_summary(self) -> str:
+        return f"{self.errcode} {self.error}"
 
     def to_line_summary(
         self,
@@ -1232,6 +1244,9 @@ class RoomMemberStateEvent(GenericStateEvent):
 
     def to_extras_summary(self) -> str:
         return f"membership: {self.membership} "
+
+    def to_short_type_summary(self) -> str:
+        return f"{self.event_type} {self.sender} {self.membership}"
 
     def to_pretty_summary(
         self,
