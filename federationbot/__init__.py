@@ -595,7 +595,9 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
+        discovered_info = await self._discover_event_ids_and_room_ids(
+            origin_server, destination_server, command_event, room_id_or_alias, event_id
+        )
         if not discovered_info:
             # The user facing error message was already sent
             return
@@ -640,7 +642,9 @@ class FederationBot(Plugin):
             # if limit is more than the number of hosts, fix it
             limit = min(limit, len(host_list))
             for host_number in range(0, limit):
-                list_of_buffer_lines.extend([f"{host_list[host_number:host_number+1]}\n"])
+                list_of_buffer_lines.extend(
+                    [f"{host_list[host_number:host_number+1]}\n"]
+                )
         else:
             for host in host_list:
                 list_of_buffer_lines.extend([f"['{host}']\n"])
@@ -1194,7 +1198,9 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
+        discovered_info = await self._discover_event_ids_and_room_ids(
+            origin_server, destination_server, command_event, room_id_or_alias, event_id
+        )
         if not discovered_info:
             # The user facing error message was already sent
             return
@@ -1236,7 +1242,9 @@ class FederationBot(Plugin):
         event_to_event_base: Dict[str, EventBase]
 
         started_at = time.monotonic()
-        event_to_event_base = await self.federation_handler.get_events_from_server(origin_server, destination_server, pdu_list)
+        event_to_event_base = await self.federation_handler.get_events_from_server(
+            origin_server, destination_server, pdu_list
+        )
         total_time = time.monotonic() - started_at
 
         # Time to start rendering. Build the header lines first
@@ -2126,7 +2134,9 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
+        discovered_info = await self._discover_event_ids_and_room_ids(
+            origin_server, destination_server, command_event, room_id_or_alias, event_id
+        )
         if not discovered_info:
             # The user facing error message was already sent
             return
@@ -2263,7 +2273,9 @@ class FederationBot(Plugin):
         else:
             destination_server = origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(origin_server, destination_server, command_event, room_id_or_alias, event_id)
+        discovered_info = await self._discover_event_ids_and_room_ids(
+            origin_server, destination_server, command_event, room_id_or_alias, event_id
+        )
         if not discovered_info:
             # The user facing error message was already sent
             return
@@ -2508,12 +2520,22 @@ class FederationBot(Plugin):
             room_id=room_id,
             event_id=event_id_in_timeline,
         )
-        state_events_dict = await self.federation_handler.get_events_from_server(origin_server, destination_server, state_ids)
+        state_events_dict = await self.federation_handler.get_events_from_server(
+            origin_server, destination_server, state_ids
+        )
         state_events = []
         for event_id, state_event in state_events_dict.items():
             state_events.append(state_event)
-        filtered_room_member_events = cast(List[RoomMemberStateEvent], filter_events_based_on_type(state_events, "m.room.member"))
-        joined_member_events = cast(List[RoomMemberStateEvent], filter_state_events_based_on_membership(filtered_room_member_events, "join"))
+        filtered_room_member_events = cast(
+            List[RoomMemberStateEvent],
+            filter_events_based_on_type(state_events, "m.room.member"),
+        )
+        joined_member_events = cast(
+            List[RoomMemberStateEvent],
+            filter_state_events_based_on_membership(
+                filtered_room_member_events, "join"
+            ),
+        )
         joined_member_events.sort(key=lambda x: x.depth)
         hosts_ordered = []
         for member in joined_member_events:
@@ -2529,7 +2551,7 @@ class FederationBot(Plugin):
         destination_server: str,
         command_event: MessageEvent,
         room_id_or_alias: Optional[str],
-        event_id: Optional[str]
+        event_id: Optional[str],
     ) -> Optional[Tuple[str, str, int]]:
         room_id = None
         origin_server_ts = None
@@ -2565,7 +2587,9 @@ class FederationBot(Plugin):
                     "origin_server_ts", None
                 )
         else:
-            event_result = await self.federation_handler.get_events_from_server(origin_server, destination_server, [event_id])
+            event_result = await self.federation_handler.get_events_from_server(
+                origin_server, destination_server, [event_id]
+            )
             event = event_result.get(event_id, None)
             if event:
                 room_id = event.room_id
@@ -2573,6 +2597,7 @@ class FederationBot(Plugin):
                     origin_server_ts = event.origin_server_ts
 
         return room_id, event_id, origin_server_ts
+
 
 def format_result_lines(
     server_name: str,

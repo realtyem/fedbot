@@ -18,7 +18,10 @@ from federationbot.delegation import (
     check_and_maybe_split_server_name,
 )
 from federationbot.events import (
-    Event, EventBase, EventError, RoomMemberStateEvent,
+    Event,
+    EventBase,
+    EventError,
+    RoomMemberStateEvent,
     determine_what_kind_of_event,
 )
 from federationbot.responses import (
