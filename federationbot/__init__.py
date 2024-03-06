@@ -30,6 +30,7 @@ from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from federationbot.events import (
     Event,
     EventBase,
+    EventError,
     GenericStateEvent,
     RoomMemberStateEvent,
     determine_what_kind_of_event,
@@ -1036,26 +1037,23 @@ class FederationBot(Plugin):
 
         # Collect all the Federation Responses as well as the EventBases.
         # Errors can be found in the Responses.
-        response, returned_events = await self.federation_handler.get_event_from_server(
+        returned_events = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
             destination_server=destination_server,
             event_id=event_id,
         )
 
         buffered_message = ""
-        if isinstance(response, FederationErrorResponse):
+        returned_event = returned_events.get(event_id)
+        if isinstance(returned_event, EventError):
             buffered_message += (
-                f"received an error\n{response.status_code}:{response.reason}"
+                f"received an error\n{returned_event.errcode}:{returned_event.error}"
             )
 
-            if response.response_dict:
-                buffered_message += f"{json.dumps(response.response_dict, indent=4)}\n"
-
         else:
-            for event in returned_events:
-                buffered_message += f"{event.event_id}\n"
-                # EventBase.to_json() does not have a trailing new line, add one
-                buffered_message += event.to_json() + "\n"
+            buffered_message += f"{returned_event.event_id}\n"
+            # EventBase.to_json() does not have a trailing new line, add one
+            buffered_message += returned_event.to_json() + "\n"
 
         # It is extremely unlikely that an Event will be larger than can be displayed.
         # Don't bother chunking the response.
@@ -1103,64 +1101,51 @@ class FederationBot(Plugin):
             f"{destination_server} using {origin_server}"
         )
 
-        response, returned_events = await self.federation_handler.get_event_from_server(
+        returned_event_dict = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
             destination_server=destination_server,
             event_id=event_id,
         )
 
         buffered_message = ""
-        if isinstance(response, FederationErrorResponse):
+        returned_event = returned_event_dict.get(event_id)
+        if isinstance(returned_event, EventError):
             buffered_message += (
-                f"received an error\n{response.status_code}:{response.reason}\n"
+                f"received an error\n{returned_event.errcode}:{returned_event.error}\n"
             )
-            if response.response_dict:
-                buffered_message += f"{response.response_dict.get('error')}\n"
 
         else:
             # a_event will stand for ancestor event
-            # A mapping of 'a_event_id' to the result to be shown
-            a_event_data_map = {}
-            for event in returned_events:
-                # Recursively retrieve events that are in the immediate past. This
-                # allows for some annotation to the events when they are displayed in
-                # the 'footer' section of the rendered response. For example: auth
-                # events will have their event type displayed, such as 'm.room.create'
-                # and the room version.
-                list_of_a_events = event.auth_events.copy()
-                list_of_a_events.extend(event.prev_events)
+            # A mapping of 'a_event_id' to the string of short data about the a_event to
+            # be shown
+            a_event_data_map: Dict[str, str] = {}
+            # Recursively retrieve events that are in the immediate past. This
+            # allows for some annotation to the events when they are displayed in
+            # the 'footer' section of the rendered response. For example: auth
+            # events will have their event type displayed, such as 'm.room.create'
+            # and the room version.
+            list_of_a_event_ids = returned_event.auth_events.copy()
+            list_of_a_event_ids.extend(returned_event.prev_events)
 
-                for a_event in list_of_a_events:
-                    (
-                        a_response,
-                        a_returned_events,
-                    ) = await self.federation_handler.get_event_from_server(
-                        origin_server=origin_server,
-                        destination_server=destination_server,
-                        event_id=a_event,
-                    )
+            a_returned_events = await self.federation_handler.get_events_from_server(
+                origin_server=origin_server,
+                destination_server=destination_server,
+                events_list=list_of_a_event_ids,
+            )
+            for a_event_id in list_of_a_event_ids:
+                a_event_base = a_returned_events.get(a_event_id)
+                if a_event_base:
+                    a_event_data_map[a_event_id] = a_event_base.to_short_type_summary()
 
-                    if isinstance(a_response, FederationErrorResponse):
-                        a_event_data_map[a_event] = "error retrieving"
-
-                    else:
-                        for entry in a_returned_events:
-                            if isinstance(entry, RoomMemberStateEvent):
-                                a_event_data_map[
-                                    a_event
-                                ] = f"{entry.event_type} {entry.sender} {entry.membership}"
-                            else:
-                                a_event_data_map[a_event] = f"{entry.event_type}"
-
-                # Begin rendering
-                buffered_message += event.to_pretty_summary()
-                # Add a little gap at the bottom of the previous for better separation
-                buffered_message += "\n"
-                buffered_message += event.to_pretty_summary_content()
-                buffered_message += event.to_pretty_summary_unrecognized()
-                buffered_message += event.to_pretty_summary_footer(
-                    event_data_map=a_event_data_map
-                )
+            # Begin rendering
+            buffered_message += returned_event.to_pretty_summary()
+            # Add a little gap at the bottom of the previous for better separation
+            buffered_message += "\n"
+            buffered_message += returned_event.to_pretty_summary_content()
+            buffered_message += returned_event.to_pretty_summary_unrecognized()
+            buffered_message += returned_event.to_pretty_summary_footer(
+                event_data_map=a_event_data_map
+            )
 
         await command_event.respond(wrap_in_code_block_markdown(buffered_message))
 

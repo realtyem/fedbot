@@ -435,7 +435,7 @@ class FederationHandler:
 
     async def get_event_from_server(
         self, origin_server: str, destination_server: str, event_id: str
-    ) -> Tuple[Optional[FederationBaseResponse], List[EventBase]]:
+    ) -> Dict[str, EventBase]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
          be included in the retrieved Event.
@@ -448,16 +448,20 @@ class FederationHandler:
             contained in a List
 
         """
+        # The return, map of event_id -> EventBase
+        event_id_to_event: Dict[str, EventBase] = {}
+
         new_event_base = self._events_cache.get((destination_server, event_id), None)
         if new_event_base:
-            return None, [new_event_base]
+            # Only successful events are cached
+            return {event_id: new_event_base}
+
         response = await self.federation_request(
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/event/{event_id}",
             auth_request_for=origin_server,
         )
-        # event_id_to_event: Dict[str, EventBase] = {}
-        event_base_list = []
+
         if response.status_code != 200:
             self.logger.warning(
                 f"get_event_from_server had an error\n{response.status_code}:{response.reason}"
@@ -466,19 +470,18 @@ class FederationHandler:
                 EventID(event_id),
                 {"error": f"{response.reason}", "errcode": f"{response.status_code}"},
             )
-            event_base_list.append(new_event_base)
-            return response, event_base_list
+
+            return {event_id: new_event_base}
 
         pdu_list = response.response_dict.get("pdus", [])
         for data in pdu_list:
-            # self.logger.warning(json.dumps(data, indent=4))
+            # This path is only taken on success, errors are sorted above
             new_event_base = determine_what_kind_of_event(EventID(event_id), data)
             self._events_cache.setdefault(
                 (destination_server, event_id), new_event_base
             )
-            event_base_list.append(new_event_base)
 
-        return response, event_base_list
+        return {event_id: new_event_base}
 
     async def get_events_from_server(
         self, origin_server: str, destination_server: str, events_list: Sequence[str]
@@ -491,7 +494,7 @@ class FederationHandler:
             while True:
                 worker_event_id: str = await queue.get()
                 try:
-                    (server_response, event_base_list,) = await asyncio.wait_for(
+                    event_base_dict = await asyncio.wait_for(
                         self.get_event_from_server(
                             origin_server=origin_server,
                             destination_server=destination_server,
@@ -514,10 +517,10 @@ class FederationHandler:
                     event_to_event_base[worker_event_id] = error_event
 
                 else:
-                    for event_base_entry in event_base_list:
-                        event_to_event_base[
-                            str(event_base_entry.event_id)
-                        ] = event_base_entry
+                    for r_event_id, event_base in event_base_dict.items():
+                        # Add this newly retrieved Event data to the outside dict that
+                        # is being returned.
+                        event_to_event_base[r_event_id] = event_base
 
                 finally:
                     queue.task_done()
