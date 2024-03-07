@@ -133,7 +133,6 @@ class FederationHandler:
                         request_headers["Authorization"],
                         signed_content,
                     ) = authorization_headers(
-                        logger_cb=self.logger.warning,
                         origin_name=auth_request_for,
                         origin_signing_key=self.server_signing_keys[auth_request_for],
                         destination_name=destination_server,
@@ -151,8 +150,7 @@ class FederationHandler:
                     else None,
                     json=signed_content,
                 )
-                self.logger.warning(f"response:\n {response}")
-                self.logger.warning(f"response request info:\n {response.request_info}")
+
             else:
                 diag_info.add(f"Making request to {destination_server}{path}")
 
@@ -164,9 +162,6 @@ class FederationHandler:
                     timeout=timeout_seconds,
                 )
 
-            self.logger.warning(f"response:\n {response}")
-            self.logger.warning(f"response request info:\n {response.request_info}")
-
         except ConnectionRefusedError as e:
             diag_info.error("ConnectionRefusedError")
             error_reason = "ConnectionRefusedError"
@@ -175,14 +170,12 @@ class FederationHandler:
             assert isinstance(e._certificate_error, ssl.SSLError)
             diag_info.error(f"SSL Certificate Error, {e._certificate_error.reason}")
             error_reason = f"SSL Certificate Error, {e._certificate_error.reason}"
-            self.logger.warning(f"{destination_server} had an error{e}")
             # This is one of the two errors I found while probing for SNI TLS
             code = -1
 
         except client_exceptions.ClientConnectorSSLError as e:
             diag_info.error(f"Client Connector SSL Error, {e}")
             error_reason = f"Client Connector SSL Error, {e}"
-            self.logger.warning(f"{destination_server} had an error {e}")
             code = -1
 
         except client_exceptions.ServerDisconnectedError as e:
@@ -190,24 +183,17 @@ class FederationHandler:
             error_reason = "Server Disconnect Error"
 
         # except client_exceptions.ConnectionTimeoutError as e:
-        #     self.logger.info(
-        #         "federation_request: ConnectionTimeoutError Exception: for "
-        #         f"{server}:\n {e}"
-        #     )
+
         # except client_exceptions.SocketTimeoutError as e:
-        #     self.logger.info(
-        #         "federation_request: SocketTimeoutError Exception: for "
-        #         f"{server}:\n {e}"
-        #     )
+
         except client_exceptions.ServerTimeoutError as e:
             diag_info.error(f"Server Timeout Error")
             error_reason = "Server Timeout Error"
 
         except client_exceptions.ServerFingerprintMismatch as e:
-            self.logger.info(
-                "federation_request: ServerFingerprintMismatch Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            diag_info.error(f"Server Fingerprint Mismatch Error")
+            error_reason = "Server Fingerprint Mismatch Error"
+
         except client_exceptions.ServerConnectionError as e:
             diag_info.error(f"Server Connection Error")
             error_reason = "ServerConnectionError"
@@ -219,78 +205,60 @@ class FederationHandler:
             code = -1
 
         except client_exceptions.ClientProxyConnectionError as e:
-            self.logger.info(
-                "federation_request: ClientProxyConnectionError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            diag_info.error(f"Client Proxy Connection Error")
+            error_reason = "Client Proxy Connection Error"
+
         except client_exceptions.ClientConnectorError as e:
             # code = 0
             diag_info.error(f"ClientConnectorError: {e.strerror}")
             error_reason = f"Client Connector Error: {e.strerror}"
 
         except client_exceptions.ClientHttpProxyError as e:
-            self.logger.info(
-                "federation_request: ClientHttpProxyError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            diag_info.error(f"Client HTTP Proxy Error")
+            error_reason = "Client HTTP Proxy Error"
+
         except client_exceptions.WSServerHandshakeError as e:
             # Not sure this one will ever be used...
-            self.logger.info(
-                "federation_request: WSServerHandshakeError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            pass
         except client_exceptions.ContentTypeError as e:
-            self.logger.info(
-                "federation_request: ContentTypeError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            # Pretty sure will never hit this one either, as it's not enforced here
+            diag_info.error(f"Content Type Error")
+            error_reason = "Content Type Error"
         except client_exceptions.ClientResponseError as e:
-            self.logger.info(
-                "federation_request: ClientResponseError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            diag_info.error(f"Client Response Error")
+            error_reason = "Client Response Error"
+
         except client_exceptions.ClientPayloadError as e:
-            self.logger.info(
-                "federation_request: ClientPayloadError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            diag_info.error(f"Client Payload Error")
+            error_reason = "Client Payload Error"
+
         except client_exceptions.InvalidURL as e:
-            self.logger.info(
-                f"federation_request: InvalidURL Exception: for {destination_server}:\n {e}"
-            )
+            diag_info.error(f"InvalidURL Error")
+            error_reason = "InvalidURL Error"
+
         except client_exceptions.ClientOSError as e:
-            self.logger.info(
-                f"federation_request: ClientOSError Exception: for {destination_server}:\n {e}"
-            )
+            diag_info.error(f"Client OS Error")
+            error_reason = "Client OS Error"
+
         except client_exceptions.ClientConnectionError as e:
-            self.logger.info(
-                "federation_request: ClientConnectionError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
+            diag_info.error(f"Client Connection Error")
+            error_reason = "Client Connection Error"
+
         except client_exceptions.ClientError as e:
-            self.logger.info(
-                f"federation_request: ClientError Exception: for {destination_server}:\n {e}"
-            )
-        except client_exceptions.ClientConnectorSSLError as e:
-            self.logger.info(
-                "federation_request: ClientConnectorSSLError Exception: for "
-                f"{destination_server}:\n {e}"
-            )
-        # except asyncio.Timeout as e:
-        #     self.logger.info(
-        #         f"federation_request: Timeout Exception: for {server}:\n {e}"
-        #     )
+            diag_info.error(f"Client Error")
+            error_reason = "Client Error"
+
         except asyncio.TimeoutError:
             diag_info.error(
                 "TimeoutError, this server probably doesn't exist(or is taking to long)"
             )
             error_reason = "Timed out. Is this server online?"
-        # except Exception as e:
-        #     self.logger.info(
-        #         f"federation_request: General Exception: for {server}:\n {e}"
-        #     )
-        #     diag_info.error(f"General Exception: {e}")
-        #     error_reason = "General Exception"
+        except Exception as e:
+            self.logger.info(
+                f"federation_request: General Exception: for {server}:\n {e}"
+            )
+            diag_info.error(f"General Exception: {e}")
+            error_reason = "General Exception"
 
         # response = await self.http_client.get(f"https://{server}{query_string}")
         else:
@@ -692,7 +660,6 @@ class FederationHandler:
 #     }
 # }
 def authorization_headers(
-    logger_cb: Callable,
     origin_name: str,
     origin_signing_key: str,
     destination_name: str,
@@ -739,9 +706,6 @@ def authorization_headers(
             )
         )
 
-    logger_cb(
-        f"authorization_header:\n{authorization_header}\nsigned_json:\n{json.dumps(signed_json, indent=4)}"
-    )
     return authorization_header, signed_json.get("content", None)
 
 
