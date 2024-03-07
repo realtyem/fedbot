@@ -820,9 +820,8 @@ class FederationBot(Plugin):
                             worker_server_name,
                             force_recheck=True,
                             diagnostics=True,
-                            timeout_seconds=12.0,
                         ),
-                        timeout=None,
+                        timeout=10.0,
                     )
                 except asyncio.TimeoutError:
                     server_to_server_data[worker_server_name] = FederationErrorResponse(
@@ -1386,7 +1385,7 @@ class FederationBot(Plugin):
                         self.federation_handler.get_server_version(
                             worker_server_name,
                         ),
-                        timeout=35,
+                        timeout=10.0,
                     )
                 except asyncio.TimeoutError:
                     server_to_version_data[
@@ -1623,7 +1622,7 @@ class FederationBot(Plugin):
                 try:
                     server_to_server_data[worker_server_name] = await asyncio.wait_for(
                         self.federation_handler.get_server_keys(worker_server_name),
-                        timeout=None,
+                        timeout=10.0,
                     )
 
                 except asyncio.TimeoutError:
@@ -1911,7 +1910,7 @@ class FederationBot(Plugin):
                         self.federation_handler.get_server_keys_from_notary(
                             worker_server_name, notary_server_to_use
                         ),
-                        timeout=35,
+                        timeout=10.0,
                     )
 
                 except asyncio.TimeoutError:

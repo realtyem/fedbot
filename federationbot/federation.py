@@ -63,7 +63,7 @@ class FederationHandler:
         delegation_check: bool = True,
         force_recheck: bool = False,
         diagnostics: bool = False,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 10.0,
         auth_request_for: Optional[str] = None,
         content: Optional[Dict[str, Any]] = None,
     ) -> FederationBaseResponse:
@@ -368,7 +368,7 @@ class FederationHandler:
         server_name: str,
         force_recheck: bool = False,
         diagnostics: bool = False,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self.federation_request(
             destination_server=server_name,
@@ -398,12 +398,13 @@ class FederationHandler:
             return FederationVersionResponse.from_response(response)
 
     async def get_server_keys(
-        self, server_name: str
+        self, server_name: str, timeout: float = 10.0
     ) -> Union[FederationServerKeyResponse, FederationErrorResponse]:
         response = await self.federation_request(
             destination_server=server_name,
             path="/_matrix/key/v2/server",
             method="GET",
+            timeout_seconds=timeout,
         )
         if response.status_code == 404:
             response.server_result.diag_info.connection_test_status = (
@@ -424,17 +425,22 @@ class FederationHandler:
             return FederationServerKeyResponse.from_response(response)
 
     async def get_server_keys_from_notary(
-        self, fetch_server_name: str, from_server_name: str
+        self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
     ) -> FederationBaseResponse:
         response = await self.federation_request(
             destination_server=from_server_name,
             path=f"/_matrix/key/v2/query/{fetch_server_name}",
             method="GET",
+            timeout_seconds=timeout,
         )
         return response
 
     async def get_event_from_server(
-        self, origin_server: str, destination_server: str, event_id: str
+        self,
+        origin_server: str,
+        destination_server: str,
+        event_id: str,
+        timeout: float = 10.0,
     ) -> Dict[str, EventBase]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
@@ -460,6 +466,7 @@ class FederationHandler:
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/event/{event_id}",
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         if response.status_code != 200:
@@ -484,7 +491,11 @@ class FederationHandler:
         return {event_id: new_event_base}
 
     async def get_events_from_server(
-        self, origin_server: str, destination_server: str, events_list: Sequence[str]
+        self,
+        origin_server: str,
+        destination_server: str,
+        events_list: Sequence[str],
+        timeout: float = 10.0,
     ) -> Dict[str, EventBase]:
         # Keep both the response and the actual event, if there was an error it will be
         # in the response and the event won't exist here
@@ -500,7 +511,7 @@ class FederationHandler:
                             destination_server=destination_server,
                             event_id=worker_event_id,
                         ),
-                        timeout=12.0,
+                        timeout=timeout,
                     )
 
                 except asyncio.TimeoutError:
@@ -550,12 +561,14 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id: str,
+        timeout: float = 10.0,
     ) -> Tuple[List[str], List[str],]:
         response = await self.federation_request(
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/state_ids/{room_id}",
             query_args=[("event_id", event_id)],
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         pdu_list = response.response_dict.get("pdu_ids", [])
@@ -569,11 +582,13 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id: str,
+        timeout: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self.federation_request(
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         return response
@@ -584,12 +599,14 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         utc_time_at_ms: int,
+        timeout: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self.federation_request(
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
             query_args=[("dir", "b"), ("ts", utc_time_at_ms)],
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         return response
@@ -601,6 +618,7 @@ class FederationHandler:
         room_id: str,
         event_id: str,
         limit: str = "10",
+        timeout: float = 10.0,
     ) -> FederationBaseResponse:
 
         response = await self.federation_request(
@@ -608,6 +626,7 @@ class FederationHandler:
             path=f"/_matrix/federation/v1/backfill/{room_id}",
             query_args=[("v", event_id), ("limit", limit)],
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         return response
@@ -617,6 +636,7 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         user_mxid: str,
+        timeout: float = 10.0,
     ) -> FederationBaseResponse:
         # url = URL(
         #     f"https://{destination_server}/_matrix/federation/v1/user/devices/{mxid}"
@@ -626,6 +646,7 @@ class FederationHandler:
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/user/devices/{user_mxid}",
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         return response
@@ -635,6 +656,7 @@ class FederationHandler:
         origin_server: str,
         # destination_server: Optional[str],
         room_alias: str,
+        timeout: float = 10.0,
     ) -> FederationBaseResponse:
         try:
             _, destination_server = room_alias.split(":", maxsplit=1)
@@ -650,6 +672,7 @@ class FederationHandler:
             path="/_matrix/federation/v1/query/directory",
             query_args=[("room_alias", room_alias)],
             auth_request_for=origin_server,
+            timeout_seconds=timeout,
         )
 
         return response
