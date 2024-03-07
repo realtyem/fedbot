@@ -2545,17 +2545,16 @@ class FederationBot(Plugin):
         room_id_or_alias: Optional[str],
         event_id: Optional[str],
     ) -> Optional[Tuple[str, str, int]]:
-        room_id = None
+        room_id = await self._resolve_room_id_or_alias(
+            room_id_or_alias, command_event, origin_server
+        )
+        if not room_id:
+            # Don't need to actually display an error, that's handled in the above
+            # function
+            return
+
         origin_server_ts = None
         if not event_id:
-            room_id = await self._resolve_room_id_or_alias(
-                room_id_or_alias, command_event, origin_server
-            )
-            if not room_id:
-                # Don't need to actually display an error, that's handled in the above
-                # function
-                return
-
             # No event id was supplied, find out what the last event in the room was
             now = int(time.time() * 1000)
             ts_response = (
@@ -2584,8 +2583,15 @@ class FederationBot(Plugin):
             )
             event = event_result.get(event_id, None)
             if event:
-                room_id = event.room_id
+                if isinstance(event, EventError):
+                    await command_event.reply(
+                        "The Event ID supplied doesn't appear to be on the origin "
+                        f"server({origin_server}). Try query a different server for it."
+                    )
+                    return
+
                 if isinstance(event, Event):
+                    room_id = event.room_id
                     origin_server_ts = event.origin_server_ts
 
         return room_id, event_id, origin_server_ts
