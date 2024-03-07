@@ -246,6 +246,14 @@ class FederationBot(Plugin):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
+        if get_domain_from_id(command_event.sender) != get_domain_from_id(
+            self.client.mxid
+        ):
+            await command_event.reply(
+                "I'm sorry, running this command from a user not on the same server as the bot will not help"
+            )
+            return
+
         # The only way to request from a different server than what the bot is on is to
         # have the other server's signing keys. So just use the bot's server.
         origin_server = get_domain_from_id(self.client.mxid)
