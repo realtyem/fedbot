@@ -569,6 +569,11 @@ class FederationHandler:
         utc_time_at_ms: int,
         timeout: float = 10.0,
     ) -> FederationBaseResponse:
+        # With no errors, will produce a json like:
+        # {
+        #    "event_id": "$somehash",
+        #    "origin_server_ts": 123455676543whatever_int
+        # }
         response = await self.federation_request(
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
