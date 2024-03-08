@@ -496,8 +496,8 @@ class DelegationHandler:
             server_result = ServerResult(
                 host=host,
                 port=port,
-                host_header=f"{server_name}{':'+port if port else ''}",
-                sni_server_name=server_name,
+                host_header=f"{server_name}",
+                sni_server_name=host,
                 diag_info=diag_info,
             )
             return server_result
