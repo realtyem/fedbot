@@ -1,10 +1,8 @@
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from asyncio import Queue
-from enum import Enum
 import asyncio
 import json
 import ssl
-import time
 
 from aiohttp import ClientSession, client_exceptions
 from mautrix.types import EventID
@@ -18,7 +16,6 @@ from federationbot.delegation import (
     check_and_maybe_split_server_name,
 )
 from federationbot.events import (
-    Event,
     EventBase,
     EventError,
     RoomMemberStateEvent,
@@ -145,9 +142,9 @@ class FederationHandler:
                     url=url_object,
                     headers=request_headers,
                     timeout=timeout_seconds,
-                    server_hostname=server_result.sni_server_name
-                    if server_result.use_sni
-                    else None,
+                    server_hostname=(
+                        server_result.sni_server_name if server_result.use_sni else None
+                    ),
                     json=signed_content,
                 )
 
@@ -162,14 +159,15 @@ class FederationHandler:
                     timeout=timeout_seconds,
                 )
 
-        except ConnectionRefusedError as e:
+        except ConnectionRefusedError:
             diag_info.error("ConnectionRefusedError")
             error_reason = "ConnectionRefusedError"
 
         except client_exceptions.ClientConnectorCertificateError as e:
-            assert isinstance(e._certificate_error, ssl.SSLError)
-            diag_info.error(f"SSL Certificate Error, {e._certificate_error.reason}")
-            error_reason = f"SSL Certificate Error, {e._certificate_error.reason}"
+            e_cert = e._certificate_error  # pylint: disable=protected-access
+            assert isinstance(e_cert, ssl.SSLError)
+            diag_info.error(f"SSL Certificate Error, {e_cert.reason}")
+            error_reason = f"SSL Certificate Error, {e_cert.reason}"
             # This is one of the two errors I found while probing for SNI TLS
             code = -1
 
@@ -178,24 +176,24 @@ class FederationHandler:
             error_reason = f"Client Connector SSL Error, {e}"
             code = -1
 
-        except client_exceptions.ServerDisconnectedError as e:
-            diag_info.error(f"Server Disconnect Error")
+        except client_exceptions.ServerDisconnectedError:
+            diag_info.error("Server Disconnect Error")
             error_reason = "Server Disconnect Error"
 
         # except client_exceptions.ConnectionTimeoutError as e:
 
         # except client_exceptions.SocketTimeoutError as e:
 
-        except client_exceptions.ServerTimeoutError as e:
-            diag_info.error(f"Server Timeout Error")
+        except client_exceptions.ServerTimeoutError:
+            diag_info.error("Server Timeout Error")
             error_reason = "Server Timeout Error"
 
-        except client_exceptions.ServerFingerprintMismatch as e:
-            diag_info.error(f"Server Fingerprint Mismatch Error")
+        except client_exceptions.ServerFingerprintMismatch:
+            diag_info.error("Server Fingerprint Mismatch Error")
             error_reason = "Server Fingerprint Mismatch Error"
 
-        except client_exceptions.ServerConnectionError as e:
-            diag_info.error(f"Server Connection Error")
+        except client_exceptions.ServerConnectionError:
+            diag_info.error("Server Connection Error")
             error_reason = "ServerConnectionError"
 
         except client_exceptions.ClientSSLError as e:
@@ -204,8 +202,8 @@ class FederationHandler:
             # This is one of the errors I found while probing for SNI TLS
             code = -1
 
-        except client_exceptions.ClientProxyConnectionError as e:
-            diag_info.error(f"Client Proxy Connection Error")
+        except client_exceptions.ClientProxyConnectionError:
+            diag_info.error("Client Proxy Connection Error")
             error_reason = "Client Proxy Connection Error"
 
         except client_exceptions.ClientConnectorError as e:
@@ -213,39 +211,38 @@ class FederationHandler:
             diag_info.error(f"ClientConnectorError: {e.strerror}")
             error_reason = f"Client Connector Error: {e.strerror}"
 
-        except client_exceptions.ClientHttpProxyError as e:
-            diag_info.error(f"Client HTTP Proxy Error")
+        except client_exceptions.ClientHttpProxyError:
+            diag_info.error("Client HTTP Proxy Error")
             error_reason = "Client HTTP Proxy Error"
 
-        except client_exceptions.WSServerHandshakeError as e:
+        except client_exceptions.WSServerHandshakeError:
             # Not sure this one will ever be used...
             pass
-        except client_exceptions.ContentTypeError as e:
-            # Pretty sure will never hit this one either, as it's not enforced here
-            diag_info.error(f"Content Type Error")
+        except client_exceptions.ContentTypeError:
+            diag_info.error("Content Type Error")
             error_reason = "Content Type Error"
-        except client_exceptions.ClientResponseError as e:
-            diag_info.error(f"Client Response Error")
+        except client_exceptions.ClientResponseError:
+            diag_info.error("Client Response Error")
             error_reason = "Client Response Error"
 
-        except client_exceptions.ClientPayloadError as e:
-            diag_info.error(f"Client Payload Error")
+        except client_exceptions.ClientPayloadError:
+            diag_info.error("Client Payload Error")
             error_reason = "Client Payload Error"
 
-        except client_exceptions.InvalidURL as e:
-            diag_info.error(f"InvalidURL Error")
+        except client_exceptions.InvalidURL:
+            diag_info.error("InvalidURL Error")
             error_reason = "InvalidURL Error"
 
-        except client_exceptions.ClientOSError as e:
-            diag_info.error(f"Client OS Error")
+        except client_exceptions.ClientOSError:
+            diag_info.error("Client OS Error")
             error_reason = "Client OS Error"
 
-        except client_exceptions.ClientConnectionError as e:
-            diag_info.error(f"Client Connection Error")
+        except client_exceptions.ClientConnectionError:
+            diag_info.error("Client Connection Error")
             error_reason = "Client Connection Error"
 
-        except client_exceptions.ClientError as e:
-            diag_info.error(f"Client Error")
+        except client_exceptions.ClientError:
+            diag_info.error("Client Error")
             error_reason = "Client Error"
 
         except asyncio.TimeoutError:
@@ -253,14 +250,14 @@ class FederationHandler:
                 "TimeoutError, this server probably doesn't exist(or is taking to long)"
             )
             error_reason = "Timed out. Is this server online?"
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             self.logger.info(
-                f"federation_request: General Exception: for {server}:\n {e}"
+                f"federation_request: General Exception: for {destination_server}:\n {e}"
             )
             diag_info.error(f"General Exception: {e}")
             error_reason = "General Exception"
 
-        # response = await self.http_client.get(f"https://{server}{query_string}")
+        # response = await self.http_client.get(f"https://{destination_server}{query_string}")
         else:
             async with response:
                 code = response.status
@@ -282,8 +279,7 @@ class FederationHandler:
                         f"{response.headers.get('Content-Type', 'None Found')}"
                     )
                     diag_info.add(
-                        "Expected Content-Type of 'application/json', will try "
-                        "work-around"
+                        "Expected Content-Type of 'application/json', will try work-around"
                     )
 
                 # Sometimes servers don't have their well-known(or other things)
@@ -300,36 +296,34 @@ class FederationHandler:
                         error_reason = "No/bad JSON returned"
 
                 if not result_dict:
-                    diag_info.add(f"No usable data in response")
+                    diag_info.add("No usable data in response")
 
-        finally:
-            if not server_result:
-                host, port = check_and_maybe_split_server_name(destination_server)
-                server_result = ServerResult(
-                    host=host, port=port if port else "", diag_info=diag_info
-                )
-            if code != 200:
-                diag_info.error(f"Request to {path} failed")
-                return FederationErrorResponse(
-                    code,
-                    error_reason,
-                    response_dict=result_dict,
-                    server_result=server_result,
-                    list_of_errors=diag_info.list_of_results,
-                    headers=headers,
-                    request_info=request_info,
-                )
-            else:
-                # Don't need a success diagnostic message here, the one above works fine
-                return FederationBaseResponse(
-                    code,
-                    reason,
-                    response_dict=result_dict,
-                    server_result=server_result,
-                    list_of_errors=diag_info.list_of_results,
-                    headers=headers,
-                    request_info=request_info,
-                )
+        if not server_result:
+            host, port = check_and_maybe_split_server_name(destination_server)
+            server_result = ServerResult(host=host, port=port if port else "", diag_info=diag_info)
+        if code != 200:
+            diag_info.error(f"Request to {path} failed")
+            reason = error_reason
+            return FederationErrorResponse(
+                code,
+                error_reason,
+                response_dict=result_dict,
+                server_result=server_result,
+                list_of_errors=diag_info.list_of_results,
+                headers=headers,
+                request_info=request_info,
+            )
+        else:
+            # Don't need a success diagnostic message here, the one above works fine
+            return FederationBaseResponse(
+                code,
+                reason,
+                response_dict=result_dict,
+                server_result=server_result,
+                list_of_errors=diag_info.list_of_results,
+                headers=headers,
+                request_info=request_info,
+            )
 
     async def get_server_version(
         self,
@@ -338,6 +332,22 @@ class FederationHandler:
         diagnostics: bool = False,
         timeout_seconds: float = 10.0,
     ) -> FederationBaseResponse:
+        """
+        Retrieves the version of a specified server.
+
+        This method sends a GET request to the server and returns a response that includes the
+        server's version.
+
+        Args:
+            server_name (str): The name of the server whose version is to be retrieved.
+            force_recheck (bool, opt): If True, forces recheck of server version. Defaults False.
+            diagnostics (bool, opt): If True, includes diagnostic info in response. Defaults False.
+            timeout_seconds (float, opt): Max time (in seconds) to wait for response. Defaults 10.0.
+
+        Returns either:
+            FederationBaseResponse: Response from server including version.
+            FederationErrorResponse: Response from server if returned an error.
+        """
         response = await self.federation_request(
             destination_server=server_name,
             path="/_matrix/federation/v1/version",
@@ -352,22 +362,34 @@ class FederationHandler:
         #         ResponseStatusType.NONE
         #     )
         if response.status_code != 200:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.ERROR
-            )
+            response.server_result.diag_info.connection_test_status = ResponseStatusType.ERROR
         else:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.OK
-            )
+            response.server_result.diag_info.connection_test_status = ResponseStatusType.OK
 
         if isinstance(response, FederationErrorResponse):
             return response
-        else:
-            return FederationVersionResponse.from_response(response)
+        # Else return normal response
+        return FederationVersionResponse.from_response(response)
 
     async def get_server_keys(
         self, server_name: str, timeout: float = 10.0
     ) -> Union[FederationServerKeyResponse, FederationErrorResponse]:
+        """
+        Asynchronously fetches the server keys from a specified server.
+
+        This method sends a GET request to the "/_matrix/key/v2/server" endpoint of the server.
+        It then updates the connection test status based on the response status code.
+        If the response is an instance of FederationErrorResponse, it returns the response as is.
+        Otherwise, it converts the response into a FederationServerKeyResponse and returns it.
+
+        Args:
+            server_name (str): The name of the server from which to fetch the keys.
+            timeout (float, optional): The timeout for the request in seconds. Defaults to 10.0.
+
+        Returns either:
+            FederationServerKeyResponse: The server keys response.
+            FederationErrorResponse: Error response.
+        """
         response = await self.federation_request(
             destination_server=server_name,
             path="/_matrix/key/v2/server",
@@ -375,17 +397,11 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
         if response.status_code == 404:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.NONE
-            )
+            response.server_result.diag_info.connection_test_status = ResponseStatusType.NONE
         elif response.status_code != 200:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.ERROR
-            )
+            response.server_result.diag_info.connection_test_status = ResponseStatusType.ERROR
         else:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.OK
-            )
+            response.server_result.diag_info.connection_test_status = ResponseStatusType.OK
 
         if isinstance(response, FederationErrorResponse):
             return response
@@ -409,7 +425,7 @@ class FederationHandler:
         destination_server: str,
         event_id: str,
         timeout: float = 10.0,
-    ) -> Dict[str, EventBase]:
+    ) -> Dict[str, EventBase | None]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
          be included in the retrieved Event.
@@ -422,10 +438,8 @@ class FederationHandler:
             contained in a List
 
         """
-        # The return, map of event_id -> EventBase
-        event_id_to_event: Dict[str, EventBase] = {}
-
         new_event_base = self._events_cache.get((destination_server, event_id), None)
+
         if new_event_base:
             # Only successful events are cached
             return {event_id: new_event_base}
@@ -452,9 +466,7 @@ class FederationHandler:
         for data in pdu_list:
             # This path is only taken on success, errors are sorted above
             new_event_base = determine_what_kind_of_event(EventID(event_id), data)
-            self._events_cache.setdefault(
-                (destination_server, event_id), new_event_base
-            )
+            self._events_cache.setdefault((destination_server, event_id), new_event_base)
 
         return {event_id: new_event_base}
 
@@ -464,10 +476,10 @@ class FederationHandler:
         destination_server: str,
         events_list: Sequence[str],
         timeout: float = 10.0,
-    ) -> Dict[str, EventBase]:
+    ) -> Dict[str, EventBase | None]:
         # Keep both the response and the actual event, if there was an error it will be
         # in the response and the event won't exist here
-        event_to_event_base: Dict[str, EventBase] = {}
+        event_to_event_base: Dict[str, EventBase | None] = {}
 
         async def _get_event_worker(queue: Queue) -> None:
             while True:
@@ -488,7 +500,7 @@ class FederationHandler:
                         {"error": "Request Timed Out", "errcode": "Timeout err"},
                     )
                     event_to_event_base[worker_event_id] = error_event
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     error_event = EventError(
                         EventID(worker_event_id),
                         {"error": f"{e}", "errcode": "Plugin error"},
@@ -509,7 +521,7 @@ class FederationHandler:
             await event_queue.put(event_id)
 
         tasks = []
-        for i in range(min(len(events_list), 10)):
+        for i in range(min(len(events_list), 10)):  # pylint: disable=unused-variable
             task = asyncio.create_task(_get_event_worker(event_queue))
             tasks.append(task)
 
@@ -530,7 +542,10 @@ class FederationHandler:
         room_id: str,
         event_id: str,
         timeout: float = 10.0,
-    ) -> Tuple[List[str], List[str],]:
+    ) -> Tuple[
+        List[str],
+        List[str],
+    ]:
         response = await self.federation_request(
             destination_server=destination_server,
             path=f"/_matrix/federation/v1/state_ids/{room_id}",
@@ -667,8 +682,8 @@ def authorization_headers(
     uri: str,
     content: Optional[Union[str, Dict[str, Any]]] = None,
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
-    # Extremely borrowed from Matrix spec docs, linked above. Spelunked a bit into
-    # Synapse code to identify how the signing key is stored and decoded.
+    # Extremely borrowed from Matrix spec docs, linked above. Spelunked a bit
+    # into Synapse code to identify how the signing key is stored and decoded.
     request_json = {
         "method": request_method,
         "uri": uri,
@@ -685,7 +700,7 @@ def authorization_headers(
         else:
             content_json = content
         # Assuming content is already parsed as JSON
-        request_json["content"] = content_json
+        request_json["content"] = content_json  # type: ignore
 
     # canon_request_json = canonical_json(request_json)
     signed_json = sign_json(request_json, origin_name, key)
@@ -693,17 +708,11 @@ def authorization_headers(
     authorization_header = ""
 
     for key, sig in signed_json["signatures"][origin_name].items():
-        # 'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
-        #
-        # authorization_header = f'X-Matrix origin=\"{origin_name}\",key=\"{key}\",sig=\"{sig}\",destination=\"{destination_name}\"'
         authorization_header = (
-            'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
-            % (
-                origin_name,
-                key,
-                sig,
-                destination_name,
-            )
+            f'X-Matrix origin="{origin_name}",'
+            f'key="{key}",'
+            f'sig="{sig}",'
+            f'destination="{destination_name}"'
         )
 
     return authorization_header, signed_json.get("content", None)
@@ -718,22 +727,20 @@ def canonical_json(value: Union[str, Dict[str, Any]]) -> bytes:
     ).encode("UTF-8")
 
 
-def filter_events_based_on_type(
-    events: List[EventBase], filter: str
-) -> List[EventBase]:
+def filter_events_based_on_type(events: List[EventBase], filter_str: str) -> List[EventBase]:
     events_to_return = []
     for event in events:
-        if event.event_type == filter:
+        if event.event_type == filter_str:
             events_to_return.append(event)
     return events_to_return
 
 
 def filter_state_events_based_on_membership(
-    events: List[RoomMemberStateEvent], filter: str
+    events: List[RoomMemberStateEvent], filter_str: str
 ) -> List[EventBase]:
     events_to_return = []
     for event in events:
-        if event.membership == filter:
+        if event.membership == filter_str:
             events_to_return.append(event)
     return events_to_return
 
@@ -742,10 +749,11 @@ def parse_list_response_into_list_of_event_bases(
     list_from_response: List[Dict[str, Any]]
 ) -> List[EventBase]:
     """
-    Parse a list returned from a federation request into a list of EventBase type
-    objects. Best used when we don't have any event id's to add to the new EventBase.
+    Parse a list returned from a federation request into a list of EventBase
+    type objects. Best used when we don't have any event id's to add to the
+    new EventBase.
 
-    Returns: list of processed Event type objects, in the order they were received
+    Returns: list of processed Event type objects, in order they were received
 
     """
     list_of_event_bases = []

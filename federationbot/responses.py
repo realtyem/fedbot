@@ -70,9 +70,7 @@ class FederationErrorResponse(FederationBaseResponse):
             headers=headers,
             request_info=request_info,
         )
-        self.server_result.drop_after = int(
-            (time.time_ns() / 1000) + BAD_RESULT_TIMEOUT_MS
-        )
+        self.server_result.drop_after = int((time.time_ns() / 1000) + BAD_RESULT_TIMEOUT_MS)
         if self.response_dict:
             self.reason = self.response_dict.get("error", self.reason)
 
@@ -103,9 +101,7 @@ class FederationVersionResponse(FederationBaseResponse):
         self.server_version = server_block.get("version", "")
 
     @classmethod
-    def from_response(
-        cls, base_response: FederationBaseResponse
-    ) -> "FederationVersionResponse":
+    def from_response(cls, base_response: FederationBaseResponse) -> "FederationVersionResponse":
         return cls(
             base_response.status_code,
             base_response.reason,
@@ -146,9 +142,7 @@ class FederationServerKeyResponse(FederationBaseResponse):
         self.server_name = self.response_dict.get("server_name", "")
         self.valid_until_ts = self.response_dict.get("valid_until_ts", None)
         if self.valid_until_ts and self.valid_until_ts > 0:
-            self.valid_until_pretty = str(
-                datetime.fromtimestamp(float(self.valid_until_ts / 1000))
-            )
+            self.valid_until_pretty = str(datetime.fromtimestamp(float(self.valid_until_ts / 1000)))
         else:
             self.valid_until_pretty = "Unknown"
 
@@ -162,8 +156,7 @@ class FederationServerKeyResponse(FederationBaseResponse):
                 expired_ts = key_data.get("expired_ts", 0)
                 if expired_ts > 0:
                     expired_pretty = (
-                        "EXPIRED: "
-                        f"{str(datetime.fromtimestamp(float(expired_ts / 1000)))}"
+                        "EXPIRED: " f"{str(datetime.fromtimestamp(float(expired_ts / 1000)))}"
                     )
                 else:
                     expired_pretty = "EXPIRED: Unknown"
@@ -185,9 +178,7 @@ class FederationServerKeyResponse(FederationBaseResponse):
             self.signatures.setdefault(server_name, key_data)
 
     @classmethod
-    def from_response(
-        cls, base_response: FederationBaseResponse
-    ) -> "FederationServerKeyResponse":
+    def from_response(cls, base_response: FederationBaseResponse) -> "FederationServerKeyResponse":
         return cls(
             base_response.status_code,
             base_response.reason,

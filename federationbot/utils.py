@@ -1,6 +1,5 @@
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from enum import Enum
-
 from mautrix.types import EventID
 
 
@@ -59,9 +58,7 @@ class DisplayLineColumnConfig:
         """
         return self.line_size
 
-    def pad(
-        self, data_piece: Optional[Union[str, int]] = None, additional_padding: int = 0
-    ) -> str:
+    def pad(self, data_piece: Optional[Union[str, int]] = None, additional_padding: int = 0) -> str:
         """
         Pad the data_piece string by the column size. No data_piece means use the
         header_name
@@ -90,11 +87,11 @@ class DisplayLineColumnConfig:
         Returns: The formatted string
         """
 
-        return f"{pad(data_piece if data_piece is not None else self.header_name, self.size, front=True)}"
+        return str(
+            pad(data_piece if data_piece is not None else self.header_name, self.size, front=True)
+        )
 
-    def render_pretty_line(
-        self, header: str, item_to_render: Any, force: bool = False
-    ) -> str:
+    def render_pretty_line(self, header: str, item_to_render: Any, force: bool = False) -> str:
         summary = ""
         if item_to_render is not None or force:
             summary += f"{self.front_pad(header)}"
@@ -182,8 +179,7 @@ class DataSet:
             self.final_data.extend([f"{self.dc.pad(line)}"])
 
     def load_fresh_data(self, new_header: str, new_data: List[str]) -> None:
-        new_data_tuple = (new_header, new_data)
-
+        new_data_tuple = (new_header, new_data)  # noqa: F841, pylint: disable=unused-variable
         self.preliminary_data = new_data
         self._recalculate_column_width()
 
@@ -236,9 +232,7 @@ class DataSet:
             if first_line:
                 header_data = f"{self.dc.front_pad()}{self.horz_delimiter}"
             else:
-                header_data = (
-                    f"{self.dc.pad('', additional_padding=len(self.horz_delimiter))}"
-                )
+                header_data = f"{self.dc.pad('', additional_padding=len(self.horz_delimiter))}"
             final_data += header_data
             final_data += f"{line}\n"
             first_line = False

@@ -1,8 +1,8 @@
-from typing import Any, Dict, List, NewType, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, NewType, Optional, Sequence, Tuple
 from datetime import datetime
 import json
 
-from mautrix.types import EncryptedFile, EventID, Signature
+from mautrix.types import EventID, Signature
 
 from federationbot.utils import (
     DisplayLineColumnConfig,
@@ -230,7 +230,7 @@ class EventBase:
 
     def to_pretty_summary_footer(
         self,
-        event_data_map: Dict[str, str] = {},
+        event_data_map: Dict[str, str] | None = None,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
     ) -> str:
         """
@@ -249,6 +249,8 @@ class EventBase:
         Returns: A formatted string containing data about the ancestor events terminated
             with a single new line. If there is no data, an empty string.
         """
+        if event_data_map is None:
+            event_data_map = {}
         auth_header = "-- Auth Event"
         prev_header = "<- Prev Event"
         # For the moment, these are the same length so either will do for a length
@@ -256,16 +258,22 @@ class EventBase:
 
         summary = ""
         for auth_event in self.auth_events:
-            summary += f"{dc.front_pad(auth_header)}: {auth_event}: {event_data_map.get(auth_event, '')}\n"
+            summary += (
+                f"{dc.front_pad(auth_header)}: {auth_event}: {event_data_map.get(auth_event, '')}\n"
+            )
 
         for prev_event in self.prev_events:
-            summary += f"{dc.front_pad(prev_header)}: {prev_event}: {event_data_map.get(prev_event, '')}\n"
+            summary += (
+                f"{dc.front_pad(prev_header)}: {prev_event}: {event_data_map.get(prev_event, '')}\n"
+            )
 
         return summary
 
 
 class EventError(EventBase):
-    def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:
+    def __init__(  # pylint: disable=super-init-not-called
+        self, event_id: EventID, data: Dict[str, Any]
+    ) -> None:
         # super().__init__(event_id, data)
         self.error = data.get("error", "Unknown Error")
         self.errcode = data.get("errcode", "Unknown Error")
@@ -364,7 +372,7 @@ class RelatesTo:
         event_id_header = "Relates to Event ID"
         rel_type_header = "Relation Type"
         in_reply_to_header = "In Reply To"
-        new_content_header = "New Content"
+        new_content_header = "New Content"  # noqa: F841, pylint: disable=unused-variable
         reaction_key_header = "Reaction Key"
         dc.maybe_update_column_width(len(event_id_header))
         summary = ""
@@ -546,9 +554,7 @@ class EncryptedRoomEvent(Event):
 
         summary = super().to_pretty_summary(dc)
         summary += dc.render_pretty_line(algo_header, self.encrypted_content.algorithm)
-        summary += dc.render_pretty_line(
-            sess_id_header, self.encrypted_content.session_id
-        )
+        summary += dc.render_pretty_line(sess_id_header, self.encrypted_content.session_id)
         summary += dc.render_pretty_line(
             ciphertext_size_header, self.encrypted_content.ciphertext_size
         )
@@ -685,9 +691,7 @@ class FileBasedContent(UnencryptedRoomContent):
         if self.url and self.info:
             # This file was unencrypted, both of these are required
             summary += dc.render_pretty_line(url_header, self.url)
-            summary += dc.render_pretty_list(
-                info_header, self.info.to_pretty_summary_as_list()
-            )
+            summary += dc.render_pretty_list(info_header, self.info.to_pretty_summary_as_list())
         if self.thumbnail_url and self.thumbnail_info:
             # This file was unencrypted
             summary += dc.render_pretty_line(thumbnail_url_header, self.thumbnail_url)
@@ -736,9 +740,7 @@ class MessageContent(UnencryptedRoomContent):
 
         summary = super().to_pretty_content_summary(dc)
         summary += dc.render_pretty_line(format_header, self.format)
-        summary += dc.render_pretty_line(
-            formatted_body_size_header, self.formatted_body_size
-        )
+        summary += dc.render_pretty_line(formatted_body_size_header, self.formatted_body_size)
 
         return summary
 
@@ -838,9 +840,7 @@ class UnencryptedRoomEvent(Event):
         summary = super().to_pretty_summary(dc)
         summary += self.rc.to_pretty_content_summary(dc)
         if self.rc.mentions:
-            summary += dc.render_pretty_list(
-                mentions_header, self.rc.mentions.to_list()
-            )
+            summary += dc.render_pretty_list(mentions_header, self.rc.mentions.to_list())
 
         return summary
 
@@ -873,9 +873,7 @@ class StickerRoomEvent(Event):
         summary = super().to_pretty_summary(dc)
         summary += self.rc.to_pretty_content_summary(dc)
         if self.rc.mentions:
-            summary += dc.render_pretty_list(
-                mentions_header, self.rc.mentions.to_list()
-            )
+            summary += dc.render_pretty_list(mentions_header, self.rc.mentions.to_list())
 
         return summary
 
@@ -924,9 +922,7 @@ class GenericStateEvent(StrippedStateEvent):
         # Recall that auth_events and prev_events are part of the base class EventBase
         self.auth_events = self.unrecognized.pop("auth_events", [])
         self.prev_events = self.unrecognized.pop("prev_events", [])
-        self.replaces_state = self.unrecognized.get("unsigned", {}).pop(
-            "replaces_state", None
-        )
+        self.replaces_state = self.unrecognized.get("unsigned", {}).pop("replaces_state", None)
         # self.depth can be found on the superclass, EventBase
         self.depth = self.unrecognized.pop("depth", 0)
         self.hashes = self.unrecognized.pop("hashes", {})
@@ -943,7 +939,10 @@ class GenericStateEvent(StrippedStateEvent):
         summary = super().to_pretty_summary(dc)
         summary += f"{dc.front_pad('Depth')}: {self.depth}\n"
         summary += f"{dc.front_pad('Origin')}: {self.origin}\n"
-        summary += f"{dc.front_pad('Origin Server TS')}: {datetime.fromtimestamp(self.origin_server_ts / 1000)}\n"
+        summary += (
+            f"{dc.front_pad('Origin Server TS')}: "
+            + f"{datetime.fromtimestamp(self.origin_server_ts / 1000)}\n"
+        )
         for server, key_id_and_hash in self.signatures.items():
             summary += f"{dc.front_pad('Signatures')}: {server} "
             for key_id in key_id_and_hash.keys():
@@ -956,15 +955,23 @@ class GenericStateEvent(StrippedStateEvent):
 
     def to_pretty_summary_footer(
         self,
-        event_data_map: Dict[str, str] = {},
+        event_data_map: Dict[str, str] | None = None,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
     ) -> str:
+        if event_data_map is None:
+            event_data_map = {}
         dc.maybe_update_column_width(17)
         summary = super().to_pretty_summary_footer(event_data_map, dc)
         for prev_state in self.prev_state:
-            summary += f"{dc.front_pad('<- Prev State')}: {prev_state}: {event_data_map.get(prev_state, '')}\n"
+            summary += (
+                f"{dc.front_pad('<- Prev State')}: {prev_state}: "
+                + f"{event_data_map.get(prev_state, '')}\n"
+            )
         if self.replaces_state:
-            summary += f"{dc.front_pad('-> Replaces State')}: {self.replaces_state}: {event_data_map.get(self.replaces_state, '')}\n"
+            summary += (
+                f"{dc.front_pad('-> Replaces State')}: {self.replaces_state}: "
+                + f"{event_data_map.get(self.replaces_state, '')}\n"
+            )
 
         return summary
 
@@ -1051,9 +1058,7 @@ class CreateRoomStateEvent(GenericStateEvent):
         last_event_id: Optional[str] = predecessor_content.get("event_id", None)
         last_room_id: Optional[str] = predecessor_content.get("room_id", None)
         if last_event_id and last_room_id:
-            self.predecessor = PreviousRoom(
-                room_id=last_room_id, event_id=last_event_id
-            )
+            self.predecessor = PreviousRoom(room_id=last_room_id, event_id=last_event_id)
         self.room_version = int(self.content.pop("room_version", 1))
         self.room_type = self.content.pop("room_type", None)
 
@@ -1073,9 +1078,7 @@ class CreateRoomStateEvent(GenericStateEvent):
         summary += dc.render_pretty_line(creator_header, self.creator)
         summary += dc.render_pretty_line(fed_allowed_header, self.federation_allowed)
         if self.predecessor:
-            summary += dc.render_pretty_list(
-                pred_header, self.predecessor.to_pretty_list()
-            )
+            summary += dc.render_pretty_list(pred_header, self.predecessor.to_pretty_list())
 
         summary += dc.render_pretty_line(ver_header, self.room_version)
         summary += dc.render_pretty_line(room_type_header, self.room_type)
@@ -1280,9 +1283,7 @@ class RoomMemberStateEvent(GenericStateEvent):
         summary += dc.render_pretty_line(reason_header, self.reason)
         summary += dc.render_pretty_line(displayname_header, self.displayname)
         summary += dc.render_pretty_line(avatar_url_header, self.avatar_url)
-        summary += dc.render_pretty_line(
-            JAVUS_header, self.join_authorised_via_users_server
-        )
+        summary += dc.render_pretty_line(JAVUS_header, self.join_authorised_via_users_server)
         summary += dc.render_pretty_line(
             third_party_invite_header,
             self.third_party_invite.signed.mxid if self.third_party_invite else None,
@@ -1312,15 +1313,9 @@ class PowerLevelStateEvent(GenericStateEvent):
         self.invite = self.content.pop("invite", "Not Found(Defaults to 0)")
         self.kick = self.content.pop("kick", "Not Found(Defaults to 50)")
         self.redact = self.content.pop("redact", "Not Found(Defaults to 50)")
-        self.events_default = self.content.pop(
-            "events_default", "Not Found(Defaults to 0)"
-        )
-        self.state_default = self.content.pop(
-            "state_default", "Not Found(Defaults to 50)"
-        )
-        self.users_default = self.content.pop(
-            "users_default", "Not Found(Defaults to 0)"
-        )
+        self.events_default = self.content.pop("events_default", "Not Found(Defaults to 0)")
+        self.state_default = self.content.pop("state_default", "Not Found(Defaults to 50)")
+        self.users_default = self.content.pop("users_default", "Not Found(Defaults to 0)")
         self.events = self.content.pop("events", {})
         self.notifications = self.content.pop("notifications", {})
         self.users = self.content.pop("users", {})
@@ -1348,9 +1343,7 @@ class PowerLevelStateEvent(GenericStateEvent):
         notif_val_col = DisplayLineColumnConfig("")
         notif_num_entries = len(self.notifications)
 
-        max_entries_to_display = max(
-            user_num_entries, events_num_entries, notif_num_entries
-        )
+        max_entries_to_display = max(user_num_entries, events_num_entries, notif_num_entries)
 
         # Prepare the whole list of entries, so we know how many lines will be needed
         complex_buffer_lines_list = []
@@ -1451,9 +1444,7 @@ class RedactionStateEvent(GenericStateEvent):
     def __init__(self, event_id: EventID, raw_data: Dict[str, Any]) -> None:
         super().__init__(event_id, raw_data)
         self.reason = self.content.pop("reason", "")
-        self.redacts = self.content.pop(
-            "redacts", "Not Found(Is this a version 11 room?"
-        )
+        self.redacts = self.content.pop("redacts", "Not Found(Is this a version 11 room?")
 
     def to_pretty_summary(
         self,

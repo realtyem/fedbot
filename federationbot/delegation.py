@@ -41,8 +41,8 @@ def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[s
     except ValueError:
         # Accept this gracefully, as it is probably the common path
         pass
-    finally:
-        return server_host, server_port
+    # finally:
+    return server_host, server_port
 
 
 def is_this_an_ip_address(host: str) -> bool:
@@ -101,18 +101,14 @@ def _parse_and_check_well_known_response(
             try:
                 host, port = check_and_maybe_split_server_name(well_known_result)
             except MalformedServerNameError:
-                diag_info.error(
-                    "Well-Known 'm.server' has a scheme when it should not:"
-                )
+                diag_info.error("Well-Known 'm.server' has a scheme when it should not:")
                 diag_info.error(f"{well_known_result}", front_pad="      ")
                 diag_info.mark_error_on_well_known()
             except AttributeError:
                 # Apparently this happens if a server has their well-known set like a
                 # client well-known. Don't print custom error message showing the result
                 # as it could be spammy(and not fit)
-                diag_info.error(
-                    "Well-Known 'm.server' has wrong attributes, should be a host/port"
-                )
+                diag_info.error("Well-Known 'm.server' has wrong attributes, should be a host/port")
                 diag_info.mark_error_on_well_known()
 
             else:
@@ -167,9 +163,7 @@ class DelegationHandler:
             except dns.resolver.NXDOMAIN:
                 # No records are being returned, don't bother retrying
                 retries = 10
-                diag_info.error(
-                    f"DNS records for '{server_name}' do not exist(NXDOMAIN)"
-                )
+                diag_info.error(f"DNS records for '{server_name}' do not exist(NXDOMAIN)")
 
             # mypy complains that this isn't in the module...
             except dns.resolver.LifetimeTimeout:
@@ -195,35 +189,27 @@ class DelegationHandler:
 
         # A records return a dns.rdtypes.IN.A object that has an 'address' property
         try:
-            a_records: dns.resolver.Answer = await self.dns_resolver.resolve(
-                server_name, "A"
-            )
-
+            a_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "A")
         except dns.resolver.NoAnswer:
             diag_info.add(f"No 'A' DNS record found for '{server_name}'")
-
         else:
-            for rdata in a_records:
-                a_ip_address = rdata.address
-                diag_info.mark_dns_record_found()
-                diag_info.add(f"DNS 'A' record found: {server_name} -> {a_ip_address}")
+            if a_records is not None and a_records.rrset is not None:
+                for rdata in a_records.rrset:
+                    a_ip_address = rdata.address
+                    diag_info.mark_dns_record_found()
+                    diag_info.add(f"DNS 'A' record found: {server_name} -> {a_ip_address}")
 
         # AAAA records return a dns.rdtypes.IN.AAAA object that also uses 'address'
         try:
-            a4_records: dns.resolver.Answer = await self.dns_resolver.resolve(
-                server_name, "AAAA"
-            )
-
+            a4_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "AAAA")
         except dns.resolver.NoAnswer:
             diag_info.add(f"No 'AAAA' DNS record found for '{server_name}'")
-
         else:
-            for rdata in a4_records:
-                a4_ip_address = rdata.address
-                diag_info.mark_dns_record_found()
-                diag_info.add(
-                    f"DNS 'AAAA' record found: {server_name} -> {a4_ip_address}"
-                )
+            if a4_records is not None and a4_records.rrset is not None:
+                for rdata in a4_records.rrset:
+                    a4_ip_address = rdata.address
+                    diag_info.mark_dns_record_found()
+                    diag_info.add(f"DNS 'AAAA' record found: {server_name} -> {a4_ip_address}")
 
         if check_cname:
             # CNAME records return a dns.rdtypes.ANY.CNAME object which uses 'target'
@@ -231,16 +217,15 @@ class DelegationHandler:
                 cname_records: dns.resolver.Answer = await self.dns_resolver.resolve(
                     server_name, "CNAME"
                 )
-
             except dns.resolver.NoAnswer:
                 diag_info.add(f"No 'CNAME' DNS record found for '{server_name}'")
-
             else:
-                for rdata in cname_records:
-                    cname_ip_address = rdata.target
-                    diag_info.add(
-                        f"DNS 'CNAME' record found: {server_name} -> {cname_ip_address}"
-                    )
+                if cname_records is not None and cname_records.rrset is not None:
+                    for rdata in cname_records.rrset:
+                        cname_ip_address = rdata.target
+                        diag_info.add(
+                            f"DNS 'CNAME' record found: {server_name} -> {cname_ip_address}"
+                        )
 
         return a_ip_address, a4_ip_address, cname_ip_address, diag_info
 
@@ -276,9 +261,7 @@ class DelegationHandler:
             except dns.resolver.NXDOMAIN:
                 # No records are being returned, don't bother retrying
                 retries = 10
-                diag_info.error(
-                    f"SRV DNS records for '{server_name}' do not exist(NXDOMAIN)"
-                )
+                diag_info.error(f"SRV DNS records for '{server_name}' do not exist(NXDOMAIN)")
 
             # except dns.resolver.LifetimeTimeout as e:
             #     self.logger.info(
@@ -312,19 +295,17 @@ class DelegationHandler:
             srv_records: dns.resolver.Answer = await self.dns_resolver.resolve(
                 f"_matrix-fed._tcp.{server_name}", "SRV"
             )
-
         except dns.resolver.NoAnswer:
             diag_info.add(f"No 'SRV' record for '_matrix-fed._tcp.{server_name}'")
-
         else:
-            for rdata in srv_records:
-                host = str(rdata.target).rstrip(".")
-                port = rdata.port
-                diag_info.mark_srv_record_found()
-                diag_info.add(
-                    f"SRV record found: '_matrix-fed._tcp.{server_name}' -> "
-                    f"{host}:{port}"
-                )
+            if srv_records is not None and srv_records.rrset is not None:
+                for rdata in srv_records.rrset:
+                    host = str(rdata.target).rstrip(".")
+                    port = rdata.port
+                    diag_info.mark_srv_record_found()
+                    diag_info.add(
+                        f"SRV record found: '_matrix-fed._tcp.{server_name}' -> " f"{host}:{port}"
+                    )
 
         try:
             deprecated_srv_records = await self.dns_resolver.resolve(
@@ -332,16 +313,16 @@ class DelegationHandler:
             )
         except dns.resolver.NoAnswer:
             diag_info.add(f"No 'SRV' record for '_matrix._tcp.{server_name}'")
-
         else:
-            for rdata in deprecated_srv_records:
-                dep_host = str(rdata.target).rstrip(".")
-                dep_port = rdata.port
-                diag_info.mark_srv_record_found()
-                diag_info.add(
-                    f"SRV record found: '_matrix._tcp.{server_name} -> "
-                    f"{dep_host}:{dep_port}"
-                )
+            if deprecated_srv_records is not None and deprecated_srv_records.rrset is not None:
+                for rdata in deprecated_srv_records.rrset:
+                    dep_host = str(rdata.target).rstrip(".")
+                    dep_port = rdata.port
+                    diag_info.mark_srv_record_found()
+                    diag_info.add(
+                        f"SRV record found: '_matrix._tcp.{server_name} -> "
+                        f"{dep_host}:{dep_port}"
+                    )
 
         return host or dep_host, port or dep_port, diag_info
 
@@ -392,9 +373,7 @@ class DelegationHandler:
         """
 
         # Check for cached copy of ServerResult
-        server_result = self._retrieve_or_evict_server_result_from_cache(
-            server_name, force_reload
-        )
+        server_result = self._retrieve_or_evict_server_result_from_cache(server_name, force_reload)
         if not server_result:
             server_result = await self._maybe_handle_delegation(
                 server_name, get_callback=get_callback, diag_info=diag_info
@@ -547,9 +526,7 @@ class DelegationHandler:
             if is_this_an_ip_address(well_known_host):
                 host_header = f"{well_known_host}:{well_known_port if well_known_port else '8448'}"
 
-                diag_info.add(
-                    f"Host defined in Well-Known was Literal IP {host_header}"
-                )
+                diag_info.add(f"Host defined in Well-Known was Literal IP {host_header}")
                 diag_info.mark_well_known_maybe_found()
                 server_result = ServerResult(
                     host=host,
@@ -568,16 +545,17 @@ class DelegationHandler:
                 # Step 3b, same as Step 2 above
                 # HOST header should be the result of the well_known
                 # request(including port)
-                diag_info.mark_step_num(
-                    "Step 3.2", "Checking Well-Known Host for explicit Port"
-                )
+                diag_info.mark_step_num("Step 3.2", "Checking Well-Known Host for explicit Port")
 
                 # Because of our explicit conditional above
                 diag_info.add(f"Explicit port found: {well_known_port}")
 
-                (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                    well_known_host, diag_info=diag_info
-                )
+                (
+                    _,
+                    _,
+                    _,
+                    diag_info,
+                ) = await self.check_dns_for_reg_records(well_known_host, diag_info=diag_info)
                 host_header = f"{well_known_host}:{well_known_port}"
 
                 server_result = ServerResult(
@@ -605,7 +583,12 @@ class DelegationHandler:
                 if srv_host and srv_port:
                     # SRV records should always have a port, that is literally
                     # their purpose
-                    (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
+                    (
+                        _,
+                        _,
+                        _,
+                        diag_info,
+                    ) = await self.check_dns_for_reg_records(
                         srv_host, check_cname=False, diag_info=diag_info
                     )
 
@@ -628,9 +611,12 @@ class DelegationHandler:
                     "Checking for implied port 8448 of host from Well-Known",
                 )
 
-                (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                    well_known_host, diag_info=diag_info
-                )
+                (
+                    _,
+                    _,
+                    _,
+                    diag_info,
+                ) = await self.check_dns_for_reg_records(well_known_host, diag_info=diag_info)
 
                 server_result = ServerResult(
                     host=host,

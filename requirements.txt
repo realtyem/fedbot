@@ -1,0 +1,4 @@
+aiohttp>=3.9.3
+dnspython>=2.6.1
+maubot>=0.4.2
+signedjson>=1.1.4
