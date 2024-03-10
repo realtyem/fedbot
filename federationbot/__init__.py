@@ -175,7 +175,7 @@ class FederationBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.server_signing_keys = {}
-        self.task_control = {}
+        self.task_control: Dict[EventID, ReactionCommandStatus] = {}
         self.reaction_handler_count = 0
         if self.config:
             self.config.load_and_update()
@@ -219,15 +219,15 @@ class FederationBot(Plugin):
         name="context",
         help="level 1",
     )
-    @command.argument(name="room_id_or_alias", parser=is_room_id, required=False)
-    @command.argument(name="event_id", parser=is_event_id, required=False)
+    @command.argument(name="room_id_or_alias", parser=is_room_id, required=True)
+    @command.argument(name="event_id", parser=is_event_id, required=True)
     @command.argument(name="limit", required=False)
     async def context_subcommand(
         self,
         command_event: MessageEvent,
-        room_id_or_alias: Optional[str] = None,
-        event_id: Optional[str] = None,
-        limit: Optional[str] = None,
+        room_id_or_alias: str,
+        event_id: str,
+        limit: str,
     ) -> None:
         stuff = await self.client.get_event_context(
             room_id=RoomID(room_id_or_alias),
@@ -246,7 +246,7 @@ class FederationBot(Plugin):
         self,
         command_event: MessageEvent,
         room_id_or_alias: Optional[str],
-        per_iteration: Optional[str],
+        per_iteration: str = "1000",
     ) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
@@ -337,9 +337,9 @@ class FederationBot(Plugin):
         static_lines.extend(["--------------------------"])
         static_lines.extend([f"Room Depth reported as: {room_depth}"])
 
-        discovery_lines = []
+        discovery_lines: List[str] = []
         progress_line = ""
-        backwalk_lines = []
+        backwalk_lines: List[str] = []
 
         def _combine_lines_for_backwalk() -> str:
             combined_lines = ""
@@ -379,7 +379,7 @@ class FederationBot(Plugin):
                 try:
                     iter_start_time = time.time()
                     worker_response = await self.client.get_messages(
-                        room_id=room_to_check,
+                        room_id=RoomID(room_to_check),
                         direction=for_direction,
                         from_token=next_token,
                         limit=per_iteration_int,

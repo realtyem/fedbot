@@ -456,6 +456,7 @@ class FederationHandler:
                 (destination_server, event_id), new_event_base
             )
 
+        assert new_event_base is not None
         return {event_id: new_event_base}
 
     async def get_events_from_server(
@@ -504,7 +505,7 @@ class FederationHandler:
                 finally:
                     queue.task_done()
 
-        event_queue = asyncio.Queue()
+        event_queue: Queue[str] = asyncio.Queue()
         for event_id in events_list:
             await event_queue.put(event_id)
 
@@ -674,7 +675,7 @@ def authorization_headers(
 ) -> Tuple[str, Optional[Dict[str, Any]]]:
     # Extremely borrowed from Matrix spec docs, linked above. Spelunked a bit into
     # Synapse code to identify how the signing key is stored and decoded.
-    request_json = {
+    request_json: Dict[str, Any] = {
         "method": request_method,
         "uri": uri,
         "origin": origin_name,
@@ -684,13 +685,7 @@ def authorization_headers(
 
     key = decode_signing_key_base64(algorithm, version, key_base64)
     if content is not None:
-        # Synapse does not do this part, it just passes the content straight in as a dict
-        if isinstance(content, Dict):
-            content_json = canonical_json(content)
-        else:
-            content_json = content
-        # Assuming content is already parsed as JSON
-        request_json["content"] = content_json
+        request_json["content"] = content
 
     # canon_request_json = canonical_json(request_json)
     signed_json = sign_json(request_json, origin_name, key)
@@ -735,7 +730,7 @@ def filter_events_based_on_type(
 
 def filter_state_events_based_on_membership(
     events: List[RoomMemberStateEvent], filter: str
-) -> List[EventBase]:
+) -> List[RoomMemberStateEvent]:
     events_to_return = []
     for event in events:
         if event.membership == filter:
