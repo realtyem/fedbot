@@ -329,7 +329,14 @@ class FederationBot(Plugin):
             )
             return
         else:
-            room_depth = ts_response.response_dict.get("depth", 0)
+            event_id = ts_response.response_dict.get("event_id", None)
+            assert isinstance(event_id, str)
+            event_result = await self.federation_handler.get_event_from_server(
+                origin_server, origin_server, event_id
+            )
+            event = event_result.get(event_id, None)
+            assert event is not None
+            room_depth = event.depth
 
         # Initial messages and lines setup. Never end in newline, as the helper handles
         header_lines = ["Room Back-walking Procedure: Running"]
