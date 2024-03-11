@@ -1,7 +1,8 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, cast
 from asyncio import Queue
 from datetime import datetime
 from enum import Enum
+from itertools import chain
 import asyncio
 import json
 import time
@@ -73,6 +74,10 @@ MAX_NUMBER_OF_CONCURRENT_TASKS = 10
 MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST = 100
 
 SECONDS_BETWEEN_EDITS = 5.0
+# Used to control that a suggested backoff should be ignored
+SECONDS_BEFORE_IGNORE_BACKOFF = 1.0
+# For response time, multiply the previous by this to get the suggested backoff for next
+BACKOFF_MULTIPLIER = 0.5
 
 # Column headers. Probably will remove these constants
 SERVER_NAME = "Server Name"
@@ -177,6 +182,10 @@ class FederationBot(Plugin):
         self.server_signing_keys = {}
         self.task_control: Dict[EventID, ReactionCommandStatus] = {}
         self.reaction_handler_count = 0
+        self.client.add_event_handler(
+            EventType.REACTION, self.react_control_handler, True
+        )
+
         if self.config:
             self.config.load_and_update()
             # self.log.info(str(self.config["server_signing_keys"]))
@@ -573,6 +582,575 @@ class FederationBot(Plugin):
         header_lines = ["Room Back-walking Procedure: Done"]
 
         backwalk_lines.extend(["Done"])
+        await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown(_combine_lines_for_backwalk()),
+            ),
+            edits=pinned_message,
+        )
+
+    @test_command.subcommand(
+        name="room_walk2",
+        help="Use the federation api to try and selectively download events that are missing(beta).",
+    )
+    @command.argument(
+        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
+    )
+    @command.argument(name="server_to_fix", required=False)
+    async def room_walk_2_command(
+        self,
+        command_event: MessageEvent,
+        room_id_or_alias: Optional[str],
+        server_to_fix: Optional[str],
+    ) -> None:
+        # Let the user know the bot is paying attention
+        await command_event.mark_read()
+
+        if get_domain_from_id(command_event.sender) != get_domain_from_id(
+            self.client.mxid
+        ):
+            await command_event.reply(
+                "I'm sorry, running this command from a user not on the same "
+                "server as the bot will not help"
+            )
+            return
+
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        origin_server = get_domain_from_id(self.client.mxid)
+        if origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first."
+            )
+            return
+
+        if server_to_fix:
+            destination_server = server_to_fix
+        else:
+            destination_server = get_domain_from_id(command_event.sender)
+
+        # Sort out the room id
+        if room_id_or_alias:
+            room_id = await self._resolve_room_id_or_alias(
+                room_id_or_alias, command_event, origin_server
+            )
+            if not room_id:
+                # Don't need to actually display an error, that's handled in the above
+                # function
+                return
+        else:
+            # with server_to_check being set, this will be ignored any way
+            room_id = command_event.room_id
+
+        # try:
+        #     per_iteration_int = int(per_iteration)
+        # except ValueError:
+        #     await command_event.reply("per_iteration must be an integer")
+        #     return
+
+        # Need:
+        # *1. Initial Event ID to start at. Want the depth from that Event to base
+        #    progress bars on
+        # *2. progress bars based on depth reversal, as this is going backwards. Depth
+        #    and prev_events won't always have a correlation(remember the ping room)
+        # 3. Count of:
+        #    *a. All Events seen
+        #    *b. Events just with errors
+        #    *c. Events that had errors but were resolved later(these count as 'probably
+        #       new')
+        #    d. Events that had errors but were found on other hosts in the room
+        # 4. Times for:
+        #    *a. Time spent on backwalk as a whole(incremental=so far)
+        #    b. Time spent on last request
+        #    c. Time spent in backoff
+        # 5. Allow-list for users to block bad actors
+
+        # The process heuristic:
+        # 1. backfill with limit=1(variable?) for event_id
+        # 2. Take that event(s) and parse out prev_events and auth_events
+        #    A. Try and pull prev_events and auth_events from the local server
+        #       1. This acts as a prefetch(and will probably be very iterative, caching)
+        #          and a basic check that the next event is not a failure
+        #       2. If this is a failure, use backfill directly on that Event ID to try
+        #          and get the Events from federation. Add to Error List, if found also
+        #          add to Resolved Errors List
+        #       3. If this continues to fail, check the hosts in the room to see if any
+        #          other hosts have it.
+        #       4. Add to Error list
+        # Notes: If an Event has multiple prev_events, check them all before moving on.
+        # They should all collectively have the same prev_event as a batch
+
+        event_id_analyzed: Set[str] = set()
+        event_id_ok_list: Set[str] = set()
+        event_id_error_list: Set[str] = set()
+        event_id_resolved_error_list: Set[str] = set()
+        event_id_retries_exhausted: Set[str] = set()
+
+        async def _filter_ancestor_events(
+            worker_name: str,
+            event_id_list_of_ancestors: List[str],
+            _event_id_ok_list: Set[str],
+            _event_id_error_list: Set[str],
+            _event_id_resolved_error_list: Set[str],
+            _event_id_retries_exhausted: Set[str],
+        ) -> Tuple[Set[str], Set[str]]:
+            """
+            Condense and filter given Event IDs from the OK list of Events already
+            checked then check that any remaining are retrievable.
+            Args:
+                worker_name: string name for logging
+                event_id_list_of_ancestors: Event ID's to look for
+                _event_id_ok_list:
+                _event_id_error_list:
+                _event_id_resolved_error_list:
+                _event_id_retries_exhausted:
+
+            Returns: a Tuple of (events that are good, events that are bad)
+
+            """
+            next_batch: Set[str] = set()
+            error_batch: Set[str] = set()
+            # TODO: Make this work with the bulk request
+            # if _event_id in _event_id_ok_list:
+            #     # Because it's already been checked
+            #     continue
+            sorted_event_id_set = set(event_id_list_of_ancestors)
+            sorted_event_id_set.difference_update(_event_id_ok_list)
+            pulled_event_map = await self.federation_handler.get_events_from_server(
+                origin_server=origin_server,
+                destination_server=destination_server,
+                events_list=sorted_event_id_set,
+            )
+            for _event_id in sorted_event_id_set:
+                pulled_event = pulled_event_map.get(_event_id)
+                if isinstance(pulled_event, EventError):
+                    # Had an error, keep a tally
+                    _event_id_error_list.add(_event_id)
+                    error_batch.add(_event_id)
+                    self.log.warning(
+                        f"{worker_name}: Error on event_id: {_event_id}\n {pulled_event.error}"
+                    )
+                else:
+                    # Got one, make a note
+                    next_batch.add(_event_id)
+                    _event_id_ok_list.add(_event_id)
+
+            return next_batch, error_batch
+
+        # Get the last event that was in the room, for its depth and as a starting spot
+        now = int(time.time() * 1000)
+        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
+            origin_server=origin_server,
+            destination_server=origin_server,
+            room_id=room_id,
+            utc_time_at_ms=now,
+        )
+        if isinstance(ts_response, FederationErrorResponse):
+            await command_event.respond(
+                "Something went wrong while getting last event in room\n"
+                f"* {ts_response.reason}"
+            )
+            return
+
+        event_id = ts_response.response_dict.get("event_id", None)
+        assert isinstance(event_id, str)
+        event_result = await self.federation_handler.get_event_from_server(
+            origin_server, origin_server, event_id
+        )
+        event = event_result.get(event_id, None)
+        assert event is not None
+        room_depth = event.depth
+        current_depth = int(room_depth)
+
+        # Initial messages and lines setup. Never end in newline, as the helper handles
+        header_lines = ["Room Back-walking Procedure: Running"]
+        static_lines = []
+        static_lines.extend(["--------------------------"])
+        static_lines.extend([f"Room Depth reported as: {room_depth}"])
+
+        discovery_lines: List[str] = []
+        progress_line = ""
+        roomwalk_lines: List[str] = []
+
+        def _render_progress_bar(total_value: int, current_value: int) -> str:
+            """
+            Generate a progress bar string 52 chars long, like:
+            {|||||||||||||||||||                               } 38%
+            based on the(mostly) simple math of current_value / total_value
+
+            Args:
+                total_value:
+                current_value:
+
+            Returns: string with no newlines
+
+            """
+            buffered_message = "{"
+            calculated_percent = (current_value / total_value) * 100
+            adjusted_percent = int(calculated_percent)
+            # Since we are using range() to calculate our positions, there are some
+            # oddities around the step argument and how it deals with odd numbers. The
+            # progress bar's accuracy is less important than representing forward
+            # progress so just making the odd number even is close enough.
+            is_odd_number = (adjusted_percent % 2) != 0
+            if is_odd_number:
+                adjusted_percent += 1
+
+            for _ in range(0, adjusted_percent, 2):
+                buffered_message += "|"
+            for _ in range(0, 100 - adjusted_percent, 2):
+                buffered_message += " "
+
+            buffered_message += "} " + str(adjusted_percent) + "%"
+            return buffered_message
+
+        def _combine_lines_for_backwalk() -> str:
+            combined_lines = ""
+            for line in header_lines:
+                combined_lines += line + "\n"
+            for line in static_lines:
+                combined_lines += line + "\n"
+            for line in discovery_lines:
+                combined_lines += line + "\n"
+            combined_lines += progress_line + "\n"
+            nonlocal roomwalk_lines
+            for line in roomwalk_lines:
+                combined_lines += line + "\n"
+
+            return combined_lines
+
+        pinned_message = await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown(_combine_lines_for_backwalk())
+            )
+        )
+        await self.client.react(
+            command_event.room_id, pinned_message, ReactionCommandStatus.STOP.value
+        )
+        await self.client.react(
+            command_event.room_id, pinned_message, ReactionCommandStatus.PAUSE.value
+        )
+        await self.client.react(
+            command_event.room_id, pinned_message, ReactionCommandStatus.START.value
+        )
+
+        # The initial command
+        self.task_control.setdefault(pinned_message, ReactionCommandStatus.START)
+
+        async def _event_walking_fetcher(
+            worker_name: str,
+            _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
+            _backfill_queue: Queue[str],
+        ) -> None:
+            while True:
+                if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+                    break
+
+                # Use a set for this, as sometimes prev_events ARE auth_events
+                next_list_to_get = set()
+                # next_event_ids is the previous iterations next_list_to_get. Usually
+                # there will be only one item in that sequence
+                (
+                    back_off_time,
+                    is_this_a_retry,
+                    next_event_ids,
+                ) = await _event_fetch_queue.get()
+
+                nonlocal event_id_analyzed
+                # We already ran this event id through analysis, no need to again. A
+                # good example of how this helps: In the ping room, each bot that
+                # sends a 'pong' will have the invocation as a prev_event. The next
+                # thing sent into the room will have all those 'pong' responses as
+                # prev_events.
+                # if next_event_id in event_id_analyzed:
+                #     # TODO: investigate difference_update() for this instead
+                #     next_event_ids.discard(next_event_id)
+
+                # But still add it to the pile so we don't do it twice
+                event_id_analyzed.update(next_event_ids)
+
+                if back_off_time > 5.0:  # SECONDS_BEFORE_IGNORE_BACKOFF:
+                    self.log.info(f"{worker_name}: Backing off for {back_off_time}")
+                    await asyncio.sleep(back_off_time)
+
+                iter_start_time = time.time()
+                max_depth_of_pulled_events = 0
+                for next_event_id in next_event_ids:
+                    pulled_event_map = (
+                        await self.federation_handler.get_event_from_server(
+                            origin_server=origin_server,
+                            destination_server=destination_server,
+                            event_id=next_event_id,
+                        )
+                    )
+                    # self.log.info(f"{worker_name} on {next_event_id}")
+                    pulled_event = pulled_event_map.get(next_event_id)
+                    # pulled_event should never be None, but mypy doesn't know that
+                    assert pulled_event is not None
+                    if not isinstance(pulled_event, EventError):
+                        if is_this_a_retry:
+                            # This should only be hit after a backfill attempt, and
+                            # means the second try succeeded.
+                            event_id_resolved_error_list.add(next_event_id)
+
+                        max_depth_of_pulled_events = max(max_depth_of_pulled_events, pulled_event.depth)
+                        prev_events = pulled_event.prev_events
+                        auth_events = pulled_event.auth_events
+                        # _event_id_ok_list: Set[str],
+                        # _event_id_error_list: Set[str],
+                        # _event_id_resolved_error_list: Set[str],
+                        # _event_id_retries_exhausted: Set[str],
+
+                        # These have filters inside so as not to duplicate work too,
+                        # hence why passing all these Set's in
+                        (
+                            prev_good_events,
+                            prev_bad_events,
+                        ) = await _filter_ancestor_events(
+                            worker_name,
+                            prev_events,
+                            event_id_ok_list,
+                            event_id_error_list,
+                            event_id_resolved_error_list,
+                            event_id_retries_exhausted,
+                        )
+
+                        # We don't iterate the walk based on auth_events themselves,
+                        # eventually we'll find them in prev_events. At worst, this is a
+                        # prefetch for the cache.
+                        (
+                            auth_good_events,
+                            auth_bad_events,
+                        ) = await _filter_ancestor_events(
+                            worker_name,
+                            auth_events,
+                            event_id_ok_list,
+                            event_id_error_list,
+                            event_id_resolved_error_list,
+                            event_id_retries_exhausted,
+                        )
+
+                        for _event_id in chain(prev_bad_events, auth_bad_events):
+                            _backfill_queue.put_nowait(_event_id)
+                        # Prep for next iteration. Don't worry about adding auth events
+                        # to this, as they will come along in due time
+                        next_list_to_get.update(prev_good_events)
+
+                    # else is an EventError. Chances of hitting this are extremely low,
+                    # in fact it may only happen on the initial pull to start a walk.
+                    # All other opportunities to hit this will have been handled in the
+                    # above filter function.
+
+                # _event_fetch_queue.task_done()
+                nonlocal current_depth
+                current_depth = min(max_depth_of_pulled_events, current_depth)
+
+                iter_finish_time = time.time()
+                _time_spent = iter_finish_time - iter_start_time
+
+                # The queue item is (new_back_off_time, is_this_a_retry, next_event_ids)
+                if next_list_to_get:
+                    _event_fetch_queue.put_nowait(
+                        (_time_spent * BACKOFF_MULTIPLIER, False, next_list_to_get)
+                    )
+
+                if not next_list_to_get:
+                    self.log.error(
+                        f"{worker_name}: Unexpectedly had no new events(from {next_event_ids})"
+                    )
+
+                # Tuple of time spent(for calculating backoff) and if we are done
+                render_list.extend([(_time_spent, False if next_list_to_get else True)])
+
+                _event_fetch_queue.task_done()
+
+        async def _backfill_fetcher(
+            worker_name: str,
+            _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
+            _backfill_queue: Queue[str],
+        ) -> None:
+            while True:
+                if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+                    break
+
+                next_event_id = await _backfill_queue.get()
+
+                if next_event_id in event_id_ok_list:
+                    self.log.warning(
+                        f"{worker_name}: Unexpectedly found backfill fetch event in OK list {next_event_id}"
+                    )
+                if next_event_id in event_id_resolved_error_list:
+                    self.log.warning(
+                        f"{worker_name}: Unexpectedly found backfill fetch event in RESOLVED list {next_event_id}"
+                    )
+                if next_event_id in event_id_retries_exhausted:
+                    _backfill_queue.task_done()
+                    continue
+
+                # self.log.warning(f"{worker_name}: (Retry count: {retry_count}) Trying a backfill on {_event_id}")
+                start_time = time.time()
+                backfilled_event = await self._get_event_from_backfill(
+                    origin_server=origin_server,
+                    destination_server=destination_server,
+                    room_id=room_id,
+                    event_id=next_event_id,
+                )
+                request_time = time.time() - start_time
+
+                # Go ahead and add to this tally, just in case somehow there ends up
+                # being another duplicate of this in the queue
+                event_id_retries_exhausted.add(next_event_id)
+
+                # Maintain the tally. We don't remove Events that were resolved
+                # from the Errors List
+                if isinstance(backfilled_event, EventError):
+                    # Fed error, really not a lot we can do here, if getting an
+                    # event worked but backfilled didn't, there are bigger
+                    # problems. Just log it and move on, nothing will be added to the
+                    # queue in this case(as there is nothing to work with)
+                    self.log.warning(
+                        f"{worker_name}: Error after backfill event_id: {next_event_id}\n {backfilled_event.to_json()}"
+                    )
+
+                elif backfilled_event is None:
+                    # The event wasn't found. Drop it for now(might add something neat
+                    # later, like look for this event on other hosts in the room)
+                    self.log.warning(
+                        f"{worker_name}: No Event found on target server after backfill event_id: {next_event_id}"
+                    )
+
+                else:
+                    # found the event, send it back to the event fetch queue for retry
+                    self.log.warning(
+                        f"{worker_name}: Potentially found event on backfill, testing {next_event_id}"
+                    )
+                    _event_fetch_queue.put_nowait((request_time * BACKOFF_MULTIPLIER, True, {next_event_id}))
+
+                _backfill_queue.task_done()
+
+        # Tuple[suggested_backoff, is_this_a_retry, event_ids_to_fetch]
+        roomwalk_fetch_queue: Queue[Tuple[float, bool, Set[str]]] = Queue()
+        # Tuple[suggested_backoff, event_id_to_fetch]
+        backfill_fetch_queue: Queue[str] = Queue()
+
+        tasks = []
+        for i in range(0, 3):
+            tasks.append(
+                asyncio.create_task(
+                    _event_walking_fetcher(
+                        f"event_worker_{i}", roomwalk_fetch_queue, backfill_fetch_queue
+                    )
+                )
+            )
+        tasks.append(
+            asyncio.create_task(
+                _backfill_fetcher(
+                    f"worker_backfill", roomwalk_fetch_queue, backfill_fetch_queue
+                )
+            )
+        )
+
+        roomwalk_cumulative_iter_time = 0.0
+        # Number of times we've re-rendered status
+        roomwalk_iterations = 0
+        # List of tuples, (time_spent float, bool if we are done)
+        render_list: List[Tuple[float, bool]] = []
+        last_count_of_events_processed = 0
+        # prime the queue
+        await roomwalk_fetch_queue.put((0.0, False, {event_id}))
+
+        # Want it to look like:
+        #
+        # Room depth reported as: 45867
+        # [|||||||||||||||||||||||||||||||||||||||||||||||||] 100%
+        # (Updating every x seconds)
+        # Total Events processed: 0
+        #   Errors: 0(0 found on other servers)
+        #   Resolved Errors: 0
+        #   Time taken: 120 seconds
+        #
+
+        # Don't use the finish bool below to avoid the last sleep()
+        while True:
+            finish_on_this_round = False
+            if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+                finish_on_this_round = True
+
+            if self.task_control.get(pinned_message) == ReactionCommandStatus.PAUSE:
+                # A pause just means not adding anything to the screen, until restarted
+                await asyncio.sleep(1)
+                continue
+
+            # pinch off the list of things to work on
+            new_items_to_render = render_list.copy()
+            render_list = []
+            # self.log.info(f"LENGTH of render_list: {len(new_items_to_render)}")
+
+            # self.log.info(f"SIZE of queue: {roomwalk_fetch_queue.qsize()}")
+
+            for time_spent, finish in new_items_to_render:
+                if finish:
+                    finish_on_this_round = True
+                roomwalk_cumulative_iter_time += time_spent
+            roomwalk_iterations = roomwalk_iterations + 1
+            current_count_of_events_processed = len(event_id_ok_list.union(event_id_error_list))
+            # Want it to look like:
+            #
+            # Room depth reported as: 45867
+            # [|||||||||||||||||||||||||||||||||||||||||||||||||] 100%
+            # (Updating every x seconds)
+            # Total Events processed: 0
+            #   Errors: 0(0 found on other servers)
+            #   Resolved Errors: 0
+            #   Time taken: 120 seconds
+            #
+            # TODO: Fix this too
+            # if new_items_to_render or finish_on_this_round:
+
+            # self.log.info(f"mid-render, room_depth difference: {current_depth} / {room_depth}")
+            progress_line = (
+                f"{_render_progress_bar(room_depth, room_depth-current_depth)}"
+            )
+            roomwalk_lines = [
+                f"(Updating every {SECONDS_BETWEEN_EDITS} seconds)",
+                f"Total Events processed: {current_count_of_events_processed} ({current_count_of_events_processed - last_count_of_events_processed} / update)",
+                f"  Errors: {len(event_id_error_list)}",
+                f"  Resolved Errors: ({len(event_id_resolved_error_list)})",
+                f"  Time taken: {roomwalk_cumulative_iter_time:.3f} seconds (iter# {roomwalk_iterations})",
+                f"  (Items currently in backlog event queue: {roomwalk_fetch_queue.qsize()})",
+                f"  (Items currently in backlog backfill queue: {backfill_fetch_queue.qsize()})",
+            ]
+
+            # Only print something if there is something to say
+            await command_event.respond(
+                make_into_text_event(
+                    wrap_in_code_block_markdown(_combine_lines_for_backwalk()),
+                ),
+                edits=pinned_message,
+            )
+            last_count_of_events_processed = current_count_of_events_processed
+            if finish_on_this_round:
+                break
+
+            await asyncio.sleep(SECONDS_BETWEEN_EDITS)
+
+        # Cancel our worker tasks.
+        for task in tasks:
+            task.cancel()
+        # Wait until all worker tasks are cancelled.
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Clean up the task controller
+        self.task_control.pop(pinned_message)
+
+        header_lines = ["Room Back-walking Procedure: Done"]
+        # progress_line = (
+        #     f"{_render_progress_bar(room_depth, room_depth)}"
+        # )
+
+        roomwalk_lines.extend(["Done"])
         await command_event.respond(
             make_into_text_event(
                 wrap_in_code_block_markdown(_combine_lines_for_backwalk()),
