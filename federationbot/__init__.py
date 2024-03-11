@@ -1331,7 +1331,7 @@ class FederationBot(Plugin):
                     if host not in host_list:
                         host_list.extend([host])
 
-        host_queue = Queue()
+        host_queue: Queue[str] = Queue()
         for host in host_list:
             host_queue.put_nowait(host)
 
@@ -1346,7 +1346,7 @@ class FederationBot(Plugin):
                     event_id=event_id,
                 )
                 inner_returned_event = returned_events.get(event_id)
-
+                assert inner_returned_event is not None
                 host_to_event_status_map[worker_host] = inner_returned_event
                 queue.task_done()
 
@@ -1370,7 +1370,7 @@ class FederationBot(Plugin):
         dc_host_config = DisplayLineColumnConfig("Hosts", justify=Justify.RIGHT)
         dc_result_config = DisplayLineColumnConfig("Results")
 
-        for host, result in host_to_event_status_map.items():
+        for host in host_to_event_status_map:
             dc_host_config.maybe_update_column_width(len(host))
 
         header_message = (
@@ -1524,7 +1524,7 @@ class FederationBot(Plugin):
             )
             # Need to cancel server_to_check, but can't use None
             server_to_check = ""
-            if not maybe_room_id:
+            if not room_to_check:
                 # Don't need to actually display an error, that's handled in the above
                 # function
                 return
@@ -1542,7 +1542,8 @@ class FederationBot(Plugin):
         # let's check.
         if not list_of_servers_to_check:
             try:
-                joined_members = await self.client.get_joined_members(room_to_check)
+                assert room_to_check is not None
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -1608,7 +1609,7 @@ class FederationBot(Plugin):
                 finally:
                     queue.task_done()
 
-        delegation_queue = asyncio.Queue()
+        delegation_queue: Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await delegation_queue.put(server_name)
 
@@ -1812,6 +1813,7 @@ class FederationBot(Plugin):
             )
 
         else:
+            assert isinstance(returned_event, EventBase)
             buffered_message += f"{returned_event.event_id}\n"
             # EventBase.to_json() does not have a trailing new line, add one
             buffered_message += returned_event.to_json() + "\n"
@@ -1885,6 +1887,7 @@ class FederationBot(Plugin):
             # the 'footer' section of the rendered response. For example: auth
             # events will have their event type displayed, such as 'm.room.create'
             # and the room version.
+            assert isinstance(returned_event, EventBase)
             list_of_a_event_ids = returned_event.auth_events.copy()
             list_of_a_event_ids.extend(returned_event.prev_events)
 
@@ -2110,7 +2113,8 @@ class FederationBot(Plugin):
             # Get the members this bot knows about in this room
             # TODO: try and find a way to not use the client API for this
             try:
-                joined_members = await self.client.get_joined_members(room_to_check)
+                assert isinstance(room_to_check, str)
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2176,7 +2180,7 @@ class FederationBot(Plugin):
                 finally:
                     queue.task_done()
 
-        version_queue = asyncio.Queue()
+        version_queue: Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await version_queue.put(server_name)
 
@@ -2345,7 +2349,8 @@ class FederationBot(Plugin):
         # If the room id was passed in, then this will turn into None
         if not server_to_check:
             try:
-                joined_members = await self.client.get_joined_members(room_to_check)
+                assert isinstance(room_to_check, str)
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2411,7 +2416,7 @@ class FederationBot(Plugin):
                 finally:
                     queue.task_done()
 
-        keys_queue = asyncio.Queue()
+        keys_queue: Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 
@@ -2620,7 +2625,8 @@ class FederationBot(Plugin):
         # If the room id was passed in, then this will turn into None
         if not server_to_check:
             try:
-                joined_members = await self.client.get_joined_members(room_to_check)
+                assert isinstance(room_to_check, str)
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2699,7 +2705,7 @@ class FederationBot(Plugin):
                 finally:
                     queue.task_done()
 
-        keys_queue = asyncio.Queue()
+        keys_queue: Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 
@@ -3192,7 +3198,6 @@ class FederationBot(Plugin):
         command_event: MessageEvent,
         origin_server: str,
     ) -> Optional[str]:
-        room_id = None
         if room_id_or_alias:
             # Sort out if the room id or alias passed in is valid and resolve the alias
             # to the room id if it is.
@@ -3209,7 +3214,7 @@ class FederationBot(Plugin):
                         f"{alias_result.status_code}: {alias_result.reason}"
                     )
                     # self.log.warning(f"alias_result: {alias_result}")
-                    return
+                    return None
                 else:
                     room_id = alias_result.response_dict.get("room_id")
             elif room_id_or_alias.startswith("!"):
@@ -3221,7 +3226,7 @@ class FederationBot(Plugin):
                     "Room ID or Alias supplied doesn't have the appropriate sigil"
                     f"(either a `!` or a `#`), '{room_id_or_alias}'"
                 )
-                return
+                return None
         else:
             # When not supplied a room id, we assume they want the room the command was
             # issued from.
@@ -3305,7 +3310,7 @@ class FederationBot(Plugin):
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
             # function
-            return
+            return None
 
         origin_server_ts = None
         if not event_id:
@@ -3325,13 +3330,11 @@ class FederationBot(Plugin):
                     f"{ts_response.reason}"
                     "). Please supply an event_id instead at the place in time of query"
                 )
-                return
+                return None
             else:
                 event_id = ts_response.response_dict.get("event_id", None)
-                origin_server_ts = ts_response.response_dict.get(
-                    "origin_server_ts", None
-                )
 
+        assert event_id is not None
         event_result = await self.federation_handler.get_event_from_server(
             origin_server, destination_server, event_id
         )
@@ -3342,12 +3345,13 @@ class FederationBot(Plugin):
                     "The Event ID supplied doesn't appear to be on the origin "
                     f"server({origin_server}). Try query a different server for it."
                 )
-                return
+                return None
 
-            if isinstance(event, Event):
+            if isinstance(event, (Event, GenericStateEvent)):
                 room_id = event.room_id
                 origin_server_ts = event.origin_server_ts
 
+        assert isinstance(origin_server_ts, int)
         return room_id, event_id, origin_server_ts
 
     async def _get_event_from_backfill(
