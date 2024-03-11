@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from asyncio import Queue
 from enum import Enum
 import asyncio
@@ -463,9 +463,22 @@ class FederationHandler:
         self,
         origin_server: str,
         destination_server: str,
-        events_list: Sequence[str],
+        events_list: Union[Sequence[str], Set[str]],
         timeout: float = 10.0,
     ) -> Dict[str, EventBase]:
+        """
+        Retrieve multiple Events from a given server. Uses Async Tasks and a Queue to
+        be efficient. Creates number of event_ids up to 10 Tasks for concurrency.
+
+        Args:
+            origin_server: The server to auth the request with
+            destination_server: The server to ask about the Event
+            events_list: Either a Sequence or a Set of Event ID strings
+            timeout:
+
+        Returns: A mapping of the Event ID to the Event(or EventError)
+
+        """
         # Keep both the response and the actual event, if there was an error it will be
         # in the response and the event won't exist here
         event_to_event_base: Dict[str, EventBase] = {}
