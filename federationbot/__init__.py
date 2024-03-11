@@ -2753,22 +2753,22 @@ class FederationBot(Plugin):
                 origin_server_ts = ts_response.response_dict.get(
                     "origin_server_ts", None
                 )
-        else:
-            event_result = await self.federation_handler.get_events_from_server(
-                origin_server, destination_server, [event_id]
-            )
-            event = event_result.get(event_id, None)
-            if event:
-                if isinstance(event, EventError):
-                    await command_event.reply(
-                        "The Event ID supplied doesn't appear to be on the origin "
-                        f"server({origin_server}). Try query a different server for it."
-                    )
-                    return
 
-                if isinstance(event, Event):
-                    room_id = event.room_id
-                    origin_server_ts = event.origin_server_ts
+        event_result = await self.federation_handler.get_event_from_server(
+            origin_server, destination_server, event_id
+        )
+        event = event_result.get(event_id, None)
+        if event:
+            if isinstance(event, EventError):
+                await command_event.reply(
+                    "The Event ID supplied doesn't appear to be on the origin "
+                    f"server({origin_server}). Try query a different server for it."
+                )
+                return
+
+            if isinstance(event, Event):
+                room_id = event.room_id
+                origin_server_ts = event.origin_server_ts
 
         return room_id, event_id, origin_server_ts
 
