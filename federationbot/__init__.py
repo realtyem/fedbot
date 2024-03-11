@@ -712,12 +712,14 @@ class FederationBot(Plugin):
             """
             next_batch: Set[str] = set()
             error_batch: Set[str] = set()
-            # TODO: Make this work with the bulk request
-            # if _event_id in _event_id_ok_list:
-            #     # Because it's already been checked
-            #     continue
+
+            # Do not add the error list to these, as they may be getting retried
             sorted_event_id_set = set(event_id_list_of_ancestors)
             sorted_event_id_set.difference_update(_event_id_ok_list)
+            if not sorted_event_id_set:
+                # These events have already all been seen, waste no time on it
+                return next_batch, error_batch
+
             pulled_event_map = await self.federation_handler.get_events_from_server(
                 origin_server=origin_server,
                 destination_server=destination_server,
@@ -850,6 +852,7 @@ class FederationBot(Plugin):
 
                 # Use a set for this, as sometimes prev_events ARE auth_events
                 next_list_to_get = set()
+                total_time_spent = 0.0
                 # next_event_ids is the previous iterations next_list_to_get. Usually
                 # there will be only one item in that sequence
                 (
@@ -858,26 +861,28 @@ class FederationBot(Plugin):
                     next_event_ids,
                 ) = await _event_fetch_queue.get()
 
-                nonlocal event_id_analyzed
-                # We already ran this event id through analysis, no need to again. A
-                # good example of how this helps: In the ping room, each bot that
-                # sends a 'pong' will have the invocation as a prev_event. The next
-                # thing sent into the room will have all those 'pong' responses as
-                # prev_events.
-                # if next_event_id in event_id_analyzed:
-                #     # TODO: investigate difference_update() for this instead
-                #     next_event_ids.discard(next_event_id)
+                # nonlocal event_id_analyzed
+                # If this event_id has already been through analysis, no need to
+                # again. A good example of how this helps: In the ping room, each bot
+                # that sends a 'pong' will have the invocation as a prev_event. The
+                # next thing sent into the room will have all those 'pong' responses
+                # as prev_events. However if this is a retry because it wasn't
+                # available the first time around...
+                # if not is_this_a_retry:
+                    # Filter out already analyzed event_ids
+                    # next_event_ids.difference_update(event_id_analyzed)
 
                 # But still add it to the pile so we don't do it twice
-                event_id_analyzed.update(next_event_ids)
+                # event_id_analyzed.update(next_event_ids)
 
                 if back_off_time > 5.0:  # SECONDS_BEFORE_IGNORE_BACKOFF:
                     self.log.info(f"{worker_name}: Backing off for {back_off_time}")
                     await asyncio.sleep(back_off_time)
 
-                iter_start_time = time.time()
                 max_depth_of_pulled_events = 0
+                nonlocal current_depth
                 for next_event_id in next_event_ids:
+                    iter_start_time = time.time()
                     pulled_event_map = (
                         await self.federation_handler.get_event_from_server(
                             origin_server=origin_server,
@@ -895,7 +900,9 @@ class FederationBot(Plugin):
                             # means the second try succeeded.
                             event_id_resolved_error_list.add(next_event_id)
 
-                        max_depth_of_pulled_events = max(max_depth_of_pulled_events, pulled_event.depth)
+                        max_depth_of_pulled_events = max(
+                            max_depth_of_pulled_events, pulled_event.depth
+                        )
                         prev_events = pulled_event.prev_events
                         auth_events = pulled_event.auth_events
                         # _event_id_ok_list: Set[str],
@@ -932,11 +939,24 @@ class FederationBot(Plugin):
                             event_id_retries_exhausted,
                         )
 
+                        _time_spent = time.time() - iter_start_time
+                        total_time_spent += _time_spent
                         for _event_id in chain(prev_bad_events, auth_bad_events):
                             _backfill_queue.put_nowait(_event_id)
                         # Prep for next iteration. Don't worry about adding auth events
                         # to this, as they will come along in due time
                         next_list_to_get.update(prev_good_events)
+                        # The queue item is (new_back_off_time, is_this_a_retry, next_event_ids)
+                        if next_list_to_get:
+                            _event_fetch_queue.put_nowait(
+                                (
+                                    _time_spent * BACKOFF_MULTIPLIER,
+                                    False,
+                                    prev_good_events,
+                                )
+                            )
+
+                    current_depth = min(max_depth_of_pulled_events, current_depth)
 
                     # else is an EventError. Chances of hitting this are extremely low,
                     # in fact it may only happen on the initial pull to start a walk.
@@ -944,25 +964,15 @@ class FederationBot(Plugin):
                     # above filter function.
 
                 # _event_fetch_queue.task_done()
-                nonlocal current_depth
-                current_depth = min(max_depth_of_pulled_events, current_depth)
-
-                iter_finish_time = time.time()
-                _time_spent = iter_finish_time - iter_start_time
-
-                # The queue item is (new_back_off_time, is_this_a_retry, next_event_ids)
-                if next_list_to_get:
-                    _event_fetch_queue.put_nowait(
-                        (_time_spent * BACKOFF_MULTIPLIER, False, next_list_to_get)
-                    )
-
                 if not next_list_to_get:
                     self.log.error(
                         f"{worker_name}: Unexpectedly had no new events(from {next_event_ids})"
                     )
 
                 # Tuple of time spent(for calculating backoff) and if we are done
-                render_list.extend([(_time_spent, False if next_list_to_get else True)])
+                render_list.extend(
+                    [(total_time_spent, False if current_depth > 1 else True)]
+                )
 
                 _event_fetch_queue.task_done()
 
@@ -1026,7 +1036,9 @@ class FederationBot(Plugin):
                     self.log.warning(
                         f"{worker_name}: Potentially found event on backfill, testing {next_event_id}"
                     )
-                    _event_fetch_queue.put_nowait((request_time * BACKOFF_MULTIPLIER, True, {next_event_id}))
+                    _event_fetch_queue.put_nowait(
+                        (request_time * BACKOFF_MULTIPLIER, True, {next_event_id})
+                    )
 
                 _backfill_queue.task_done()
 
@@ -1036,7 +1048,7 @@ class FederationBot(Plugin):
         backfill_fetch_queue: Queue[str] = Queue()
 
         tasks = []
-        for i in range(0, 3):
+        for i in range(0, MAX_NUMBER_OF_CONCURRENT_TASKS):
             tasks.append(
                 asyncio.create_task(
                     _event_walking_fetcher(
@@ -1044,13 +1056,13 @@ class FederationBot(Plugin):
                     )
                 )
             )
-        tasks.append(
-            asyncio.create_task(
-                _backfill_fetcher(
-                    f"worker_backfill", roomwalk_fetch_queue, backfill_fetch_queue
+            tasks.append(
+                asyncio.create_task(
+                    _backfill_fetcher(
+                        f"backfill_worker_{i}", roomwalk_fetch_queue, backfill_fetch_queue
+                    )
                 )
             )
-        )
 
         roomwalk_cumulative_iter_time = 0.0
         # Number of times we've re-rendered status
@@ -1095,7 +1107,9 @@ class FederationBot(Plugin):
                     finish_on_this_round = True
                 roomwalk_cumulative_iter_time += time_spent
             roomwalk_iterations = roomwalk_iterations + 1
-            current_count_of_events_processed = len(event_id_ok_list.union(event_id_error_list))
+            current_count_of_events_processed = len(
+                event_id_ok_list.union(event_id_error_list)
+            )
             # Want it to look like:
             #
             # Room depth reported as: 45867
@@ -1109,7 +1123,7 @@ class FederationBot(Plugin):
             # TODO: Fix this too
             # if new_items_to_render or finish_on_this_round:
 
-            # self.log.info(f"mid-render, room_depth difference: {current_depth} / {room_depth}")
+            self.log.info(f"mid-render, room_depth difference: {current_depth} / {room_depth}")
             progress_line = (
                 f"{_render_progress_bar(room_depth, room_depth-current_depth)}"
             )
@@ -1543,7 +1557,9 @@ class FederationBot(Plugin):
         if not list_of_servers_to_check:
             try:
                 assert room_to_check is not None
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+                joined_members = await self.client.get_joined_members(
+                    RoomID(room_to_check)
+                )
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2114,7 +2130,9 @@ class FederationBot(Plugin):
             # TODO: try and find a way to not use the client API for this
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+                joined_members = await self.client.get_joined_members(
+                    RoomID(room_to_check)
+                )
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2350,7 +2368,9 @@ class FederationBot(Plugin):
         if not server_to_check:
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+                joined_members = await self.client.get_joined_members(
+                    RoomID(room_to_check)
+                )
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2626,7 +2646,9 @@ class FederationBot(Plugin):
         if not server_to_check:
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+                joined_members = await self.client.get_joined_members(
+                    RoomID(room_to_check)
+                )
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
