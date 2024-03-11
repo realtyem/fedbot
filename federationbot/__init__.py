@@ -2772,6 +2772,51 @@ class FederationBot(Plugin):
 
         return room_id, event_id, origin_server_ts
 
+    async def _get_event_from_backfill(
+        self, origin_server: str, destination_server: str, room_id: str, event_id: str
+    ) -> Optional[EventBase]:
+        """
+        Retrieve a single event from the backfill mechanism. This will have 3 types of
+        return values(listed below)
+
+        Args:
+            origin_server: The server to make the request from(applies auth to request)
+            destination_server: The server being asked
+            room_id: The room the Event ID should be part of
+            event_id: The actual Event ID to look up
+
+        Returns:
+            * EventBase in question
+            * None(for when the event isn't on this server)
+            * Error from federation response in the EventError custom class
+
+        """
+        response = await self.federation_handler.get_backfill_from_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            event_id=event_id,
+            limit="1",
+        )
+        if isinstance(response, FederationErrorResponse):
+            return EventError(
+                event_id=EventID(event_id),
+                data={
+                    "error": f"{response.reason}",
+                    "errcode": f"{response.status_code}",
+                },
+            )
+
+        pdus_list = response.response_dict.get("pdus", [])
+
+        event = None
+        # Even though this is a list, there should be only one
+        for pdu in pdus_list:
+            event = determine_what_kind_of_event(
+                event_id=EventID(event_id), data_to_use=pdu
+            )
+        return event
+
 
 def format_result_lines(
     server_name: str,
