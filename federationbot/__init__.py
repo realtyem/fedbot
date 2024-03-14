@@ -816,6 +816,8 @@ class FederationBot(Plugin):
         # The initial command
         self.task_control.setdefault(pinned_message, ReactionCommandStatus.START)
 
+        bot_working: Dict[str, bool] = dict()
+
         async def _event_walking_fetcher(
             worker_name: str,
             _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
@@ -835,6 +837,8 @@ class FederationBot(Plugin):
                     is_this_a_retry,
                     next_event_ids,
                 ) = await _event_fetch_queue.get()
+
+                bot_working[worker_name] = True
 
                 # nonlocal event_id_analyzed
                 # If this event_id has already been through analysis, no need to
@@ -946,15 +950,16 @@ class FederationBot(Plugin):
                     # above filter function.
 
                 # _event_fetch_queue.task_done()
-                if not next_list_to_get:
-                    self.log.error(
-                        f"{worker_name}: Unexpectedly had no new events(from {next_event_ids})"
-                    )
+                # if not next_list_to_get:
+                #     self.log.error(
+                #         f"{worker_name}: Unexpectedly had no new events(from {next_event_ids})"
+                #     )
 
                 # Tuple of time spent(for calculating backoff) and if we are done
                 render_list.extend([(total_time_spent, False)])
 
                 _event_fetch_queue.task_done()
+                bot_working[worker_name] = False
 
         async def _backfill_fetcher(
             worker_name: str,
@@ -966,6 +971,7 @@ class FederationBot(Plugin):
                     break
 
                 next_event_id = await _backfill_queue.get()
+                bot_working[worker_name] = True
 
                 if next_event_id in event_id_ok_list:
                     self.log.warning(
@@ -1021,6 +1027,7 @@ class FederationBot(Plugin):
                     )
 
                 _backfill_queue.task_done()
+                bot_working[worker_name] = False
 
         # Tuple[suggested_backoff, is_this_a_retry, event_ids_to_fetch]
         roomwalk_fetch_queue: Queue[Tuple[float, bool, Set[str]]] = Queue()
@@ -1028,23 +1035,25 @@ class FederationBot(Plugin):
         backfill_fetch_queue: Queue[str] = Queue()
 
         tasks = []
-        for i in range(0, 1):
-            tasks.append(
-                asyncio.create_task(
-                    _event_walking_fetcher(
-                        f"event_worker_{i}", roomwalk_fetch_queue, backfill_fetch_queue
-                    )
+        i = 0
+        tasks.append(
+            asyncio.create_task(
+                _event_walking_fetcher(
+                    f"event_worker_{i}", roomwalk_fetch_queue, backfill_fetch_queue
                 )
             )
-            tasks.append(
-                asyncio.create_task(
-                    _backfill_fetcher(
-                        f"backfill_worker_{i}",
-                        roomwalk_fetch_queue,
-                        backfill_fetch_queue,
-                    )
+        )
+        bot_working.setdefault(f"event_worker_{i}", False)
+        tasks.append(
+            asyncio.create_task(
+                _backfill_fetcher(
+                    f"backfill_worker_{i}",
+                    roomwalk_fetch_queue,
+                    backfill_fetch_queue,
                 )
             )
+        )
+        bot_working.setdefault(f"backfill_worker_{i}", False)
 
         roomwalk_cumulative_iter_time = 0.0
         # Number of times we've re-rendered status
@@ -1076,6 +1085,11 @@ class FederationBot(Plugin):
                 # A pause just means not adding anything to the screen, until restarted
                 await asyncio.sleep(1)
                 continue
+
+            if roomwalk_fetch_queue.qsize() == 0 and backfill_fetch_queue.qsize() == 0:
+                if all([not x for x in bot_working.values()]):
+                    finish_on_this_round = True
+                    self.log.warning(f"Unexpectedly found no work being processed")
 
             # pinch off the list of things to work on
             new_items_to_render = render_list.copy()
