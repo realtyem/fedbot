@@ -596,7 +596,8 @@ class FederationBot(Plugin):
 
     @test_command.subcommand(
         name="room_walk2",
-        help="Use the federation api to try and selectively download events that are missing(beta).",
+        help="Use the federation api to try and selectively download events that are "
+        "missing(beta).",
     )
     @command.argument(
         name="room_id_or_alias", parser=is_room_id_or_alias, required=False
@@ -649,12 +650,6 @@ class FederationBot(Plugin):
             # with server_to_check being set, this will be ignored any way
             room_id = command_event.room_id
 
-        # try:
-        #     per_iteration_int = int(per_iteration)
-        # except ValueError:
-        #     await command_event.reply("per_iteration must be an integer")
-        #     return
-
         # Need:
         # *1. Initial Event ID to start at. Want the depth from that Event to base
         #    progress bars on
@@ -683,7 +678,6 @@ class FederationBot(Plugin):
         #          add to Resolved Errors List
         #       3. If this continues to fail, check the hosts in the room to see if any
         #          other hosts have it.
-        #       4. Add to Error list
         # Notes: If an Event has multiple prev_events, check them all before moving on.
         # They should all collectively have the same prev_event as a batch
 
@@ -700,7 +694,7 @@ class FederationBot(Plugin):
             _event_id_error_list: Set[str],
             _event_id_resolved_error_list: Set[str],
             _event_id_retries_exhausted: Set[str],
-        ) -> Tuple[Set[str], Set[str]]:
+        ) -> Tuple[Set[str], Set[str], Set[int]]:
             """
             Condense and filter given Event IDs from the OK list of Events already
             checked then check that any remaining are retrievable.
@@ -717,13 +711,13 @@ class FederationBot(Plugin):
             """
             next_batch: Set[str] = set()
             error_batch: Set[str] = set()
-
+            depths_seen: Set[int] = set()
             # Do not add the error list to these, as they may be getting retried
             sorted_event_id_set = set(event_id_list_of_ancestors)
             sorted_event_id_set.difference_update(_event_id_ok_list)
             if not sorted_event_id_set:
                 # These events have already all been seen, waste no time on it
-                return next_batch, error_batch
+                return next_batch, error_batch, depths_seen
 
             pulled_event_map = await self.federation_handler.get_events_from_server(
                 origin_server=origin_server,
@@ -736,15 +730,22 @@ class FederationBot(Plugin):
                     # Had an error, keep a tally
                     _event_id_error_list.add(_event_id)
                     error_batch.add(_event_id)
-                    self.log.warning(
-                        f"{worker_name}: Error on event_id: {_event_id}\n {pulled_event.error}"
-                    )
+                    # self.log.warning(
+                    #     f"{worker_name}: "
+                    #     f"Error on event_id: {_event_id}\n {pulled_event.error}"
+                    # )
                 else:
                     # Got one, make a note
                     next_batch.add(_event_id)
                     _event_id_ok_list.add(_event_id)
+                    depths_seen.add(pulled_event.depth)
+                    # self.log.warning(
+                    #     f"{worker_name}: Depth on event_id: {_event_id}\n"
+                    #     f" current: {pulled_event.depth}\n"
+                    #     f" max iter: {max_depth}"
+                    # )
 
-            return next_batch, error_batch
+            return next_batch, error_batch, depths_seen
 
         # Get the last event that was in the room, for its depth and as a starting spot
         now = int(time.time() * 1000)
@@ -769,12 +770,12 @@ class FederationBot(Plugin):
         event = event_result.get(event_id, None)
         assert event is not None
         room_depth = event.depth
-        current_depth = int(room_depth)
+        seen_depths_for_progress = set()
 
         # Initial messages and lines setup. Never end in newline, as the helper handles
         header_lines = ["Room Back-walking Procedure: Running"]
         static_lines = []
-        static_lines.extend(["--------------------------"])
+        static_lines.extend(["------------------------------------"])
         static_lines.extend([f"Room Depth reported as: {room_depth}"])
 
         discovery_lines: List[str] = []
@@ -840,21 +841,20 @@ class FederationBot(Plugin):
                 # again. A good example of how this helps: In the ping room, each bot
                 # that sends a 'pong' will have the invocation as a prev_event. The
                 # next thing sent into the room will have all those 'pong' responses
-                # as prev_events. However if this is a retry because it wasn't
+                # as prev_events. However, if this is a retry because it wasn't
                 # available the first time around...
                 # if not is_this_a_retry:
-                    # Filter out already analyzed event_ids
-                    # next_event_ids.difference_update(event_id_analyzed)
+                #    Filter out already analyzed event_ids
+                #    next_event_ids.difference_update(event_id_analyzed)
 
-                # But still add it to the pile so we don't do it twice
+                # But still add it to the pile so that we don't do it twice
                 # event_id_analyzed.update(next_event_ids)
 
                 if back_off_time > 5.0:  # SECONDS_BEFORE_IGNORE_BACKOFF:
                     self.log.info(f"{worker_name}: Backing off for {back_off_time}")
                     await asyncio.sleep(back_off_time)
 
-                max_depth_of_pulled_events = 0
-                nonlocal current_depth
+                nonlocal seen_depths_for_progress
                 for next_event_id in next_event_ids:
                     iter_start_time = time.time()
                     pulled_event_map = (
@@ -872,11 +872,13 @@ class FederationBot(Plugin):
                         if is_this_a_retry:
                             # This should only be hit after a backfill attempt, and
                             # means the second try succeeded.
+                            self.log.info(
+                                f"{worker_name}: "
+                                f"Hit a Resolved Error on {next_event_id}"
+                            )
                             event_id_resolved_error_list.add(next_event_id)
 
-                        max_depth_of_pulled_events = max(
-                            max_depth_of_pulled_events, pulled_event.depth
-                        )
+                        seen_depths_for_progress.add(pulled_event.depth)
                         prev_events = pulled_event.prev_events
                         auth_events = pulled_event.auth_events
                         # _event_id_ok_list: Set[str],
@@ -889,6 +891,7 @@ class FederationBot(Plugin):
                         (
                             prev_good_events,
                             prev_bad_events,
+                            prev_depths,
                         ) = await _filter_ancestor_events(
                             worker_name,
                             prev_events,
@@ -897,6 +900,10 @@ class FederationBot(Plugin):
                             event_id_resolved_error_list,
                             event_id_retries_exhausted,
                         )
+                        # seen_depths_for_progress.add(prev_depths)
+                        # self.log.warning(
+                        #     f"{worker_name}: Depth from prev_depth\n {prev_depths}"
+                        # )
 
                         # We don't iterate the walk based on auth_events themselves,
                         # eventually we'll find them in prev_events. At worst, this is a
@@ -904,6 +911,7 @@ class FederationBot(Plugin):
                         (
                             auth_good_events,
                             auth_bad_events,
+                            auth_depths,
                         ) = await _filter_ancestor_events(
                             worker_name,
                             auth_events,
@@ -912,6 +920,7 @@ class FederationBot(Plugin):
                             event_id_resolved_error_list,
                             event_id_retries_exhausted,
                         )
+                        # seen_depths_for_progress.add(auth_depths)
 
                         _time_spent = time.time() - iter_start_time
                         total_time_spent += _time_spent
@@ -920,7 +929,8 @@ class FederationBot(Plugin):
                         # Prep for next iteration. Don't worry about adding auth events
                         # to this, as they will come along in due time
                         next_list_to_get.update(prev_good_events)
-                        # The queue item is (new_back_off_time, is_this_a_retry, next_event_ids)
+                        # The queue item is:
+                        # (new_back_off_time, is_this_a_retry, next_event_ids)
                         if next_list_to_get:
                             _event_fetch_queue.put_nowait(
                                 (
@@ -929,8 +939,6 @@ class FederationBot(Plugin):
                                     prev_good_events,
                                 )
                             )
-
-                    current_depth = min(max_depth_of_pulled_events, current_depth)
 
                     # else is an EventError. Chances of hitting this are extremely low,
                     # in fact it may only happen on the initial pull to start a walk.
@@ -944,9 +952,7 @@ class FederationBot(Plugin):
                     )
 
                 # Tuple of time spent(for calculating backoff) and if we are done
-                render_list.extend(
-                    [(total_time_spent, False if current_depth > 1 else True)]
-                )
+                render_list.extend([(total_time_spent, False)])
 
                 _event_fetch_queue.task_done()
 
@@ -1022,7 +1028,7 @@ class FederationBot(Plugin):
         backfill_fetch_queue: Queue[str] = Queue()
 
         tasks = []
-        for i in range(0, MAX_NUMBER_OF_CONCURRENT_TASKS):
+        for i in range(0, 1):
             tasks.append(
                 asyncio.create_task(
                     _event_walking_fetcher(
@@ -1033,7 +1039,9 @@ class FederationBot(Plugin):
             tasks.append(
                 asyncio.create_task(
                     _backfill_fetcher(
-                        f"backfill_worker_{i}", roomwalk_fetch_queue, backfill_fetch_queue
+                        f"backfill_worker_{i}",
+                        roomwalk_fetch_queue,
+                        backfill_fetch_queue,
                     )
                 )
             )
@@ -1097,10 +1105,12 @@ class FederationBot(Plugin):
             # TODO: Fix this too
             # if new_items_to_render or finish_on_this_round:
 
-            self.log.info(f"mid-render, room_depth difference: {current_depth} / {room_depth}")
+            self.log.info(
+                f"mid-render, room_depth difference: {len(seen_depths_for_progress)} / {room_depth}"
             )
             progress_bar.update(len(seen_depths_for_progress))
             progress_line = progress_bar.render_progress_bar()
+
             roomwalk_lines = [
                 f"(Updating every {SECONDS_BETWEEN_EDITS} seconds)",
                 f"Total Events processed: {current_count_of_events_processed} ({current_count_of_events_processed - last_count_of_events_processed} / update)",
@@ -1109,6 +1119,7 @@ class FederationBot(Plugin):
                 f"  Time taken: {roomwalk_cumulative_iter_time:.3f} seconds (iter# {roomwalk_iterations})",
                 f"  (Items currently in backlog event queue: {roomwalk_fetch_queue.qsize()})",
                 f"  (Items currently in backlog backfill queue: {backfill_fetch_queue.qsize()})",
+                f"Total number of workers: {len(tasks)}",
             ]
 
             # Only print something if there is something to say
