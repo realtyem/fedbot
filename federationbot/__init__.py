@@ -231,7 +231,7 @@ class FederationBot(Plugin):
 
     @test_command.subcommand(
         name="context",
-        help="level 1",
+        help="test /context federation command",
     )
     @command.argument(name="room_id_or_alias", parser=is_room_id, required=True)
     @command.argument(name="event_id", parser=is_event_id, required=True)
