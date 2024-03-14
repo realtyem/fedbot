@@ -1,5 +1,6 @@
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
-from enum import Enum
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from enum import Enum, auto
+import math
 
 from mautrix.types import EventID
 
@@ -289,3 +290,262 @@ def extract_max_value_len_from_dict(data: Dict[str, Any]) -> int:
     for value_item in data.values():
         max_len = max(max_len, len(str(value_item)))
     return max_len
+
+
+class ProgressBar:
+    def __init__(
+        self,
+        max_size: int,
+        current_value: int = 0,
+        front: str = "{",
+        rear: str = "}",
+        fill: str = "|",
+        blank: str = " ",
+    ) -> None:
+        self.max_size = max_size
+        self.current_value = current_value
+        self.front = front
+        self.rear = rear
+        self.fill = fill
+        self.blank = blank
+
+    def update(self, current_value: int) -> None:
+        self.current_value = current_value
+
+    def render_progress_bar(self) -> str:
+        """
+        Generate a progress bar string 52 chars long, like:
+        {|||||||||||||||||||                               } 38%
+        based on the(mostly) simple math of current_value / max_size
+
+        Returns: string with no newlines
+
+        """
+        buffered_message = self.front
+        calculated_percent = (self.current_value / self.max_size) * 100
+        adjusted_percent = int(calculated_percent)
+        # Since we are using range() to calculate our positions, there are some
+        # oddities around the step argument and how it deals with odd numbers. The
+        # progress bar's accuracy is less important than representing forward
+        # progress so just making the odd number even is close enough.
+        is_odd_number = (adjusted_percent % 2) != 0
+        if is_odd_number:
+            adjusted_percent += 1
+
+        for _ in range(0, adjusted_percent, 2):
+            buffered_message += self.fill
+        for _ in range(0, 100 - adjusted_percent, 2):
+            buffered_message += self.blank
+
+        buffered_message += self.rear + " " + str(adjusted_percent) + "%"
+        return buffered_message
+
+
+class BitmapProgressBarStyle(Enum):
+    linear = auto()
+    scatter = auto()
+
+
+class BitmapProgressBar:
+    # Size of the displayed progress bar, in characters
+    line_size: int
+
+    # Maximum values count to get to 100%
+    max_size: int
+
+    # The bit map itself. As a value is updated it will be marked True.
+    _map: Dict[int, bool]
+
+    # Let's do buckets to divide the segments of the bar. There will be the same
+    # number of buckets as a count of line_size, so line_size of 50 means 50 buckets.
+    # Each bucket has two integers as a Tuple, one for the start item in the bitmap
+    # and one for the end(which is exclusive). Sometimes a bucket will overlap with
+    # two items for the bitmap(should only happen for bitmap counts less than line_size)
+    _buckets: List[Tuple[int, int]]
+
+    # Segment size should reflect what % each segment(of line_size) is responsible for.
+    # For example:
+    #  with a line_size of 50(so 50 segments total) and a max_size of 100 units:
+    #  100 / 50 = 2%
+    #  So each segment would be responsible for 2% of the displayable value. By
+    #  extension, max_sizes less than line_size will reflect smaller percents.
+    #  with a line_size of 50 and a max_size of 20:
+    #  20 / 50 = 0.4%
+    # TLDR, above 1.0 for line_size>max_size, below 1.0 for line_size<max_size.
+    # (buckets per bit vs bits per bucket)
+    _segment_size: float
+
+    # The graphics to use for displaying items on the bar, each is considered a segment
+    # on the line. In theory could have any number of elements(and the math is taken
+    # care of), 8 works pretty good.
+    # Work ups, tried(all had some kind of problem):
+    # constants = {1: "▏", 2: "▎", 3: "▍", 4: "▌", 5: "▋", 6: "▊", 7: "▉", 8: "█"}
+    # constants = {1: "▁", 2: "▂", 3: "▃", 4: "▄", 5: "▅", 6: "▆", 7: "▇", 8: "█"}
+    # constants = {1: "▖", 2: "▄", 3: "▙", 4: "█"}
+    # constants = {1: "╷", 2: "╻", 3: "╽", 4: "┃", 5: "┫", 6: "╋"}
+
+    # (3, 4), (7, 8) appear same
+    # constants = {1: "╷", 2: "╻", 3: "┒", 4: "┓", 5: "┪", 6: "┫", 7: "╉", 8: "╋"}
+
+    # Unfortunately, because of the fonts used in various clients, they look like trash
+    # due to misformed/inconsistent-formed glyphs. The braille sequence seems best. Set
+    # these in the __init__() function, allowing flexibility of scatter vs linear.
+    # constants: Dict[int, str] = {
+    #     1: "⡀",
+    #     2: "⣀",
+    #     3: "⣄",
+    #     4: "⣤",
+    #     5: "⣦",
+    #     6: "⣶",
+    #     7: "⣷",
+    #     8: "⣿",
+    # }  # "⠈"
+    # constants = {
+    #     1: "⡀", 2: "⡄", 3: "⡆", 4: "⡇", 5: "⣇", 6: "⣧", 7: "⣷", 8: "⣿"
+    # }  # , 2: "⠀" "⠈"
+
+    # The blank spacing. Take care must be taken to verify that the pixel width is close
+    # to the glyph size(again, inconsistency in fonts)
+    blank = "⠈"  # other fractional spaces:"    "
+
+    # Percent of a segment that each increase represents. For example:
+    # a line_size of 50, and max_size of 100 and 8 constants(just above)
+    # 1 / 8 = 0.125 or 12.5%
+    # so if the bar is started at empty and we update positions 1-3 to True,
+    # a segment size is 2%(so segment 1 would be responsible for values 1-2 and segment
+    # 2 would be responsible for 3-4),
+    # segment 1 would be constant[8] and segment 2 would be constant[4]
+    increment_size: float
+    style: BitmapProgressBarStyle
+
+    def __init__(
+        self,
+        line_size: int,
+        max_size: int,
+        front: str = "{",
+        rear: str = "}",
+        style: BitmapProgressBarStyle = BitmapProgressBarStyle.scatter,
+    ) -> None:
+        self.line_size = line_size
+        self.max_size = max_size
+        self.front = front
+        self.rear = rear
+        self.style = style
+        # Create the empty bitmap and fill it with False
+        self._map = dict()
+        for i in range(1, self.max_size + 1):
+            self._map[i] = False
+
+        if self.style == BitmapProgressBarStyle.scatter:
+            self.constants = {
+                1: "⡀",
+                2: "⣀",
+                3: "⣄",
+                4: "⣤",
+                5: "⣦",
+                6: "⣶",
+                7: "⣷",
+                8: "⣿",
+            }
+        elif self.style == BitmapProgressBarStyle.linear:
+            self.constants = {
+                1: "⡀",
+                2: "⡄",
+                3: "⡆",
+                4: "⡇",
+                5: "⣇",
+                6: "⣧",
+                7: "⣷",
+                8: "⣿",
+            }
+        # Percent(as float)
+        self.increment_size = 1 / len(self.constants)
+
+        self._buckets = []
+        if self.max_size <= self.line_size:
+            # When the line_size is larger than the max_size, this will be a count of
+            # the segments that make up a given bit in the map. That is a convenient
+            # measure of how many buckets to assign to that bit, so:
+            # Buckets / bit
+            self._segment_size = self.line_size / self.max_size  # 50 / 21 = 2.5
+            bucket_counter = 0
+            bit_counter = 1
+
+            for s in range(1, self.line_size + 1):
+                bucket_counter += 1
+                self._buckets.append((bit_counter, bit_counter + 1))
+                if s >= round_half_up(bit_counter * self._segment_size):
+                    bit_counter += 1
+                    bucket_counter = 0
+
+        elif self.max_size > self.line_size:
+            # Bits / bucket(see above)
+            self._segment_size = self.max_size / self.line_size  # 105 / 50 = 2.1
+            start_bit_counter = 1
+
+            for s in range(1, self.line_size + 1):
+                end_bit_counter = int(round_half_up(s * self._segment_size))
+                self._buckets.append((start_bit_counter, end_bit_counter))
+                start_bit_counter = end_bit_counter
+
+    def update(self, values: Iterable[int]) -> None:
+        """
+        Scatter bar: Add given iterable integers to the bit map
+        Linear bar: Advance all bits up to given integer to the bit map, leaving no
+            gaps(recommend only submitting a single integer inside the iterable,
+            otherwise only the largest will apply)
+        Args:
+            values: An iterable of integers(largest of submitted will be used for linear
+                bar)
+
+        Returns: None
+
+        """
+        if self.style == BitmapProgressBarStyle.scatter:
+            for value in values:
+                self._map[value] = True
+        else:
+            max_value = max(values)
+            for i in range(1, max_value + 1):
+                self._map[i] = True
+
+    def render_bitmap_bar(self) -> str:
+        result_bar = self.front
+        for start, end in self._buckets:
+            count = end - start
+            tally = 0
+            next_segment = self.blank
+            for i in range(start, end):
+                tally += 1 if self._map[i] else 0
+
+            segment_percent = tally / count
+
+            for constant, value in self.constants.items():
+                constant_ratio = constant * self.increment_size
+                if segment_percent >= constant_ratio:
+                    next_segment = value
+
+            result_bar += next_segment
+
+        result_bar += self.rear
+        return result_bar
+
+
+def round_up(n, decimals=0):
+    multiplier = 10 ** decimals
+    return math.ceil(n * multiplier) / multiplier
+
+
+def round_down(n, decimals=0):
+    multiplier = 10 ** decimals
+    return math.floor(n * multiplier) / multiplier
+
+
+def round_half_up(n, decimals=0):
+    multiplier = 10 ** decimals
+    return math.floor(n * multiplier + 0.5) / multiplier
+
+
+def truncate(n, decimals=0):
+    multiplier = 10 ** decimals
+    return int(n * multiplier) / multiplier
