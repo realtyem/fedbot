@@ -779,8 +779,8 @@ class FederationBot(Plugin):
         static_lines.extend([f"Room Depth reported as: {room_depth}"])
 
         discovery_lines: List[str] = []
-        progress_bar = ProgressBar(room_depth)
-        progress_line = progress_bar.render_progress_bar()
+        progress_bar = BitmapProgressBar(30, room_depth)
+        progress_line = progress_bar.render_bitmap_bar()
         roomwalk_lines: List[str] = []
 
         def _combine_lines_for_backwalk() -> str:
@@ -1108,8 +1108,8 @@ class FederationBot(Plugin):
             self.log.info(
                 f"mid-render, room_depth difference: {len(seen_depths_for_progress)} / {room_depth}"
             )
-            progress_bar.update(len(seen_depths_for_progress))
-            progress_line = progress_bar.render_progress_bar()
+            progress_bar.update(seen_depths_for_progress)
+            progress_line = progress_bar.render_bitmap_bar()
 
             roomwalk_lines = [
                 f"(Updating every {SECONDS_BETWEEN_EDITS} seconds)",
@@ -1145,9 +1145,6 @@ class FederationBot(Plugin):
         self.task_control.pop(pinned_message)
 
         header_lines = ["Room Back-walking Procedure: Done"]
-        # progress_line = (
-        #     f"{_render_progress_bar(room_depth, room_depth)}"
-        # )
 
         roomwalk_lines.extend(["Done"])
         await command_event.respond(
