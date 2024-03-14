@@ -5,6 +5,7 @@ from enum import Enum
 from itertools import chain
 import asyncio
 import json
+import random
 import time
 
 from maubot import MessageEvent, Plugin
@@ -56,10 +57,14 @@ from federationbot.server_result import (
     ServerResultError,
 )
 from federationbot.utils import (
+    BitmapProgressBar,
+    BitmapProgressBarStyle,
     DisplayLineColumnConfig,
     Justify,
+    ProgressBar,
     get_domain_from_id,
     pad,
+    round_half_up,
 )
 
 # An event is considered having a maximum size of 64K. Unfortunately, encryption uses
@@ -773,40 +778,9 @@ class FederationBot(Plugin):
         static_lines.extend([f"Room Depth reported as: {room_depth}"])
 
         discovery_lines: List[str] = []
-        progress_line = ""
+        progress_bar = ProgressBar(room_depth)
+        progress_line = progress_bar.render_progress_bar()
         roomwalk_lines: List[str] = []
-
-        def _render_progress_bar(total_value: int, current_value: int) -> str:
-            """
-            Generate a progress bar string 52 chars long, like:
-            {|||||||||||||||||||                               } 38%
-            based on the(mostly) simple math of current_value / total_value
-
-            Args:
-                total_value:
-                current_value:
-
-            Returns: string with no newlines
-
-            """
-            buffered_message = "{"
-            calculated_percent = (current_value / total_value) * 100
-            adjusted_percent = int(calculated_percent)
-            # Since we are using range() to calculate our positions, there are some
-            # oddities around the step argument and how it deals with odd numbers. The
-            # progress bar's accuracy is less important than representing forward
-            # progress so just making the odd number even is close enough.
-            is_odd_number = (adjusted_percent % 2) != 0
-            if is_odd_number:
-                adjusted_percent += 1
-
-            for _ in range(0, adjusted_percent, 2):
-                buffered_message += "|"
-            for _ in range(0, 100 - adjusted_percent, 2):
-                buffered_message += " "
-
-            buffered_message += "} " + str(adjusted_percent) + "%"
-            return buffered_message
 
         def _combine_lines_for_backwalk() -> str:
             combined_lines = ""
@@ -1124,9 +1098,9 @@ class FederationBot(Plugin):
             # if new_items_to_render or finish_on_this_round:
 
             self.log.info(f"mid-render, room_depth difference: {current_depth} / {room_depth}")
-            progress_line = (
-                f"{_render_progress_bar(room_depth, room_depth-current_depth)}"
             )
+            progress_bar.update(len(seen_depths_for_progress))
+            progress_line = progress_bar.render_progress_bar()
             roomwalk_lines = [
                 f"(Updating every {SECONDS_BETWEEN_EDITS} seconds)",
                 f"Total Events processed: {current_count_of_events_processed} ({current_count_of_events_processed - last_count_of_events_processed} / update)",
@@ -1273,6 +1247,92 @@ class FederationBot(Plugin):
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
             )
+
+    @test_command.subcommand(
+        name="demo_bar",
+        help="test bitmap progress bar",
+    )
+    @command.argument(name="max_size", parser=is_int, required=False)
+    @command.argument(name="style", required=False)
+    @command.argument(name="seconds_to_run_for", parser=is_int, required=False)
+    async def demo_progress_bar_subcommand(
+        self,
+        command_event: MessageEvent,
+        max_size: Optional[str],
+        style: Optional[str],
+        seconds_to_run_for: Optional[str],
+    ) -> None:
+        if not max_size:
+            max_size = "50"
+        if not seconds_to_run_for:
+            seconds_to_run_for = "60"
+        max_size_int = int(max_size)
+        seconds_float = float(seconds_to_run_for)
+        interval_float = 5.0
+        num_of_intervals = seconds_float / interval_float
+        if style == "linear":
+            style_type = BitmapProgressBarStyle.linear
+        else:
+            style_type = BitmapProgressBarStyle.scatter
+        how_many_to_pull = max(int(max_size_int / num_of_intervals), 1)
+        progress_bar = BitmapProgressBar(30, max_size_int, style=style_type)
+        range_list = []
+
+        constants_display_string = ""
+        for digit, value in progress_bar.constants.items():
+            constants_display_string += f"'{value}', "
+        spaces_display_string = f"' ', ' ', ' ', ' ', ' '"
+        await command_event.respond(
+            wrap_in_code_block_markdown(
+                f"fullb char: {constants_display_string}\n"
+                f"other char: '{progress_bar.blank}'\n"
+                f"space char: {spaces_display_string}\n"
+                f"segment_size: {progress_bar._segment_size}\n"
+            )  #
+        )
+
+        if style_type == BitmapProgressBarStyle.scatter:
+            for i in range(1, max_size_int + 1):
+                range_list.extend([i])
+        else:
+            for i in range(1, int(round_half_up(num_of_intervals)) + 1):
+                range_list.extend([i * how_many_to_pull])
+        pinned_message = await command_event.respond(
+            wrap_in_code_block_markdown(
+                progress_bar.render_bitmap_bar()
+                + f"\n size of range_list: {len(range_list)}\n"
+                f" how many to pull: {how_many_to_pull}\n"
+            )
+        )
+        finish = False
+        while True:
+            set_to_pull = set()
+            start_time = time.time()
+            if style_type == BitmapProgressBarStyle.scatter:
+                for j in range(0, min(int(how_many_to_pull), len(range_list))):
+                    entry_index = random.randint(0, len(range_list) - 1)
+                    entry = range_list.pop(entry_index)
+                    set_to_pull.add(entry)
+            else:
+                entry = range_list.pop(0)
+                set_to_pull.add(entry)
+
+            if len(range_list) == 0:
+                finish = True
+            progress_bar.update(set_to_pull)
+            rendered_bar = progress_bar.render_bitmap_bar()
+            finished_time = time.time()
+            await command_event.respond(
+                wrap_in_code_block_markdown(
+                    rendered_bar + f"\n size of range_list: {len(range_list)}\n"
+                    f" how many to pull: {how_many_to_pull}\n"
+                    f" time to render: {finished_time - start_time}\n"
+                ),
+                edits=pinned_message,
+            )
+            if finish:
+                break
+            await asyncio.sleep(interval_float)
 
     @test_command.subcommand(
         name="find_event", help="Search all hosts in a given room for a given Event"
