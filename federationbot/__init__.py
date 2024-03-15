@@ -859,15 +859,14 @@ class FederationBot(Plugin):
                     await asyncio.sleep(back_off_time)
 
                 nonlocal seen_depths_for_progress
+                iter_start_time = time.time()
+                pulled_event_map = await self.federation_handler.get_events_from_server(
+                    origin_server=origin_server,
+                    destination_server=destination_server,
+                    events_list=next_event_ids,
+                )
                 for next_event_id in next_event_ids:
-                    iter_start_time = time.time()
-                    pulled_event_map = (
-                        await self.federation_handler.get_event_from_server(
-                            origin_server=origin_server,
-                            destination_server=destination_server,
-                            event_id=next_event_id,
-                        )
-                    )
+
                     # self.log.info(f"{worker_name} on {next_event_id}")
                     pulled_event = pulled_event_map.get(next_event_id)
                     # pulled_event should never be None, but mypy doesn't know that
@@ -926,34 +925,29 @@ class FederationBot(Plugin):
                         )
                         # seen_depths_for_progress.add(auth_depths)
 
-                        _time_spent = time.time() - iter_start_time
-                        total_time_spent += _time_spent
                         for _event_id in chain(prev_bad_events, auth_bad_events):
                             _backfill_queue.put_nowait(_event_id)
                         # Prep for next iteration. Don't worry about adding auth events
                         # to this, as they will come along in due time
                         next_list_to_get.update(prev_good_events)
-                        # The queue item is:
-                        # (new_back_off_time, is_this_a_retry, next_event_ids)
-                        if next_list_to_get:
-                            _event_fetch_queue.put_nowait(
-                                (
-                                    _time_spent * BACKOFF_MULTIPLIER,
-                                    False,
-                                    prev_good_events,
-                                )
-                            )
 
                     # else is an EventError. Chances of hitting this are extremely low,
                     # in fact it may only happen on the initial pull to start a walk.
                     # All other opportunities to hit this will have been handled in the
                     # above filter function.
+                _time_spent = time.time() - iter_start_time
+                total_time_spent += _time_spent
 
-                # _event_fetch_queue.task_done()
-                # if not next_list_to_get:
-                #     self.log.error(
-                #         f"{worker_name}: Unexpectedly had no new events(from {next_event_ids})"
-                #     )
+                if next_list_to_get:
+                    # The queue item is:
+                    # (new_back_off_time, is_this_a_retry, next_event_ids)
+                    _event_fetch_queue.put_nowait(
+                        (
+                            _time_spent * BACKOFF_MULTIPLIER,
+                            False,
+                            next_list_to_get,
+                        )
+                    )
 
                 # Tuple of time spent(for calculating backoff) and if we are done
                 render_list.extend([(total_time_spent, False)])
