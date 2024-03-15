@@ -13,6 +13,7 @@ from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
 from yarl import URL
 
+from federationbot.cache import LRUCache
 from federationbot.delegation import (
     DelegationHandler,
     check_and_maybe_split_server_name,
@@ -51,7 +52,7 @@ class FederationHandler:
         self.json_decoder = json.JSONDecoder()
         self.delegation_handler = DelegationHandler(self.logger)
         # Map the key to (server_name, event_id) -> Event
-        self._events_cache: Dict[Tuple[str, str], EventBase] = {}
+        self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
 
     async def federation_request(
         self,
@@ -425,7 +426,7 @@ class FederationHandler:
         # The return, map of event_id -> EventBase
         event_id_to_event: Dict[str, EventBase] = {}
 
-        new_event_base = self._events_cache.get((destination_server, event_id), None)
+        new_event_base = self._events_cache.get((destination_server, event_id))
         if new_event_base:
             # Only successful events are cached
             return {event_id: new_event_base}
@@ -452,9 +453,7 @@ class FederationHandler:
         for data in pdu_list:
             # This path is only taken on success, errors are sorted above
             new_event_base = determine_what_kind_of_event(EventID(event_id), data)
-            self._events_cache.setdefault(
-                (destination_server, event_id), new_event_base
-            )
+            self._events_cache.set((destination_server, event_id), new_event_base)
 
         assert new_event_base is not None
         return {event_id: new_event_base}

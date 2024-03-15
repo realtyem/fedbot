@@ -202,6 +202,10 @@ class FederationBot(Plugin):
 
     async def pre_stop(self) -> None:
         self.client.remove_event_handler(EventType.REACTION, self.react_control_handler)
+        self.federation_handler._events_cache._cleanup_task.cancel()
+        await asyncio.gather(
+            self.federation_handler._events_cache._cleanup_task, return_exceptions=True
+        )
 
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to
@@ -217,6 +221,44 @@ class FederationBot(Plugin):
                 self.task_control[reaction_data.event_id] = ReactionCommandStatus.START
 
         return
+
+    @command.new(
+        name="status",
+        help="playing",
+        arg_fallthrough=True,
+    )
+    async def status_command(
+        self,
+        command_event: MessageEvent,
+    ) -> None:
+        pinned_message = await command_event.respond(
+            f"Received Status Command on: {self.client.mxid}"
+        )
+        await self.client.react(
+            command_event.room_id, pinned_message, ReactionCommandStatus.STOP.value
+        )
+        await self.client.react(
+            command_event.room_id, pinned_message, ReactionCommandStatus.PAUSE.value
+        )
+        await self.client.react(
+            command_event.room_id, pinned_message, ReactionCommandStatus.START.value
+        )
+        self.task_control[pinned_message] = ReactionCommandStatus.START
+        header_line = "Bot status(wip)\n"
+        finish_on_this_round = False
+        while True:
+            if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+                finish_on_this_round = True
+
+            buffered_line = f"Event Cache size: {len(self.federation_handler._events_cache._cache)}\n"
+            await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(buffered_line)),
+                edits=pinned_message,
+            )
+
+            if finish_on_this_round:
+                return
+            await asyncio.sleep(5.0)
 
     @command.new(
         name="test",
