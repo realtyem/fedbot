@@ -1813,3 +1813,299 @@ def determine_what_kind_of_event(
             return StickerRoomEvent(event_id, data_to_use)
         else:
             return Event(event_id, data_to_use)
+
+
+# [Redactions]
+# v1_to_v5
+# Upon receipt of a redaction event, the server must strip off any keys not in the
+# following list:
+#
+#     event_id
+#     type
+#     room_id
+#     sender
+#     state_key
+#     content
+#     hashes
+#     signatures
+#     depth
+#     prev_events
+#     prev_state
+#     auth_events
+#     origin
+#     origin_server_ts
+#     membership
+
+# The content object must also be stripped of all keys, unless it is one of the
+# following event types:
+#
+#     m.room.member allows key membership.
+#     m.room.create allows key creator.
+#     m.room.join_rules allows key join_rule.
+#     m.room.power_levels allows keys ban, events, events_default, kick, redact,
+#           state_default, users, users_default.
+#     m.room.aliases allows key aliases.
+#     m.room.history_visibility allows key history_visibility.
+
+
+v1_to_v5_list_of_keys_to_keep = [
+    "event_id",
+    "type",
+    "room_id",
+    "sender",
+    "state_key",
+    "content",
+    "hashes",
+    "signatures",
+    "depth",
+    "prev_events",
+    "prev_state",
+    "auth_events",
+    "origin",
+    "origin_server_ts",
+    "membership",
+]
+v1_to_v5_map_of_keys_from_content_to_keep = {
+    "m.room.member": ["membership"],
+    "m.room.create": ["creator"],
+    "m.room.join_rules": ["join_rule"],
+    "m.room.aliases": ["aliases"],
+    "m.room.history_visibility": ["history_visibility"],
+    "m.room.power_levels": [
+        "ban",
+        "events",
+        "events_default",
+        "kick",
+        "redact",
+        "state_default",
+        "users",
+        "users_default",
+    ],
+}
+
+# v6_to_v7
+# This is mostly the same as v1_to_v5, however we no longer apply:
+# - m.room.aliases allows key aliases.
+
+v6_to_v7_list_of_keys_to_keep = [
+    "event_id",
+    "type",
+    "room_id",
+    "sender",
+    "state_key",
+    "content",
+    "hashes",
+    "signatures",
+    "depth",
+    "prev_events",
+    "prev_state",
+    "auth_events",
+    "origin",
+    "origin_server_ts",
+    "membership",
+]
+v6_to_v7_map_of_keys_from_content_to_keep = {
+    "m.room.member": ["membership"],
+    "m.room.create": ["creator"],
+    "m.room.join_rules": ["join_rule"],
+    "m.room.history_visibility": ["history_visibility"],
+    "m.room.power_levels": [
+        "ban",
+        "events",
+        "events_default",
+        "kick",
+        "redact",
+        "state_default",
+        "users",
+        "users_default",
+    ],
+}
+
+# v8
+# This is mostly the same as v6_to_v7, however we now apply:
+# + m.room.join_rules now allows key 'allow'.
+
+v8_list_of_keys_to_keep = [
+    "event_id",
+    "type",
+    "room_id",
+    "sender",
+    "state_key",
+    "content",
+    "hashes",
+    "signatures",
+    "depth",
+    "prev_events",
+    "prev_state",
+    "auth_events",
+    "origin",
+    "origin_server_ts",
+    "membership",
+]
+v8_map_of_keys_from_content_to_keep = {
+    "m.room.member": ["membership"],
+    "m.room.create": ["creator"],
+    "m.room.join_rules": ["allow", "join_rule"],
+    "m.room.history_visibility": ["history_visibility"],
+    "m.room.power_levels": [
+        "ban",
+        "events",
+        "events_default",
+        "kick",
+        "redact",
+        "state_default",
+        "users",
+        "users_default",
+    ],
+}
+
+# v9_to_v10
+# Building on v8, however we now apply that:
+# + 'm.room.member' events now keep 'join_authorised_via_users_server' in addition to
+#       other keys in content when being redacted.
+
+v9_to_v10_list_of_keys_to_keep = [
+    "event_id",
+    "type",
+    "room_id",
+    "sender",
+    "state_key",
+    "content",
+    "hashes",
+    "signatures",
+    "depth",
+    "prev_events",
+    "prev_state",
+    "auth_events",
+    "origin",
+    "origin_server_ts",
+    "membership",
+]
+v9_to_v10_map_of_keys_from_content_to_keep = {
+    "m.room.member": ["join_authorised_via_users_server", "membership"],
+    "m.room.create": ["creator"],
+    "m.room.join_rules": ["allow", "join_rule"],
+    "m.room.history_visibility": ["history_visibility"],
+    "m.room.power_levels": [
+        "ban",
+        "events",
+        "events_default",
+        "kick",
+        "redact",
+        "state_default",
+        "users",
+        "users_default",
+    ],
+}
+
+
+# This is mostly the same as v9_to_v10, however we now apply:
+# - The top-level 'origin', 'membership', and 'prev_state' properties are no longer
+#   protected from redaction.
+# + The 'm.room.create' event now keeps the entire 'content' property.
+# + The 'm.room.redaction' event keeps the 'redacts' property under 'content'.
+# + The 'm.room.power_levels' event keeps the 'invite' property under 'content'.
+
+# With 'm.room.create' now keeping all keys under 'content', we don't have a clean way
+# to model that outside of hard-coding all potential options. If that changes in the
+# future, it may be difficult to fix. Instead, a 'magic constant' allows the flexibility
+ALL_KEYS = "_ALL_KEYS"
+v11_list_of_keys_to_keep = [
+    "event_id",
+    "type",
+    "room_id",
+    "sender",
+    "state_key",
+    "content",
+    "hashes",
+    "signatures",
+    "depth",
+    "prev_events",
+    "auth_events",
+    "origin_server_ts",
+]
+v11_map_of_keys_from_content_to_keep = {
+    "m.room.member": ["join_authorised_via_users_server", "membership"],
+    "m.room.create": [ALL_KEYS],
+    "m.room.join_rules": ["allow", "join_rule"],
+    "m.room.history_visibility": ["history_visibility"],
+    "m.room.redaction": ["redacts"],
+    "m.room.power_levels": [
+        "ban",
+        "events",
+        "events_default",
+        "invite",
+        "kick",
+        "redact",
+        "state_default",
+        "users",
+        "users_default",
+    ],
+}
+
+
+def _redact_with(
+    data_to_use: Dict[str, Any],
+    list_of_keys_to_keep: List[str],
+    map_of_keys_from_content_to_keep: Dict[str, List[str]],
+) -> Dict[str, Any]:
+    redacted_data_result: Dict[str, Any] = dict()
+    # grab the type early, for use with the 'map' argument
+    event_type = data_to_use.get("type")
+
+    # top-level
+    for key, value in data_to_use.items():
+        if key in list_of_keys_to_keep:
+            if key != "content":
+                redacted_data_result[key] = value
+            else:
+                assert isinstance(event_type, str)
+                content_list_to_keep = map_of_keys_from_content_to_keep.get(
+                    event_type, []
+                )
+                # Because of the else clause above, we know a 'content' key did exist.
+                # Create an empty one, then check if something is supposed to be copied
+                # over to it.
+                redacted_data_result.setdefault("content", {})
+                for content_key, content_value in value.items():
+                    # Only in room version 11(and possibly newer versions) do we
+                    # have the magic constant 'ALL_KEYS' in the 'list' and only for
+                    # an event type of 'm.room.create'. FTR, I'm not a fan of magic
+                    # constants.
+                    if (
+                        content_key in content_list_to_keep
+                        or ALL_KEYS in content_list_to_keep
+                    ):
+                        redacted_data_result["content"][content_key] = content_value
+
+    return redacted_data_result
+
+
+def redact_event(room_version: int, data_to_use: Dict[str, Any]) -> Dict[str, Any]:
+    if room_version <= 5:
+        return _redact_with(
+            data_to_use,
+            v1_to_v5_list_of_keys_to_keep,
+            v1_to_v5_map_of_keys_from_content_to_keep,
+        )
+    elif 5 < room_version <= 7:
+        return _redact_with(
+            data_to_use,
+            v6_to_v7_list_of_keys_to_keep,
+            v6_to_v7_map_of_keys_from_content_to_keep,
+        )
+    elif room_version == 8:
+        return _redact_with(
+            data_to_use, v8_list_of_keys_to_keep, v8_map_of_keys_from_content_to_keep
+        )
+    elif 8 < room_version <= 10:
+        return _redact_with(
+            data_to_use,
+            v9_to_v10_list_of_keys_to_keep,
+            v9_to_v10_map_of_keys_from_content_to_keep,
+        )
+    else:
+        # Greater than room version 10
+        return _redact_with(
+            data_to_use, v11_list_of_keys_to_keep, v11_map_of_keys_from_content_to_keep
+        )
