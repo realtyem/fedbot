@@ -19,6 +19,7 @@ from federationbot.delegation import (
     check_and_maybe_split_server_name,
 )
 from federationbot.events import (
+    CreateRoomStateEvent,
     Event,
     EventBase,
     EventError,
@@ -662,6 +663,60 @@ class FederationHandler:
         )
 
         return response
+
+    async def discover_room_version(
+        self, origin_server: str, destination_server: str, room_id: str
+    ) -> str:
+        creation_event_list = await self.filter_state_for_type(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            state_type_str="m.room.create",
+        )
+        # In this case, there will ever be one creation event, so slice the list
+        creation_event = creation_event_list[0]
+        # Really need to figure out a better way of doing this. Some kind of Type dance
+        assert isinstance(creation_event, CreateRoomStateEvent)
+        room_version = creation_event.room_version
+        return str(room_version)
+
+    async def filter_state_for_type(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        state_type_str: str,
+    ) -> List[EventBase]:
+        now = int(time.time() * 1000)
+        event_id = None
+        ts_response = await self.get_timestamp_to_event_from_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            utc_time_at_ms=now,
+        )
+        if not isinstance(ts_response, FederationErrorResponse):
+            event_id = ts_response.response_dict.get("event_id")
+
+        assert event_id is not None
+        state_ids, _ = await self.get_state_ids_from_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            event_id=event_id,
+            # timeout=,
+        )
+        state_events = await self.get_events_from_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            events_list=state_ids,
+        )
+        event_base_list = []
+        for event in state_events.values():
+            if event.event_type == state_type_str:
+                event_base_list.append(event)
+
+        return event_base_list
 
 
 # https://spec.matrix.org/v1.9/server-server-api/#request-authentication

@@ -1577,6 +1577,43 @@ class FederationBot(Plugin):
                 ),
             )
 
+    @test_command.subcommand(
+        name="room_version", help="experiment to get room version from room id"
+    )
+    @command.argument(
+        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
+    )
+    async def room_version_command(
+        self, command_event: MessageEvent, room_id_or_alias: Optional[str]
+    ) -> None:
+        await command_event.mark_read()
+
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        origin_server = get_domain_from_id(self.client.mxid)
+        if origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first."
+            )
+            return
+
+        room_id = await self._resolve_room_id_or_alias(
+            room_id_or_alias, command_event, origin_server
+        )
+        if not room_id:
+            # Don't need to actually display an error, that's handled in the above
+            # function
+            return
+
+        room_version = await self.federation_handler.discover_room_version(
+            origin_server=origin_server,
+            destination_server=origin_server,
+            room_id=room_id,
+        )
+        await command_event.reply(f"{room_id} version is {room_version}")
+
     # I think the command map should look a little like this:
     # (defaults will be marked with * )
     # !fed
