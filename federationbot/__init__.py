@@ -654,14 +654,14 @@ class FederationBot(Plugin):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        if get_domain_from_id(command_event.sender) != get_domain_from_id(
-            self.client.mxid
-        ):
-            await command_event.reply(
-                "I'm sorry, running this command from a user not on the same "
-                "server as the bot will not help"
-            )
-            return
+        # if get_domain_from_id(command_event.sender) != get_domain_from_id(
+        #     self.client.mxid
+        # ):
+        #     await command_event.reply(
+        #         "I'm sorry, running this command from a user not on the same "
+        #         "server as the bot will not help"
+        #     )
+        #     return
 
         # The only way to request from a different server than what the bot is on is to
         # have the other server's signing keys. So just use the bot's server.
@@ -1112,6 +1112,7 @@ class FederationBot(Plugin):
         #
 
         # Don't use the finish bool below to avoid the last sleep()
+        retry_for_finish = 0
         while True:
             finish_on_this_round = False
             if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
@@ -1124,8 +1125,14 @@ class FederationBot(Plugin):
 
             if roomwalk_fetch_queue.qsize() == 0 and backfill_fetch_queue.qsize() == 0:
                 if all([not x for x in bot_working.values()]):
-                    finish_on_this_round = True
-                    self.log.warning(f"Unexpectedly found no work being processed")
+                    retry_for_finish += 1
+                    self.log.warning(
+                        f"Unexpectedly found no work being processed. Retry count: {retry_for_finish}"
+                    )
+                    if retry_for_finish > 5:
+                        finish_on_this_round = True
+                else:
+                    retry_for_finish = 0
 
             # pinch off the list of things to work on
             new_items_to_render = render_list.copy()
@@ -1171,6 +1178,10 @@ class FederationBot(Plugin):
                 f"  (Items currently in backlog backfill queue: {backfill_fetch_queue.qsize()})",
                 f"Total number of workers: {len(tasks)}",
             ]
+            if retry_for_finish:
+                roomwalk_lines.extend(
+                    [f"Might be out of work, retry count:{retry_for_finish}"]
+                )
 
             # Only print something if there is something to say
             await command_event.respond(
@@ -1202,6 +1213,16 @@ class FederationBot(Plugin):
                 wrap_in_code_block_markdown(_combine_lines_for_backwalk()),
             ),
             edits=pinned_message,
+        )
+        event_ids_that_errored_message = ""
+        for event_id in event_id_error_list:
+            event_ids_that_errored_message += event_id + "\n"
+        if not event_ids_that_errored_message:
+            event_ids_that_errored_message = "No event ids were found to have errored\n"
+        await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown(event_ids_that_errored_message),
+            )
         )
 
     @test_command.subcommand(
