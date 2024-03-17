@@ -462,7 +462,7 @@ class FederationBot(Plugin):
                     # prep for next iteration
                     if getattr(worker_response, "end"):
                         # The queue item is (new_back_off_time, pagination_token
-                        queue.put_nowait((_time_spent * 0.5, worker_response.end))
+                        queue.put_nowait((_time_spent * 0.5, worker_response.end))  # type: ignore[attr-defined]
 
                     # Don't want this behind a 'finally', as it should only run if not retrying the request
                     queue.task_done()
@@ -496,7 +496,8 @@ class FederationBot(Plugin):
                 else:
                     finish = True
 
-                for event in response.events:
+                for event in response.events:  # type: ignore[attr-defined]
+                    assert isinstance(event, EventBase)
                     new_event_ids.add(event.event_id)
 
             discovery_collection_of_event_ids.update(new_event_ids)
@@ -543,7 +544,7 @@ class FederationBot(Plugin):
             _inner_walking_fetcher(PaginationDirection.BACKWARD, backwalk_fetch_queue)
         )
 
-        backwalk_collection_of_event_ids = set()
+        backwalk_collection_of_event_ids: Set[EventID] = set()
         backwalk_count_of_new_event_ids = 0
         backwalk_cumulative_iter_time = 0.0
         finish = False
@@ -571,7 +572,7 @@ class FederationBot(Plugin):
                 else:
                     finish = True
 
-                for event in response.events:
+                for event in response.events:  # type: ignore[attr-defined]
                     new_event_ids.add(event.event_id)
 
             # collect stats
