@@ -4,10 +4,12 @@ from datetime import datetime
 from enum import Enum
 from itertools import chain
 import asyncio
+import hashlib
 import json
 import random
 import time
 
+from canonicaljson import encode_canonical_json
 from maubot import MessageEvent, Plugin
 from maubot.handlers import command
 from mautrix.api import Method
@@ -28,6 +30,7 @@ from mautrix.types import (
 )
 from mautrix.util import markdown
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
+from unpaddedbase64 import encode_base64
 
 from federationbot.events import (
     Event,
@@ -35,7 +38,9 @@ from federationbot.events import (
     EventError,
     GenericStateEvent,
     RoomMemberStateEvent,
+    construct_event_id_from_event_v3,
     determine_what_kind_of_event,
+    redact_event,
 )
 from federationbot.federation import (
     FederationHandler,
@@ -1613,6 +1618,73 @@ class FederationBot(Plugin):
             room_id=room_id,
         )
         await command_event.reply(f"{room_id} version is {room_version}")
+
+    @test_command.subcommand(
+        name="discover_event_id", help="experiment to get event id from PDU event"
+    )
+    @command.argument(name="event_id", parser=is_event_id, required=True)
+    async def discover_event_id_command(
+        self, command_event: MessageEvent, event_id: Optional[str]
+    ) -> None:
+        await command_event.mark_read()
+
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        origin_server = get_domain_from_id(self.client.mxid)
+        if origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first."
+            )
+            return
+
+        if not event_id:
+            await command_event.respond(
+                "I need you to supply an actual existing event_id to use as a reference for this experiment."
+            )
+            return
+        event_map = await self.federation_handler.get_event_from_server(
+            origin_server=origin_server,
+            destination_server=origin_server,
+            event_id=event_id,
+        )
+        event = event_map[event_id]
+        if isinstance(event, EventError):
+            await command_event.respond(
+                f"I don't think {event_id} is a legitimate event, or {origin_server} is"
+                f" not in that room, so I can not access it.\n\n{event.errcode}"
+            )
+            return
+        else:
+            assert event is not None and isinstance(event, EventBase)
+
+        room_id = event.room_id
+
+        room_version = int(
+            await self.federation_handler.discover_room_version(
+                origin_server=origin_server,
+                destination_server=origin_server,
+                room_id=room_id,
+            )
+        )
+
+        await command_event.respond(
+            f"Original:\n{wrap_in_code_block_markdown(event.to_json())}"
+        )
+        redacted_data = redact_event(room_version, event.raw_data)
+        redacted_data.pop("signatures", None)
+        redacted_data.pop("unsigned", None)
+        await command_event.respond(
+            f"Redacted:\n{wrap_in_code_block_markdown(json.dumps(redacted_data, indent=4))}"
+        )
+        encoded_redacted_event_bytes = encode_canonical_json(redacted_data)
+        reference_content = hashlib.sha256(encoded_redacted_event_bytes)
+        reference_hash = encode_base64(reference_content.digest(), True)
+
+        await command_event.respond(
+            f"Supplied: {event_id}\n\nResolved: {'$' + reference_hash}"
+        )
 
     # I think the command map should look a little like this:
     # (defaults will be marked with * )
