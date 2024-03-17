@@ -204,10 +204,8 @@ class FederationBot(Plugin):
 
     async def pre_stop(self) -> None:
         self.client.remove_event_handler(EventType.REACTION, self.react_control_handler)
-        self.federation_handler._events_cache._cleanup_task.cancel()
-        await asyncio.gather(
-            self.federation_handler._events_cache._cleanup_task, return_exceptions=True
-        )
+        # To stop any caching cleanup tasks
+        await self.federation_handler.stop()
 
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to

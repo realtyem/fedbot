@@ -53,6 +53,10 @@ class FederationHandler:
         # Map the key to (server_name, event_id) -> Event
         self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
 
+    async def stop(self) -> None:
+        # For stopping the cleanup task on these caches
+        await self._events_cache.stop()
+
     async def federation_request(
         self,
         destination_server: str,
