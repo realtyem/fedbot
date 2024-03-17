@@ -1,10 +1,10 @@
-from typing import Any, Dict, List, NewType, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, NewType, Optional, Sequence, Tuple
 from datetime import datetime
 import hashlib
 import json
 
-from mautrix.types import EncryptedFile, EventID, Signature
 from canonicaljson import encode_canonical_json
+from mautrix.types import EventID, Signature
 from unpaddedbase64 import encode_base64
 
 from federationbot.utils import (

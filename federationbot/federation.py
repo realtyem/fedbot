@@ -1,6 +1,5 @@
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from asyncio import Queue
-from enum import Enum
 import asyncio
 import json
 import ssl
@@ -20,7 +19,6 @@ from federationbot.delegation import (
 )
 from federationbot.events import (
     CreateRoomStateEvent,
-    Event,
     EventBase,
     EventError,
     RoomMemberStateEvent,
@@ -774,15 +772,6 @@ def authorization_headers(
         )
 
     return authorization_header, signed_json.get("content", None)
-
-
-def canonical_json(value: Union[str, Dict[str, Any]]) -> bytes:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("UTF-8")
 
 
 def filter_events_based_on_type(

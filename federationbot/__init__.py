@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union, cast
+from typing import Dict, List, Optional, Set, Tuple, Type, Union, cast
 from asyncio import Queue
 from datetime import datetime
 from enum import Enum
@@ -12,19 +12,16 @@ import time
 from canonicaljson import encode_canonical_json
 from maubot import MessageEvent, Plugin
 from maubot.handlers import command
-from mautrix.api import Method
 from mautrix.errors.request import MatrixRequestError, MForbidden, MTooLarge
 from mautrix.types import (
     EventID,
     EventType,
-    ExtensibleEnum,
     Format,
     MessageType,
     PaginatedMessages,
     PaginationDirection,
     ReactionEvent,
     RoomID,
-    StateEvent,
     SyncToken,
     TextMessageEventContent,
 )
