@@ -3557,21 +3557,22 @@ class FederationBot(Plugin):
         # current state ids and the auth chain ids. The state ids should have all the
         # data from the room up to that point already layered to be current. Pull those
         # events, then sort them based on above.
-        state_ids, _ = await self.federation_handler.get_state_ids_from_server(
+        # Update for 0.0.5: Taking Tom's suggestion, going to use the alternative,
+        # get_state_from_server() instead. It will at the very least save some
+        # processing steps.
+        state_events, _ = await self.federation_handler.get_state_from_server(
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id_in_timeline,
         )
-        state_events_dict = await self.federation_handler.get_events_from_server(
-            origin_server, destination_server, state_ids
-        )
-        state_events = []
-        for event_id, state_event in state_events_dict.items():
-            state_events.append(state_event)
+        converted_state_events = []
+        for state_event in state_events:
+            converted_state_events.append(determine_what_kind_of_event(None, data_to_use=state_event))
+
         filtered_room_member_events = cast(
             List[RoomMemberStateEvent],
-            filter_events_based_on_type(state_events, "m.room.member"),
+            filter_events_based_on_type(converted_state_events, "m.room.member"),
         )
         joined_member_events = cast(
             List[RoomMemberStateEvent],
