@@ -641,6 +641,27 @@ class FederationHandler:
 
         return pdu_list, auth_chain_list
 
+    async def get_state_from_server(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        event_id: str,
+        timeout: float = 60.0,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        response = await self.federation_request(
+            destination_server_name=destination_server,
+            path=f"/_matrix/federation/v1/state/{room_id}",
+            query_args=[("event_id", event_id)],
+            origin_server=origin_server,
+            timeout_seconds=timeout,
+        )
+
+        pdus_list = response.response_dict.get("pdus", [])
+        auth_chain_list = response.response_dict.get("auth_chain", [])
+
+        return pdus_list, auth_chain_list
+
     async def get_event_auth_for_event_from_server(
         self,
         origin_server: str,
