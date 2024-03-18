@@ -509,8 +509,6 @@ class FederationHandler:
             contained in a List
 
         """
-        # The return, map of event_id -> EventBase
-        event_id_to_event: Dict[str, EventBase] = {}
 
         new_event_base = self._events_cache.get((destination_server, event_id))
         if new_event_base:
@@ -608,7 +606,7 @@ class FederationHandler:
             await event_queue.put(event_id)
 
         tasks = []
-        for i in range(min(len(events_list), 10)):
+        for i in range(min(len(events_list), 3)):
             task = asyncio.create_task(_get_event_worker(event_queue))
             tasks.append(task)
 
