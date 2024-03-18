@@ -582,6 +582,7 @@ class FederationBot(Plugin):
                     finish = True
 
                 for event in response.events:  # type: ignore[attr-defined]
+                    assert event is not None
                     new_event_ids.add(event.event_id)
 
             # collect stats
@@ -792,6 +793,7 @@ class FederationBot(Plugin):
                     # Got one, make a note
                     next_batch.add(_event_id)
                     _event_id_ok_list.add(_event_id)
+                    assert pulled_event is not None
                     depths_seen.add(pulled_event.depth)
                     # self.log.warning(
                     #     f"{worker_name}: Depth on event_id: {_event_id}\n"
@@ -1941,9 +1943,10 @@ class FederationBot(Plugin):
         for server_name, server_results in server_to_server_data.items():
             server_name_col.maybe_update_column_width(len(server_name))
             if not isinstance(server_results, FederationErrorResponse):
-                tls_server = server_results.headers.get("server", None)
-                if tls_server:
-                    tls_served_by_col.maybe_update_column_width(len(tls_server))
+                if server_results.headers is not None:
+                    tls_server = server_results.headers.get("server", None)
+                    if tls_server:
+                        tls_served_by_col.maybe_update_column_width(len(tls_server))
 
         # Just use a fixed width for the results. Should never be larger than 5 for most
         well_known_status_col.maybe_update_column_width(5)
@@ -2006,6 +2009,7 @@ class FederationBot(Plugin):
                 )
                 if not isinstance(server_response, FederationErrorResponse):
                     error_reason = None
+                    assert server_response.headers is not None
                     reverse_proxy = server_response.headers.get("server", None)
                 else:
                     error_reason = server_response.reason
@@ -3568,7 +3572,9 @@ class FederationBot(Plugin):
         )
         converted_state_events = []
         for state_event in state_events:
-            converted_state_events.append(determine_what_kind_of_event(None, data_to_use=state_event))
+            converted_state_events.append(
+                determine_what_kind_of_event(None, data_to_use=state_event)
+            )
 
         filtered_room_member_events = cast(
             List[RoomMemberStateEvent],
