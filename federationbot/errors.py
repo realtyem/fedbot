@@ -4,3 +4,12 @@ class MalformedServerNameError(Exception):
     """
 
     pass
+
+
+class ServerUnavailable(Exception):
+    """
+    When the server was offline last time we checked, and we aren't trying them again
+    for a while.
+    """
+
+    pass

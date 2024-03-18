@@ -27,6 +27,7 @@ from mautrix.types import (
 )
 from mautrix.util import markdown
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
+from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
 from federationbot.events import (
@@ -249,8 +250,18 @@ class FederationBot(Plugin):
         while True:
             if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
                 finish_on_this_round = True
-
-            buffered_line = f"Event Cache size: {len(self.federation_handler._events_cache._cache)}\n"
+            # TODO: Lose this after Tom saw
+            good_server_results, bad_server_results = partition(
+                lambda x: x.cache_value.unhealthy is not None,
+                self.federation_handler._server_discovery_cache._cache.values(),
+            )
+            buffered_line = (
+                f"Event Cache size: {len(self.federation_handler._events_cache)}\n"
+                f"New server_result cache: {len(self.federation_handler._server_discovery_cache)}\n"
+                # TODO: Lose this after Tom seen it(engrish is grate)
+                f" Good server results: {len([1 for _ in good_server_results])}\n"
+                f" Bad server results: {len([1 for _ in bad_server_results])}"
+            )
             await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(buffered_line)),
                 edits=pinned_message,
@@ -1838,15 +1849,18 @@ class FederationBot(Plugin):
                 try:
                     # The 'get_server_version' function was written with the capability of
                     # collecting diagnostic data.
-                    server_to_server_data[worker_server_name] = await asyncio.wait_for(
-                        self.federation_handler.get_server_version(
-                            worker_server_name,
-                            force_recheck=True,
-                            diagnostics=True,
-                        ),
-                        timeout=10.0,
+                    server_to_server_data[
+                        worker_server_name
+                    ] = await self.federation_handler.get_server_version(
+                        worker_server_name,
+                        force_rediscover=True,
+                        diagnostics=True,
+                        timeout_seconds=10.0,
                     )
                 except asyncio.TimeoutError:
+                    self.log.warning(
+                        f"HIT TIMEROUT ERROR WHEN SHOULD NOT: {worker_server_name}"
+                    )
                     server_to_server_data[worker_server_name] = FederationErrorResponse(
                         status_code=0,
                         status_reason="Request timed out",
@@ -1858,7 +1872,7 @@ class FederationBot(Plugin):
                 except Exception as e:
                     server_to_server_data[worker_server_name] = FederationErrorResponse(
                         status_code=0,
-                        status_reason="Plugin Error",
+                        status_reason=f"Plugin Error: {e}",
                         response_dict={},
                         server_result=ServerResultError(
                             error_reason=f"Plugin err: {e}",

@@ -5,7 +5,7 @@ import json
 import ssl
 import time
 
-from aiohttp import ClientSession, client_exceptions
+from aiohttp import ClientResponse, ClientSession, client_exceptions
 from mautrix.types import EventID
 from mautrix.util.logging import TraceLogger
 from signedjson.key import decode_signing_key_base64
@@ -17,6 +17,7 @@ from federationbot.delegation import (
     DelegationHandler,
     check_and_maybe_split_server_name,
 )
+from federationbot.errors import ServerUnavailable
 from federationbot.events import (
     CreateRoomStateEvent,
     EventBase,
@@ -52,40 +53,136 @@ class FederationHandler:
         self.delegation_handler = DelegationHandler(self.logger)
         # Map the key to (server_name, event_id) -> Event
         self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
+        # Map this cache to server_name -> ServerResult
+        self._server_discovery_cache: LRUCache[str, ServerResult] = LRUCache()
 
     async def stop(self) -> None:
         # For stopping the cleanup task on these caches
         await self._events_cache.stop()
+        await self._server_discovery_cache.stop()
 
-    async def federation_request(
+    async def _federation_request(
         self,
-        destination_server: str,
+        destination_server_name: str,
         path: str,
         query_args: Optional[Sequence[Tuple[str, Any]]] = None,
         method: str = "GET",
+        origin_server: Optional[str] = None,
         server_result: Optional[ServerResult] = None,
-        delegation_check: bool = True,
-        force_recheck: bool = False,
+        content: Optional[Dict[str, Any]] = None,
+        timeout_seconds: float = 10.0,
+    ) -> ClientResponse:
+        """
+        Retrieve json response from over federation. This inner function handles
+            applying auth to the request
+
+        Args:
+            destination_server_name: The server_name which acts as a hostname(or IP).
+                Extract actual server connection details from server_result or assume
+                that the server_name is the actual hostname.
+            path: The path to query
+            query_args: Optional query arguments as a sequence of Tuples
+            method: GET, POST, etc
+            origin_server: if authing this request, the server originating the request
+            server_result: Allows access to server discovery data, like port, host
+                header, and sni data
+            content: if not a GET request, the content to send
+            timeout_seconds: float
+
+        Returns: A ClientResponse aiohttp context manager thingy
+
+        """
+        # Use the URL class to build the parts, as otherwise the query
+        # parameters don't encode right and fail the JSON signing process verify
+        # on the other end. I suspect it has to do with sigil encoding.
+        #
+        # From what I understand, having a port as 'None' will cause the URL to select
+        # the most likely port based on the scheme. Sounds handy, use that.
+        if server_result:
+            if server_result.unhealthy:
+                # If this server was attempted at some point and errored, there is no
+                # point trying again until the cache entry is replaced.
+                raise ServerUnavailable(f"{server_result.unhealthy}")
+
+            destination_port = int(server_result.port)
+            resolved_destination_server = server_result.get_host()
+            server_hostname_sni = (
+                server_result.sni_server_name if server_result.use_sni else None
+            )
+            request_headers = {"Host": server_result.host_header}
+            # self.logger.info(f"{destination_server_name}, host: {server_result.host}, host_header: {server_result.host_header}, sni_server_name: {server_result.sni_server_name}")
+
+        else:
+            destination_port = None
+            resolved_destination_server = destination_server_name
+            server_hostname_sni = None
+            request_headers = None
+
+        url_object = URL.build(
+            scheme="https",
+            host=resolved_destination_server,
+            port=destination_port,
+            path=path,
+            query=query_args,
+            encoded=False,
+        )
+
+        if origin_server:
+            # Implying an origin server means this request must have auth attached
+            assert request_headers is not None
+            request_headers["Authorization"] = authorization_headers(
+                origin_name=origin_server,
+                origin_signing_key=self.server_signing_keys[origin_server],
+                destination_name=destination_server_name,
+                request_method=method,
+                uri=str(url_object.relative()),
+                content=content,
+            )
+
+        try:
+            response = await self.http_client.request(
+                method=method,
+                url=url_object,
+                headers=request_headers,
+                timeout=timeout_seconds,
+                server_hostname=server_hostname_sni,
+                json=content,
+            )
+        except Exception as e:
+            raise e
+        else:
+            return response
+
+    async def federation_request(
+        self,
+        destination_server_name: str,
+        path: str,
+        query_args: Optional[Sequence[Tuple[str, Any]]] = None,
+        method: str = "GET",
+        skip_discovery: bool = False,
+        force_rediscover: bool = False,
         diagnostics: bool = False,
         timeout_seconds: float = 10.0,
-        auth_request_for: Optional[str] = None,
+        origin_server: Optional[str] = None,
         content: Optional[Dict[str, Any]] = None,
     ) -> FederationBaseResponse:
         """
-        Retrieve json response from over federation.
+        Retrieve json response from over federation. This outer-level function handles
+        caching of server discovery processes and catching errors. Calls
+        _federation_request() inside to handle authing and places the actual request.
 
         Args:
-            destination_server: the server name being sent to, delegation is handled within
+            destination_server_name: the server name being sent to, delegation is
+                handled within
             path: The path component of the outgoing url
-            query_string: the query component to send
-            query_args:
+            query_args: the query component to send
             method: The method to use for the request: GET, PUT, etc
-            server_result: a ServerResult object to send against, bypassing delegation
-            delegation_check: if delegation checking should be skipped
-            force_recheck: pass this into delegation handling to force retesting
+            skip_discovery: if delegation checking should be skipped
+            force_rediscover: in case we need to bypass the cache to redo server
+                discovery
             diagnostics: Collect diagnostic data. Errors are always collected
             timeout_seconds: Float of how many seconds before timeout
-            auth_request_for: The server to send the request as, signing keys will be
+            origin_server: The server to send the request as, signing keys will be
                 required to be setup in the config files for authed requests
             content: for non-GET requests, the Dict that will be transformed into json
                 to send
@@ -98,75 +195,44 @@ class FederationHandler:
         headers = None
         diag_info = DiagnosticInfo(diagnostics)
         request_info = None
+        server_result = None
 
         # If the server is delegated in some way, this will take care of making sure we
         # get a usable host:port
-        if delegation_check and not server_result:
-            server_result = await self.delegation_handler.maybe_handle_delegation(
-                destination_server,
-                self.federation_request,
-                force_reload=force_recheck,
-                diag_info=diag_info,
-            )
+        if not skip_discovery:
+            server_result = self._server_discovery_cache.get(destination_server_name)
+            if not server_result or force_rediscover:
+                # self.logger.warning(
+                #     f"cache entry not found for {destination_server_name}"
+                # )
+                server_result = await self.delegation_handler.maybe_handle_delegation(
+                    destination_server_name,
+                    self.federation_request,
+                    diag_info=diag_info,
+                )
 
         try:
             if server_result:
+                # self.logger.info(
+                #     f"Making real federation request: {destination_server_name}"
+                # )
                 # These only get filled in when diagnostics is True
                 # This will add the word "Checking: " to the front of "Connectivity"
                 diag_info.mark_step_num("Connectivity")
-                # Use get_host() to get the actual server host instead of the delegated
                 diag_info.add(f"Making request to {server_result.get_host()}{path}")
 
-                # Use the URL class to build the parts, as otherwise the query
-                # parameters don't encode right and fail the JSON signing process verify
-                # on the other end. I suspect it has to do with sigil encoding.
-                url_object = URL.build(
-                    scheme="https",
-                    host=server_result.get_host(),
-                    port=int(server_result.port),
-                    path=path,
-                    query=query_args,
-                    encoded=False,
-                )
+            response = await self._federation_request(
+                destination_server_name=destination_server_name,
+                path=path,
+                query_args=query_args,
+                method=method,
+                origin_server=origin_server,
+                server_result=server_result,
+                content=content,
+                timeout_seconds=timeout_seconds,
+            )
 
-                request_headers = {"Host": server_result.host_header}
-
-                signed_content = None
-                if auth_request_for:
-                    (
-                        request_headers["Authorization"],
-                        signed_content,
-                    ) = authorization_headers(
-                        origin_name=auth_request_for,
-                        origin_signing_key=self.server_signing_keys[auth_request_for],
-                        destination_name=destination_server,
-                        request_method=method,
-                        uri=str(url_object.relative()),
-                        content=content,
-                    )
-                response = await self.http_client.request(
-                    method=method,
-                    url=url_object,
-                    headers=request_headers,
-                    timeout=timeout_seconds,
-                    server_hostname=server_result.sni_server_name
-                    if server_result.use_sni
-                    else None,
-                    json=signed_content,
-                )
-
-            else:
-                diag_info.add(f"Making request to {destination_server}{path}")
-
-                # Just a basic web GET request, but allowing use of our infrastructure
-                # Realistically, this will only be used by the well known request.
-                response = await self.http_client.request(
-                    method=method,
-                    url=f"https://{destination_server}{path}",
-                    timeout=timeout_seconds,
-                )
-
-        except ConnectionRefusedError as e:
+        except ConnectionRefusedError:
             diag_info.error("ConnectionRefusedError")
             error_reason = "ConnectionRefusedError"
 
@@ -182,7 +248,7 @@ class FederationHandler:
             error_reason = f"Client Connector SSL Error, {e}"
             code = -1
 
-        except client_exceptions.ServerDisconnectedError as e:
+        except client_exceptions.ServerDisconnectedError:
             diag_info.error(f"Server Disconnect Error")
             error_reason = "Server Disconnect Error"
 
@@ -190,15 +256,15 @@ class FederationHandler:
 
         # except client_exceptions.SocketTimeoutError as e:
 
-        except client_exceptions.ServerTimeoutError as e:
+        except client_exceptions.ServerTimeoutError:
             diag_info.error(f"Server Timeout Error")
             error_reason = "Server Timeout Error"
 
-        except client_exceptions.ServerFingerprintMismatch as e:
+        except client_exceptions.ServerFingerprintMismatch:
             diag_info.error(f"Server Fingerprint Mismatch Error")
             error_reason = "Server Fingerprint Mismatch Error"
 
-        except client_exceptions.ServerConnectionError as e:
+        except client_exceptions.ServerConnectionError:
             diag_info.error(f"Server Connection Error")
             error_reason = "ServerConnectionError"
 
@@ -208,7 +274,7 @@ class FederationHandler:
             # This is one of the errors I found while probing for SNI TLS
             code = -1
 
-        except client_exceptions.ClientProxyConnectionError as e:
+        except client_exceptions.ClientProxyConnectionError:
             diag_info.error(f"Client Proxy Connection Error")
             error_reason = "Client Proxy Connection Error"
 
@@ -217,40 +283,44 @@ class FederationHandler:
             diag_info.error(f"ClientConnectorError: {e.strerror}")
             error_reason = f"Client Connector Error: {e.strerror}"
 
-        except client_exceptions.ClientHttpProxyError as e:
+        except client_exceptions.ClientHttpProxyError:
             diag_info.error(f"Client HTTP Proxy Error")
             error_reason = "Client HTTP Proxy Error"
 
-        except client_exceptions.WSServerHandshakeError as e:
+        except client_exceptions.WSServerHandshakeError:
             # Not sure this one will ever be used...
             pass
-        except client_exceptions.ContentTypeError as e:
+        except client_exceptions.ContentTypeError:
             # Pretty sure will never hit this one either, as it's not enforced here
             diag_info.error(f"Content Type Error")
             error_reason = "Content Type Error"
-        except client_exceptions.ClientResponseError as e:
+        except client_exceptions.ClientResponseError:
             diag_info.error(f"Client Response Error")
             error_reason = "Client Response Error"
 
-        except client_exceptions.ClientPayloadError as e:
+        except client_exceptions.ClientPayloadError:
             diag_info.error(f"Client Payload Error")
             error_reason = "Client Payload Error"
 
-        except client_exceptions.InvalidURL as e:
+        except client_exceptions.InvalidURL:
             diag_info.error(f"InvalidURL Error")
             error_reason = "InvalidURL Error"
 
-        except client_exceptions.ClientOSError as e:
+        except client_exceptions.ClientOSError:
             diag_info.error(f"Client OS Error")
             error_reason = "Client OS Error"
 
-        except client_exceptions.ClientConnectionError as e:
+        except client_exceptions.ClientConnectionError:
             diag_info.error(f"Client Connection Error")
             error_reason = "Client Connection Error"
 
-        except client_exceptions.ClientError as e:
+        except client_exceptions.ClientError:
             diag_info.error(f"Client Error")
             error_reason = "Client Error"
+
+        except ServerUnavailable as e:
+            diag_info.error(f"{e}")
+            error_reason = f"{e}"
 
         except asyncio.TimeoutError:
             diag_info.error(
@@ -259,13 +329,14 @@ class FederationHandler:
             error_reason = "Timed out. Is this server online?"
         except Exception as e:
             self.logger.info(
-                f"federation_request: General Exception: for {destination_server}:\n {e}"
+                f"federation_request: General Exception: for {destination_server_name}"
+                f":\n {e}"
             )
             diag_info.error(f"General Exception: {e}")
             error_reason = "General Exception"
 
-        # response = await self.http_client.get(f"https://{server}{query_string}")
         else:
+            # The server was responsive, but may not have returned something useful
             async with response:
                 code = response.status
                 reason = response.reason
@@ -307,11 +378,23 @@ class FederationHandler:
                     diag_info.add(f"No usable data in response")
 
         finally:
+            # The request is complete. If the server wasn't actually there, the code
+            # will be <= 0. Anything higher means the server result can be cached, as it
+            # means a successful contact.
             if not server_result:
-                host, port = check_and_maybe_split_server_name(destination_server)
+                # This will be hit when checking for well-known, it gives us an initial
+                # ServerResult to base further queries on. Don't save it in the cache
+                host, port = check_and_maybe_split_server_name(destination_server_name)
+
                 server_result = ServerResult(
                     host=host, port=port if port else "", diag_info=diag_info
                 )
+
+            else:
+                server_result.unhealthy = error_reason if code <= 0 else None
+                # self.logger.warning(f"saving {server_result.host} to cache")
+                self._server_discovery_cache.set(server_result.host, server_result)
+
             if code != 200:
                 diag_info.error(f"Request to {path} failed")
                 return FederationErrorResponse(
@@ -338,15 +421,15 @@ class FederationHandler:
     async def get_server_version(
         self,
         server_name: str,
-        force_recheck: bool = False,
+        force_rediscover: bool = False,
         diagnostics: bool = False,
         timeout_seconds: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self.federation_request(
-            destination_server=server_name,
+            destination_server_name=server_name,
             path="/_matrix/federation/v1/version",
             method="GET",
-            force_recheck=force_recheck,
+            force_rediscover=force_rediscover,
             diagnostics=diagnostics,
             timeout_seconds=timeout_seconds,
         )
@@ -373,7 +456,7 @@ class FederationHandler:
         self, server_name: str, timeout: float = 10.0
     ) -> Union[FederationServerKeyResponse, FederationErrorResponse]:
         response = await self.federation_request(
-            destination_server=server_name,
+            destination_server_name=server_name,
             path="/_matrix/key/v2/server",
             method="GET",
             timeout_seconds=timeout,
@@ -400,7 +483,7 @@ class FederationHandler:
         self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
     ) -> FederationBaseResponse:
         response = await self.federation_request(
-            destination_server=from_server_name,
+            destination_server_name=from_server_name,
             path=f"/_matrix/key/v2/query/{fetch_server_name}",
             method="GET",
             timeout_seconds=timeout,
@@ -435,9 +518,9 @@ class FederationHandler:
             return {event_id: new_event_base}
 
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/event/{event_id}",
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -548,10 +631,10 @@ class FederationHandler:
         timeout: float = 10.0,
     ) -> Tuple[List[str], List[str],]:
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/state_ids/{room_id}",
             query_args=[("event_id", event_id)],
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -569,9 +652,9 @@ class FederationHandler:
         timeout: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -591,10 +674,10 @@ class FederationHandler:
         #    "origin_server_ts": 123455676543whatever_int
         # }
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
             query_args=[("dir", "b"), ("ts", utc_time_at_ms)],
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -611,10 +694,10 @@ class FederationHandler:
     ) -> FederationBaseResponse:
 
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/backfill/{room_id}",
             query_args=[("v", event_id), ("limit", limit)],
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -632,9 +715,9 @@ class FederationHandler:
         # )
 
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/user/devices/{user_mxid}",
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -657,10 +740,10 @@ class FederationHandler:
                 server_result=ServerResultError(),
             )
         response = await self.federation_request(
-            destination_server=destination_server,
+            destination_server_name=destination_server,
             path="/_matrix/federation/v1/query/directory",
             query_args=[("room_alias", room_alias)],
-            auth_request_for=origin_server,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -741,7 +824,7 @@ def authorization_headers(
     request_method: str,
     uri: str,
     content: Optional[Union[str, Dict[str, Any]]] = None,
-) -> Tuple[str, Optional[Dict[str, Any]]]:
+) -> str:
     # Extremely borrowed from Matrix spec docs, linked above. Spelunked a bit into
     # Synapse code to identify how the signing key is stored and decoded.
     request_json: Dict[str, Any] = {
@@ -775,7 +858,7 @@ def authorization_headers(
             )
         )
 
-    return authorization_header, signed_json.get("content", None)
+    return authorization_header
 
 
 def filter_events_based_on_type(

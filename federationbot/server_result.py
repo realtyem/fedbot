@@ -111,6 +111,7 @@ class ServerResult:
     diag_info: DiagnosticInfo
     last_contact: Optional[int]
     drop_after: int
+    unhealthy: Optional[str] = None
     use_sni: bool = True
 
     def __init__(

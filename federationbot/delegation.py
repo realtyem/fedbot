@@ -1,7 +1,6 @@
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Optional, Tuple
 from asyncio import sleep
 import ipaddress
-import time
 
 from dns.asyncresolver import Resolver
 from mautrix.util.logging import TraceLogger
@@ -128,7 +127,6 @@ class DelegationHandler:
         self.dns_resolver.lifetime = 10.0
         # DNS timeout for a request default is 2 seconds
         self.logger = logger
-        self.cached_server_names: Dict[str, ServerResult] = {}
 
     async def check_dns_for_reg_records(
         self,
@@ -345,36 +343,10 @@ class DelegationHandler:
 
         return host or dep_host, port or dep_port, diag_info
 
-    def _retrieve_or_evict_server_result_from_cache(
-        self, server_name: str, force_reload: bool = False
-    ) -> Optional[ServerResult]:
-        """
-        An 'on-demand' way to process if it's time to refresh an existing ServerResult
-
-        Args:
-             server_name: The server name to check for existing results
-             force_reload: Optionally ignore cached previous results
-        Returns: Optional ServerResult or ServerErrorResult
-        """
-        resolved_server = self.cached_server_names.get(server_name, None)
-        server_result = None
-        if resolved_server:
-            now = int(time.time_ns() / 1000)
-            if force_reload or resolved_server.drop_after < now:
-                # drop_after may be zero if this server was never actually contacted, so
-                # reload the entry in case it came back in the meantime
-                self.cached_server_names.pop(server_name)
-
-            else:
-                server_result = resolved_server
-
-        return server_result
-
     async def maybe_handle_delegation(
         self,
         server_name: str,
-        get_callback: Callable,
-        force_reload: bool = False,
+        fed_req_callback: Callable,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ) -> ServerResult:
         """
@@ -382,8 +354,7 @@ class DelegationHandler:
 
         Args:
             server_name: The name as supplied from the back of a mxid
-            get_callback: Pass through the callable to retrieve well-known data
-            force_reload: Optionally ignore cached previous results
+            fed_req_callback: Pass through the callable to retrieve well-known data
             diag_info: Diagnostic collection object
 
         Returns: A ServerResult(or ServerResultError) object with all the information
@@ -391,47 +362,6 @@ class DelegationHandler:
             information.
         """
 
-        # Check for cached copy of ServerResult
-        server_result = self._retrieve_or_evict_server_result_from_cache(
-            server_name, force_reload
-        )
-        if not server_result:
-            server_result = await self._maybe_handle_delegation(
-                server_name, get_callback=get_callback, diag_info=diag_info
-            )
-            # sni_response: FederationBaseResponse = await get_callback(
-            #     server_result=server_result,
-            #     destination_server=server_name,
-            #     path="/_matrix/federation/v1/version",
-            #     method="GET",
-            #     delegation_check=False,
-            #     diagnostics=True,
-            # )
-            # diag_info.append_from(sni_response.errors)
-            # if sni_response.status_code > -1:
-            #     self.cached_server_names[server_name] = sni_response.server_result
-            # else:
-            #     server_result.use_sni = False
-            #     diag_info.add("Trying without SNI")
-            #     no_sni_response: FederationBaseResponse = await get_callback(
-            #         server_result=server_result,
-            #         destination_server=server_name,
-            #         path="/_matrix/federation/v1/version",
-            #         method="GET",
-            #         delegation_check=False,
-            #         diagnostics=True,
-            #     )
-            #     diag_info.append_from(no_sni_response.errors)
-            self.cached_server_names[server_name] = server_result
-
-        return server_result
-
-    async def _maybe_handle_delegation(
-        self,
-        server_name: str,
-        get_callback: Callable,
-        diag_info: DiagnosticInfo = DiagnosticInfo(False),
-    ) -> ServerResult:
         # The process to determine the ultimate final host:port is defined in the
         # spec.
         # https://spec.matrix.org/v1.9/server-server-api/#resolving-server-names
@@ -505,10 +435,10 @@ class DelegationHandler:
         # Spec step 3: Well-Known pre-parsing
         diag_info.mark_step_num("Step 3", "Well-Known")
 
-        response: FederationBaseResponse = await get_callback(
-            destination_server=host,
+        response: FederationBaseResponse = await fed_req_callback(
+            destination_server_name=host,
             path="/.well-known/matrix/server",
-            delegation_check=False,
+            skip_discovery=True,
             diagnostics=True,
         )
 
@@ -545,7 +475,7 @@ class DelegationHandler:
             # request(including port)
             diag_info.mark_step_num("Step 3.1", "Checking Well-Known for Literal IP")
             if is_this_an_ip_address(well_known_host):
-                host_header = f"{well_known_host}:{well_known_port if well_known_port else '8448'}"
+                host_header = f"{well_known_host}:{well_known_port or '8448'}"
 
                 diag_info.add(
                     f"Host defined in Well-Known was Literal IP {host_header}"
