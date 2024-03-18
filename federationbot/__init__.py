@@ -1461,19 +1461,33 @@ class FederationBot(Plugin):
             return
 
         await command_event.respond(
-            f"Checking all hosts for:\n"
+            f"Checking all hosts:\n"
+            f"* from Room: {room_id_or_alias or room_id}\n\n"
+            f"for:\n"
             f"* Event ID: {event_id}\n"
-            f"* Room: {room_id_or_alias or room_id}\n"
             f"* Using {origin_server}"
         )
 
         # This will be assigned by now
         assert event_id is not None
 
-        # Get all the hosts in the room
-        host_list = await self.get_hosts_in_room_ordered(
-            origin_server, origin_server, room_id, event_id
+        # Can not assume that the event_id supplied is in the room requested to search
+        # hosts of. Get the current hosts in the room
+        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
+            origin_server, origin_server, room_id, int(time.time() * 1000)
         )
+        if isinstance(ts_response, FederationErrorResponse):
+            host_list = []
+        else:
+            event_id_from_room_right_now: Optional[str] = ts_response.response_dict.get(
+                "event_id", None
+            )
+            assert event_id_from_room_right_now is not None
+            # Get all the hosts in the supplied room
+            host_list = await self.get_hosts_in_room_ordered(
+                origin_server, origin_server, room_id, event_id_from_room_right_now
+            )
+
         use_ordered_list = True
         if not host_list:
             use_ordered_list = False
@@ -3520,9 +3534,7 @@ class FederationBot(Plugin):
         room_id: str,
         event_id_in_timeline: str,
     ) -> List[str]:
-        # Should be a faithful recreation of what Synapse does. I see problems with this
-        # though, as it doesn't calculate 'leave' events. While those servers *might*
-        # still have the events that would be looked up, it's not a guarantee.
+        # Should be a faithful recreation of what Synapse does.
         sql = """
             SELECT
                 /* Match the domain part of the MXID */
