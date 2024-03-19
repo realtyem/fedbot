@@ -1485,6 +1485,9 @@ class FederationBot(Plugin):
                 "event_id", None
             )
             assert event_id_from_room_right_now is not None
+            self.log.debug(
+                f"Timestamp to event responded with event_id: {event_id_from_room_right_now}"
+            )
             # Get all the hosts in the supplied room
             host_list = await self.get_hosts_in_room_ordered(
                 origin_server, origin_server, room_id, event_id_from_room_right_now
@@ -1512,40 +1515,11 @@ class FederationBot(Plugin):
                     if host not in host_list:
                         host_list.extend([host])
 
-        host_queue: Queue[str] = Queue()
-        for host in host_list:
-            host_queue.put_nowait(host)
-
-        host_to_event_status_map: Dict[str, EventBase] = {}
-
-        async def _event_finding_worker(queue: Queue) -> None:
-            while True:
-                worker_host = await queue.get()
-                returned_events = await self.federation_handler.get_event_from_server(
-                    origin_server=origin_server,
-                    destination_server=worker_host,
-                    event_id=event_id,
-                )
-                inner_returned_event = returned_events.get(event_id)
-                assert inner_returned_event is not None
-                host_to_event_status_map[worker_host] = inner_returned_event
-                queue.task_done()
-
-        # Collect all the Federation Responses as well as the EventBases.
-        # Errors can be found in the Responses.
-
-        tasks_list = []
-        for _ in range(MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST):
-            tasks_list.append(asyncio.create_task(_event_finding_worker(host_queue)))
-
         started_at = time.time()
-        await host_queue.join()
+        host_to_event_status_map = await self._find_event_on_servers(
+            origin_server, event_id, host_list
+        )
         total_time = time.time() - started_at
-        # Cancel our worker tasks.
-        for task in tasks_list:
-            task.cancel()
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks_list, return_exceptions=True)
 
         # Begin the render
         dc_host_config = DisplayLineColumnConfig("Hosts", justify=Justify.RIGHT)
@@ -1604,6 +1578,45 @@ class FederationBot(Plugin):
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
             )
+
+    async def _find_event_on_servers(
+        self, origin_server: str, event_id: str, servers_to_check: Collection[str]
+    ) -> Dict[str, EventBase]:
+        host_to_event_status_map: Dict[str, EventBase] = {}
+
+        host_queue: Queue[str] = Queue()
+        for host in servers_to_check:
+            host_queue.put_nowait(host)
+
+        async def _event_finding_worker(queue: Queue) -> None:
+            while True:
+                worker_host = await queue.get()
+                returned_events = await self.federation_handler.get_event_from_server(
+                    origin_server=origin_server,
+                    destination_server=worker_host,
+                    event_id=event_id,
+                )
+                inner_returned_event = returned_events.get(event_id)
+                assert inner_returned_event is not None
+                host_to_event_status_map[worker_host] = inner_returned_event
+                queue.task_done()
+
+        tasks_list = []
+        for _ in range(
+            min(len(servers_to_check), MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST)
+        ):
+            tasks_list.append(asyncio.create_task(_event_finding_worker(host_queue)))
+
+        await host_queue.join()
+
+        # Cancel our worker tasks.
+        for task in tasks_list:
+            task.cancel()
+
+        # Wait until all worker tasks are cancelled.
+        await asyncio.gather(*tasks_list, return_exceptions=True)
+
+        return host_to_event_status_map
 
     @test_command.subcommand(
         name="room_version", help="experiment to get room version from room id"
