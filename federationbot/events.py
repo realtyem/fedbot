@@ -5,7 +5,7 @@ import json
 
 from canonicaljson import encode_canonical_json
 from mautrix.types import EventID, Signature
-from unpaddedbase64 import encode_base64
+from unpaddedbase64 import decode_base64, encode_base64
 
 from federationbot.utils import (
     DisplayLineColumnConfig,
@@ -78,6 +78,11 @@ class EventBase:
         self.sender = self.unrecognized.pop("sender", "Sender Not Found")
         # unsigned.age is a pointless thing, just remove it for now
         self.unrecognized.get("unsigned", {}).pop("age", None)
+
+    def verify_content_hash(self) -> bool:
+        # This should never be hit, but need to double check that. The Event class
+        # should intercept it
+        return False
 
     def to_json(self, condensed: bool = False) -> str:
         indent = None if condensed else 4
@@ -412,6 +417,23 @@ class Event(EventBase):
         if relations:
             self.relations = RelatesTo(relations)
 
+    def verify_content_hash(self) -> bool:
+        base_event = dict(self.raw_data)
+        base_event.pop("unsigned", None)
+        base_event.pop("signatures", None)
+        hashes = base_event.pop("hashes", {})
+        event_json_bytes = encode_canonical_json(base_event)
+        hashed_event = hashlib.sha256(event_json_bytes).digest()
+        existing_hash: Optional[str] = hashes.get("sha256", None)
+        if existing_hash is not None:
+            decoded_existing_hash = decode_base64(existing_hash)
+            if hashed_event == decoded_existing_hash:
+                return True
+            else:
+                return False
+        # For some reason the hash was missing on the event, auto fail that
+        return False
+
     def to_pretty_summary(
         self,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
@@ -422,7 +444,7 @@ class Event(EventBase):
             * Origin
             * Origin Server Timestamp
             * any Signatures key id's
-            * any Hashes
+            * any Hashes(and if it passes verification)
 
         Args:
             dc: The DisplayLineColumnConfig to control the vertical layout
@@ -465,7 +487,7 @@ class Event(EventBase):
         #       Hashes: sha256: somethingorotherreallylonghashthatsnotlongeno
         #
         for hash_type, hash_value in self.hashes.items():
-            summary += f"{dc.front_pad(hashes_header)}: {hash_type}: {hash_value}\n"
+            summary += f"{dc.front_pad(hashes_header)}: {hash_type}: {hash_value} {'✅' if self.verify_content_hash() else '❌'}\n"
 
         # The previous output does not add a new line(well, it does now) but create some
         # space anyways
