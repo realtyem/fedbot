@@ -31,6 +31,7 @@ from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
 from federationbot.events import (
+    CreateRoomStateEvent,
     Event,
     EventBase,
     EventError,
@@ -2196,6 +2197,8 @@ class FederationBot(Plugin):
             list_of_a_event_ids = returned_event.auth_events.copy()
             list_of_a_event_ids.extend(returned_event.prev_events)
 
+            # For the verification display, grab the room version in these events
+            found_room_version = 0
             a_returned_events = await self.federation_handler.get_events_from_server(
                 origin_server=origin_server,
                 destination_server=destination_server,
@@ -2205,9 +2208,15 @@ class FederationBot(Plugin):
                 a_event_base = a_returned_events.get(a_event_id)
                 if a_event_base:
                     a_event_data_map[a_event_id] = a_event_base.to_short_type_summary()
+                    if isinstance(a_event_base, CreateRoomStateEvent):
+                        found_room_version = a_event_base.room_version
 
             # Begin rendering
-            buffered_message += returned_event.to_pretty_summary()
+            # It may be, but is unlikely outside of connection errors, that room_version
+            # was not found. This is handled gracefully inside of to_pretty_summary()
+            buffered_message += returned_event.to_pretty_summary(
+                room_version=found_room_version
+            )
             # Add a little gap at the bottom of the previous for better separation
             buffered_message += "\n"
             buffered_message += returned_event.to_pretty_summary_content()
