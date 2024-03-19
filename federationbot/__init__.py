@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Set, Tuple, Type, Union, cast
+from typing import Collection, Dict, List, Optional, Set, Tuple, Type, Union, cast
 from asyncio import Queue
 from datetime import datetime
 from enum import Enum
@@ -2357,22 +2357,16 @@ class FederationBot(Plugin):
         help="Check a server in the room for version info",
     )
     @command.argument(name="server_to_check", label="Server to check", required=True)
-    async def version(
+    async def version_command(
         self, command_event: MessageEvent, server_to_check: Optional[str]
-    ):
+    ) -> None:
         if not server_to_check:
             await command_event.reply(
                 "**Usage**: !fed version <server_name>\n - Check a server in the room "
                 "for version info"
             )
             return
-        await self._versions(command_event, server_to_check)
 
-    async def _versions(
-        self,
-        command_event: MessageEvent,
-        server_to_check: str,
-    ) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -2434,64 +2428,11 @@ class FederationBot(Plugin):
             f"{'s' if number_of_servers > 1 else ''}"
         )
 
-        # map of server name -> (server brand, server version)
-        server_to_version_data: Dict[str, FederationBaseResponse] = {}
-
-        async def _version_worker(queue: Queue) -> None:
-            while True:
-                worker_server_name = await queue.get()
-                try:
-                    server_to_version_data[worker_server_name] = await asyncio.wait_for(
-                        self.federation_handler.get_server_version(
-                            worker_server_name,
-                        ),
-                        timeout=10.0,
-                    )
-                except asyncio.TimeoutError:
-                    server_to_version_data[
-                        worker_server_name
-                    ] = FederationErrorResponse(
-                        status_code=0,
-                        status_reason="Timed out waiting for response",
-                        response_dict={},
-                        server_result=ServerResultError(
-                            error_reason="Timeout err", diag_info=DiagnosticInfo(True)
-                        ),
-                    )
-                except Exception as e:
-                    server_to_version_data[
-                        worker_server_name
-                    ] = FederationErrorResponse(
-                        status_code=0,
-                        status_reason="Plugin Error",
-                        response_dict={},
-                        server_result=ServerResultError(
-                            error_reason=f"Plugin err: {e}",
-                            diag_info=DiagnosticInfo(True),
-                        ),
-                    )
-
-                finally:
-                    queue.task_done()
-
-        version_queue: Queue[str] = asyncio.Queue()
-        for server_name in list_of_servers_to_check:
-            await version_queue.put(server_name)
-
-        tasks = []
-        for i in range(MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST):
-            task = asyncio.create_task(_version_worker(version_queue))
-            tasks.append(task)
-
         started_at = time.monotonic()
-        await version_queue.join()
-
+        server_to_version_data = await self._get_versions_from_servers(
+            list_of_servers_to_check
+        )
         total_time = time.monotonic() - started_at
-        # Cancel our worker tasks.
-        for task in tasks:
-            task.cancel()
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks, return_exceptions=True)
 
         # Establish the initial size of the padding for each row
         server_name_col = DisplayLineColumnConfig(SERVER_NAME)
@@ -2581,6 +2522,73 @@ class FederationBot(Plugin):
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
             )
+
+    async def _get_versions_from_servers(
+        self,
+        servers_to_check: Collection[str],
+    ) -> Dict[str, FederationBaseResponse]:
+
+        # map of server name -> (server brand, server version)
+        # Return this at the end
+        server_to_version_data: Dict[str, FederationBaseResponse] = {}
+
+        async def _version_worker(queue: Queue) -> None:
+            while True:
+                worker_server_name = await queue.get()
+                try:
+                    server_to_version_data[worker_server_name] = await asyncio.wait_for(
+                        self.federation_handler.get_server_version(
+                            worker_server_name,
+                        ),
+                        timeout=10.0,
+                    )
+                except asyncio.TimeoutError:
+                    server_to_version_data[
+                        worker_server_name
+                    ] = FederationErrorResponse(
+                        status_code=0,
+                        status_reason="Timed out waiting for response",
+                        response_dict={},
+                        server_result=ServerResultError(
+                            error_reason="Timeout err", diag_info=DiagnosticInfo(True)
+                        ),
+                    )
+                except Exception as e:
+                    server_to_version_data[
+                        worker_server_name
+                    ] = FederationErrorResponse(
+                        status_code=0,
+                        status_reason="Plugin Error",
+                        response_dict={},
+                        server_result=ServerResultError(
+                            error_reason=f"Plugin err: {e}",
+                            diag_info=DiagnosticInfo(True),
+                        ),
+                    )
+
+                finally:
+                    queue.task_done()
+
+        version_queue: Queue[str] = asyncio.Queue()
+        for server_name in servers_to_check:
+            await version_queue.put(server_name)
+
+        tasks = []
+        for i in range(
+            min(len(servers_to_check), MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST)
+        ):
+            task = asyncio.create_task(_version_worker(version_queue))
+            tasks.append(task)
+
+        await version_queue.join()
+
+        # Cancel our worker tasks.
+        for task in tasks:
+            task.cancel()
+        # Wait until all worker tasks are cancelled.
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        return server_to_version_data
 
     @fed_command.subcommand(name="server_keys")
     @command.argument(name="server_to_check", required=True)
