@@ -68,6 +68,7 @@ from federationbot.utils import (
     ProgressBar,
     get_domain_from_id,
     pad,
+    pretty_print_timestamp,
     round_half_up,
 )
 
@@ -2703,7 +2704,9 @@ class FederationBot(Plugin):
             )
             return
 
-        server_to_server_data: Dict[str, FederationBaseResponse] = {}
+        server_to_server_data: Dict[
+            str, Union[FederationErrorResponse, FederationServerKeyResponse]
+        ] = {}
         await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}"
@@ -2731,7 +2734,7 @@ class FederationBot(Plugin):
                 except Exception as e:
                     server_to_server_data[worker_server_name] = FederationErrorResponse(
                         status_code=0,
-                        status_reason="Plugin Error",
+                        status_reason=f"Plugin Error: {e}",
                         response_dict={},
                         server_result=ServerResultError(
                             error_reason=f"Plugin err: {e}",
@@ -2774,20 +2777,22 @@ class FederationBot(Plugin):
         valid_until_ts_col = DisplayLineColumnConfig("Valid until(UTC)")
 
         for server_name, server_results in server_to_server_data.items():
-            server_name_col.maybe_update_column_width(len(server_name))
-            verify_keys = server_results.response_dict.get("verify_keys", {})
-            old_verify_keys = server_results.response_dict.get("old_verify_keys", {})
-            valid_until = server_results.response_dict.get("valid_until_ts", 0)
+            if isinstance(server_results, FederationServerKeyResponse):
+                server_name_col.maybe_update_column_width(len(server_name))
+                valid_until = server_results.server_verify_keys.valid_until_ts
 
-            for key_id in verify_keys.keys():
-                server_key_col.maybe_update_column_width(len(key_id))
-            for key_id, old_key_data in old_verify_keys.items():
-                server_key_col.maybe_update_column_width(len(key_id))
-                if old_key_data:
-                    valid_until_ts_col.maybe_update_column_width(
-                        len(str(old_key_data.get("expired_ts", 0)))
-                    )
-            valid_until_ts_col.maybe_update_column_width(len(str(valid_until)))
+                for key_id in server_results.server_verify_keys.verify_keys.keys():
+                    server_key_col.maybe_update_column_width(len(key_id))
+                for (
+                    key_id,
+                    old_key_data,
+                ) in server_results.server_verify_keys.old_verify_keys.items():
+                    server_key_col.maybe_update_column_width(len(key_id))
+                    if old_key_data:
+                        valid_until_ts_col.maybe_update_column_width(
+                            len(str(old_key_data.expired_ts))
+                        )
+                valid_until_ts_col.maybe_update_column_width(len(str(valid_until)))
 
         # Begin constructing the message
 
@@ -2817,18 +2822,12 @@ class FederationBot(Plugin):
 
             else:
                 # This will be a FederationServerKeyResponse
-                verify_keys = server_response.response_dict.get("verify_keys", {})
-                old_verify_keys = server_response.response_dict.get(
-                    "old_verify_keys", {}
-                )
-                valid_until_ts: Optional[int] = server_response.response_dict.get(
-                    "valid_until_ts", None
-                )
+                verify_keys = server_response.server_verify_keys.verify_keys
+                old_verify_keys = server_response.server_verify_keys.old_verify_keys
+                valid_until_ts = server_response.server_verify_keys.valid_until_ts
                 valid_until_pretty = "None Found"
-                if valid_until_ts:
-                    valid_until_pretty = str(
-                        datetime.fromtimestamp(float(valid_until_ts / 1000))
-                    )
+                if valid_until_ts > 0:
+                    valid_until_pretty = pretty_print_timestamp(valid_until_ts)
 
                 # Use a for loop, even though there will only be a single key. I suppose
                 # with the way the spec is written, multiple keys may be possible? There
@@ -2842,14 +2841,10 @@ class FederationBot(Plugin):
                     # normal keys, old_verify_keys each have an expired timestamp
                     buffered_message += f"{server_name_col.pad('')} | "
                     buffered_message += f"{server_key_col.pad(key_id)} | "
-                    expired_ts: Optional[int] = old_verify_keys[key_id].get(
-                        "expired_ts", None
-                    )
+                    expired_ts = old_verify_keys[key_id].expired_ts
                     expired_ts_pretty = "None Found"
-                    if expired_ts:
-                        expired_ts_pretty = str(
-                            datetime.fromtimestamp(float(expired_ts / 1000))
-                        )
+                    if expired_ts > 0:
+                        expired_ts_pretty = pretty_print_timestamp(expired_ts)
                     buffered_message += f"{expired_ts_pretty}\n"
 
             list_of_result_data.extend([buffered_message])
