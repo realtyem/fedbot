@@ -5,7 +5,9 @@ import time
 
 from aiohttp import RequestInfo
 from multidict import CIMultiDictProxy
+from unpaddedbase64 import decode_base64
 
+from federationbot.events import KeyID, Signatures, full_dict_copy
 from federationbot.server_result import ServerResult
 
 # The spec recommends caching responses for a while, to avoid excess traffic
@@ -114,6 +116,85 @@ class FederationVersionResponse(FederationBaseResponse):
             list_of_errors=base_response.errors,
             headers=base_response.headers,
         )
+
+
+class ServerKey:
+    """
+    Object to store the Server Signing Keys in both the unpadded base64 form as they are
+    sent as well as the already decoded into bytes form.
+    """
+
+    encoded_key: str
+    decoded_key: bytes
+
+    def __init__(self, key: str) -> None:
+        self.encoded_key = key
+        self.decoded_key = decode_base64(self.encoded_key)
+
+
+class KeyContainer:
+    """
+    Just a simple enclosing class to mirror how the response formats the response to a
+    query for server keys.
+    """
+
+    key: ServerKey
+
+    def __init__(self, data: Dict[str, str]) -> None:
+        key = data.get("key")
+        assert isinstance(key, str)
+        self.key = ServerKey(key)
+
+
+class OldKeyContainer(KeyContainer):
+    """
+    Adds to KeyContainer to make it like old_verify_keys from a server key response.
+    """
+
+    expired_ts: int
+
+    def __init__(self, data: Dict[str, str]) -> None:
+        super().__init__(data)
+        expired_ts = data.get("expired_ts")
+        assert isinstance(expired_ts, int)
+        self.expired_ts = int(expired_ts)
+
+
+class ServerVerifyKeys:
+    """
+    Encapsulates server keys for verifying Events and other responses. All attributes
+    mirror the server response for server keys
+
+    Attributes:
+        verify_keys:
+        old_verify_keys:
+        valid_until_ts:
+    """
+
+    verify_keys: Dict[KeyID, KeyContainer]
+    old_verify_keys: Dict[KeyID, OldKeyContainer]
+    valid_until_ts: int
+    _raw_data: Dict[str, Any]
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self.verify_keys = {}
+        self.old_verify_keys = {}
+        # verify_keys will be the Dict of {"key": <base64 encoded key hash string>}
+        verify_keys = data.get("verify_keys", {})
+        for key_id, key_data in verify_keys.items():
+            self.verify_keys[KeyID(key_id)] = KeyContainer(key_data)
+
+        # constant_ts_and_key will be the Dict of:
+        # {
+        #   "key": <base64 encoded key hash string>,
+        #   "expired_ts": <int of timestamp in ms UTC>
+        # }
+        old_verify_keys = data.get("old_verify_keys", {})
+        for key_id, key_data in old_verify_keys.items():
+            self.old_verify_keys[KeyID(key_id)] = OldKeyContainer(key_data)
+
+        self.valid_until_ts = data.get("valid_until_ts", 0)
+        self._raw_data = full_dict_copy(data)
 
 
 class FederationServerKeyResponse(FederationBaseResponse):

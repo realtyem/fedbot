@@ -1,4 +1,5 @@
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from datetime import datetime
 from enum import Enum, auto
 import math
 
@@ -549,3 +550,7 @@ def round_half_up(n, decimals=0):
 def truncate(n, decimals=0):
     multiplier = 10 ** decimals
     return int(n * multiplier) / multiplier
+
+
+def pretty_print_timestamp(timestamp: int) -> str:
+    return str(datetime.fromtimestamp(float(timestamp / 1000)))
