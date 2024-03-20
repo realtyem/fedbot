@@ -4,7 +4,7 @@ import hashlib
 import json
 
 from canonicaljson import encode_canonical_json
-from mautrix.types import EventID, Signature
+from mautrix.types import EventID
 from unpaddedbase64 import decode_base64, encode_base64
 
 from federationbot.utils import (
@@ -420,6 +420,33 @@ class RelatesTo:
         return summary
 
 
+class Signature:
+    signature: str
+    decoded_signature: bytes
+
+    def __init__(self, signature: str) -> None:
+        self.signature = signature
+        self.decoded_signature = decode_base64(self.signature)
+
+
+class SignatureContainer:
+    keyid: Dict[KeyID, Signature]
+
+    def __init__(self, container_data: Dict[str, str]) -> None:
+        self.keyid = dict()
+        for key_id, signature in container_data.items():
+            self.keyid[KeyID(key_id)] = Signature(signature)
+
+
+class Signatures:
+    servers: Dict[ServerName, SignatureContainer]
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self.servers = dict()
+        for server, container in data.items():
+            self.servers[ServerName(server)] = SignatureContainer(container)
+
+
 class Event(EventBase):
     """
     A standard Event in a room(not a piece of state) such as a message or a reaction
@@ -429,7 +456,7 @@ class Event(EventBase):
     hashes: Dict[str, str]
     origin: str
     origin_server_ts: int
-    signatures: Dict[ServerName, Dict[KeyID, Signature]]
+    signatures: Signatures
     relations: Optional[RelatesTo] = None
 
     def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:
@@ -444,10 +471,7 @@ class Event(EventBase):
         self.origin_server_ts = self.unrecognized.pop("origin_server_ts", 0)
         signatures = self.unrecognized.pop("signatures", {})
         if signatures:
-            self.signatures = signatures
-            # for server_name, signatures_data in signatures.items():
-            #     for key_id, signature in signatures_data.items():
-            #         self.signatures[server_name].update((key_id, signature))
+            self.signatures = Signatures(signatures)
         relations = self.content.pop("m.relates_to", {})
         if relations:
             self.relations = RelatesTo(relations)
@@ -514,9 +538,9 @@ class Event(EventBase):
         #
         #    Signatures: example.com ed25519:k3y1D
         #
-        for server, key_id_and_hash in self.signatures.items():
+        for server, signature_container in self.signatures.servers.items():
             summary += f"{dc.front_pad(sig_header)}: {server} "
-            for key_id in key_id_and_hash.keys():
+            for key_id in signature_container.keyid:
                 summary += f"{key_id}\n"
 
         # Hashes should look like:
