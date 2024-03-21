@@ -30,6 +30,7 @@ from federationbot.responses import (
     FederationErrorResponse,
     FederationServerKeyResponse,
     FederationVersionResponse,
+    ServerVerifyKeys,
 )
 from federationbot.server_result import (
     DiagnosticInfo,
@@ -452,7 +453,7 @@ class FederationHandler:
         else:
             return FederationVersionResponse.from_response(response)
 
-    async def get_server_keys(
+    async def _get_server_keys(
         self, server_name: str, timeout: float = 10.0
     ) -> Union[FederationServerKeyResponse, FederationErrorResponse]:
         response = await self.federation_request(
@@ -461,23 +462,20 @@ class FederationHandler:
             method="GET",
             timeout_seconds=timeout,
         )
-        if response.status_code == 404:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.NONE
-            )
-        elif response.status_code != 200:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.ERROR
-            )
-        else:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.OK
-            )
-
         if isinstance(response, FederationErrorResponse):
             return response
         else:
             return FederationServerKeyResponse.from_response(response)
+
+    async def get_server_keys(
+        self, server_name: str, timeout: float = 10.0
+    ) -> Union[ServerVerifyKeys, FederationErrorResponse]:
+        response = await self._get_server_keys(server_name=server_name, timeout=timeout)
+
+        if isinstance(response, FederationErrorResponse):
+            return response
+        else:
+            return response.server_verify_keys
 
     async def get_server_keys_from_notary(
         self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0

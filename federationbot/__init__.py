@@ -53,6 +53,7 @@ from federationbot.responses import (
     FederationErrorResponse,
     FederationServerKeyResponse,
     FederationVersionResponse,
+    ServerVerifyKeys,
 )
 from federationbot.server_result import (
     DiagnosticInfo,
@@ -2705,30 +2706,22 @@ class FederationBot(Plugin):
             return
 
         server_to_server_data: Dict[
-            str, Union[FederationErrorResponse, FederationServerKeyResponse]
-        ] = {}
+            str, Union[FederationErrorResponse, ServerVerifyKeys]
+        ] = dict()
         await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}"
         )
 
-        async def _server_keys_worker(queue: Queue) -> None:
+        async def _server_keys_worker(queue: Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
                 try:
-                    server_to_server_data[worker_server_name] = await asyncio.wait_for(
-                        self.federation_handler.get_server_keys(worker_server_name),
+                    server_to_server_data[
+                        worker_server_name
+                    ] = await self.federation_handler.get_server_keys(
+                        worker_server_name,
                         timeout=10.0,
-                    )
-
-                except asyncio.TimeoutError:
-                    server_to_server_data[worker_server_name] = FederationErrorResponse(
-                        status_code=0,
-                        status_reason="Request timed out",
-                        response_dict={},
-                        server_result=ServerResultError(
-                            error_reason="Timeout err", diag_info=DiagnosticInfo(True)
-                        ),
                     )
 
                 except Exception as e:
@@ -2750,7 +2743,12 @@ class FederationBot(Plugin):
             await keys_queue.put(server_name)
 
         tasks = []
-        for i in range(MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST):
+        for i in range(
+            min(
+                len(list_of_servers_to_check),
+                MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST,
+            )
+        ):
             task = asyncio.create_task(_server_keys_worker(keys_queue))
             tasks.append(task)
 
@@ -2772,21 +2770,22 @@ class FederationBot(Plugin):
         #       matrix.org | aYp3g  | Pretty formatted DateTime
         #                  | 0ldK3y | EXPIRED: Expired DateTime
 
-        server_name_col = DisplayLineColumnConfig("Server Name")
+        server_name_col = DisplayLineColumnConfig("Server Name", justify=Justify.RIGHT)
         server_key_col = DisplayLineColumnConfig("Key ID")
         valid_until_ts_col = DisplayLineColumnConfig("Valid until(UTC)")
 
         for server_name, server_results in server_to_server_data.items():
-            if isinstance(server_results, FederationServerKeyResponse):
+            # Don't care about widening columns for errors
+            if isinstance(server_results, ServerVerifyKeys):
                 server_name_col.maybe_update_column_width(len(server_name))
-                valid_until = server_results.server_verify_keys.valid_until_ts
+                valid_until = server_results.valid_until_ts
 
-                for key_id in server_results.server_verify_keys.verify_keys.keys():
+                for key_id in server_results.verify_keys.keys():
                     server_key_col.maybe_update_column_width(len(key_id))
                 for (
                     key_id,
                     old_key_data,
-                ) in server_results.server_verify_keys.old_verify_keys.items():
+                ) in server_results.old_verify_keys.items():
                     server_key_col.maybe_update_column_width(len(key_id))
                     if old_key_data:
                         valid_until_ts_col.maybe_update_column_width(
@@ -2813,18 +2812,18 @@ class FederationBot(Plugin):
         list_of_result_data = []
         # Begin the data render. Use the sorted list, alphabetical looks nicer. Even
         # if there were errors, there will be data available.
-        for server_name, server_response in sorted(server_to_server_data.items()):
+        for server_name, server_results in sorted(server_to_server_data.items()):
             buffered_message = ""
-            buffered_message += f"{server_name_col.front_pad(server_name)} | "
+            buffered_message += f"{server_name_col.pad(server_name)} | "
 
-            if isinstance(server_response, FederationErrorResponse):
-                buffered_message += f"{server_response.reason}\n"
+            if isinstance(server_results, FederationErrorResponse):
+                buffered_message += f"{server_results.reason}\n"
 
             else:
-                # This will be a FederationServerKeyResponse
-                verify_keys = server_response.server_verify_keys.verify_keys
-                old_verify_keys = server_response.server_verify_keys.old_verify_keys
-                valid_until_ts = server_response.server_verify_keys.valid_until_ts
+                # This will be a ServerVerifyKeys
+                verify_keys = server_results.verify_keys
+                old_verify_keys = server_results.old_verify_keys
+                valid_until_ts = server_results.valid_until_ts
                 valid_until_pretty = "None Found"
                 if valid_until_ts > 0:
                     valid_until_pretty = pretty_print_timestamp(valid_until_ts)
@@ -2832,28 +2831,33 @@ class FederationBot(Plugin):
                 # Use a for loop, even though there will only be a single key. I suppose
                 # with the way the spec is written, multiple keys may be possible? There
                 # will only be a single valid_until_ts for any of them if so.
-                for key_id in verify_keys.keys():
+                for key_id in verify_keys:
                     buffered_message += f"{server_key_col.pad(key_id)} | "
                     buffered_message += f"{valid_until_pretty}\n"
 
-                for key_id, key_data in old_verify_keys.items():
+                for old_key_id, old_key_data in old_verify_keys.items():
                     # Render the old_verify_keys inline with the normal keys. Unlike the
                     # normal keys, old_verify_keys each have an expired timestamp
                     buffered_message += f"{server_name_col.pad('')} | "
-                    buffered_message += f"{server_key_col.pad(key_id)} | "
-                    expired_ts = old_verify_keys[key_id].expired_ts
+                    buffered_message += f"{server_key_col.pad(old_key_id)} | "
+                    expired_ts = old_key_data.expired_ts
                     expired_ts_pretty = "None Found"
                     if expired_ts > 0:
                         expired_ts_pretty = pretty_print_timestamp(expired_ts)
-                    buffered_message += f"{expired_ts_pretty}\n"
+                    buffered_message += f"*{expired_ts_pretty}\n"
 
             list_of_result_data.extend([buffered_message])
 
             # Only if there was a single server because of the above condition
             if display_raw:
-                list_of_result_data.extend(
-                    [f"{json.dumps(server_response.response_dict, indent=4)}\n"]
-                )
+                if isinstance(server_results, ServerVerifyKeys):
+                    list_of_result_data.extend(
+                        [f"{json.dumps(server_results._raw_data, indent=4)}\n"]
+                    )
+                else:
+                    list_of_result_data.extend(
+                        [f"{json.dumps(server_results.response_dict, indent=4)}\n"]
+                    )
 
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])
