@@ -249,7 +249,7 @@ class FederationHandler:
             code = -1
 
         except client_exceptions.ServerDisconnectedError:
-            diag_info.error(f"Server Disconnect Error")
+            diag_info.error("Server Disconnect Error")
             error_reason = "Server Disconnect Error"
 
         # except client_exceptions.ConnectionTimeoutError as e:
@@ -257,15 +257,15 @@ class FederationHandler:
         # except client_exceptions.SocketTimeoutError as e:
 
         except client_exceptions.ServerTimeoutError:
-            diag_info.error(f"Server Timeout Error")
+            diag_info.error("Server Timeout Error")
             error_reason = "Server Timeout Error"
 
         except client_exceptions.ServerFingerprintMismatch:
-            diag_info.error(f"Server Fingerprint Mismatch Error")
+            diag_info.error("Server Fingerprint Mismatch Error")
             error_reason = "Server Fingerprint Mismatch Error"
 
         except client_exceptions.ServerConnectionError:
-            diag_info.error(f"Server Connection Error")
+            diag_info.error("Server Connection Error")
             error_reason = "ServerConnectionError"
 
         except client_exceptions.ClientSSLError as e:
@@ -275,7 +275,7 @@ class FederationHandler:
             code = -1
 
         except client_exceptions.ClientProxyConnectionError:
-            diag_info.error(f"Client Proxy Connection Error")
+            diag_info.error("Client Proxy Connection Error")
             error_reason = "Client Proxy Connection Error"
 
         except client_exceptions.ClientConnectorError as e:
@@ -284,7 +284,7 @@ class FederationHandler:
             error_reason = f"Client Connector Error: {e.strerror}"
 
         except client_exceptions.ClientHttpProxyError:
-            diag_info.error(f"Client HTTP Proxy Error")
+            diag_info.error("Client HTTP Proxy Error")
             error_reason = "Client HTTP Proxy Error"
 
         except client_exceptions.WSServerHandshakeError:
@@ -292,30 +292,30 @@ class FederationHandler:
             pass
         except client_exceptions.ContentTypeError:
             # Pretty sure will never hit this one either, as it's not enforced here
-            diag_info.error(f"Content Type Error")
+            diag_info.error("Content Type Error")
             error_reason = "Content Type Error"
         except client_exceptions.ClientResponseError:
-            diag_info.error(f"Client Response Error")
+            diag_info.error("Client Response Error")
             error_reason = "Client Response Error"
 
         except client_exceptions.ClientPayloadError:
-            diag_info.error(f"Client Payload Error")
+            diag_info.error("Client Payload Error")
             error_reason = "Client Payload Error"
 
         except client_exceptions.InvalidURL:
-            diag_info.error(f"InvalidURL Error")
+            diag_info.error("InvalidURL Error")
             error_reason = "InvalidURL Error"
 
         except client_exceptions.ClientOSError:
-            diag_info.error(f"Client OS Error")
+            diag_info.error("Client OS Error")
             error_reason = "Client OS Error"
 
         except client_exceptions.ClientConnectionError:
-            diag_info.error(f"Client Connection Error")
+            diag_info.error("Client Connection Error")
             error_reason = "Client Connection Error"
 
         except client_exceptions.ClientError:
-            diag_info.error(f"Client Error")
+            diag_info.error("Client Error")
             error_reason = "Client Error"
 
         except ServerUnavailable as e:
