@@ -852,7 +852,7 @@ class LocationContent(UnencryptedRoomContent):
     # info is listed as 'LocationInfo' in the spec, but it's just a Dict that contains
     # thumbnail bits
     thumbnail_info: Optional[MediaMetadata] = None
-    thumbnail_url: Optional[str]
+    thumbnail_url: Optional[str] = None
 
     def __init__(self, raw_data: Dict[str, Any]) -> None:
         super().__init__(raw_data)
