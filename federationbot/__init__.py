@@ -2706,7 +2706,7 @@ class FederationBot(Plugin):
             return
 
         server_to_server_data: Dict[
-            str, Union[FederationErrorResponse, ServerVerifyKeys]
+            str, Union[FederationErrorResponse, FederationServerKeyResponse]
         ] = dict()
         await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server"
@@ -2719,7 +2719,7 @@ class FederationBot(Plugin):
                 try:
                     server_to_server_data[
                         worker_server_name
-                    ] = await self.federation_handler.get_server_keys(
+                    ] = await self.federation_handler._get_server_keys(
                         worker_server_name,
                         timeout=10.0,
                     )
@@ -2776,22 +2776,18 @@ class FederationBot(Plugin):
 
         for server_name, server_results in server_to_server_data.items():
             # Don't care about widening columns for errors
-            if isinstance(server_results, ServerVerifyKeys):
-                server_name_col.maybe_update_column_width(len(server_name))
-                valid_until = server_results.valid_until_ts
+            if isinstance(server_results, FederationServerKeyResponse):
 
-                for key_id in server_results.verify_keys.keys():
-                    server_key_col.maybe_update_column_width(len(key_id))
+                server_name_col.maybe_update_column_width(len(server_name))
+
                 for (
                     key_id,
-                    old_key_data,
-                ) in server_results.old_verify_keys.items():
+                    key_data,
+                ) in server_results.server_verify_keys.verify_keys.items():
                     server_key_col.maybe_update_column_width(len(key_id))
-                    if old_key_data:
-                        valid_until_ts_col.maybe_update_column_width(
-                            len(str(old_key_data.expired_ts))
-                        )
-                valid_until_ts_col.maybe_update_column_width(len(str(valid_until)))
+                    valid_until_ts_col.maybe_update_column_width(
+                        len(str(key_data.valid_until_ts))
+                    )
 
         # Begin constructing the message
 
@@ -2821,38 +2817,30 @@ class FederationBot(Plugin):
 
             else:
                 # This will be a ServerVerifyKeys
-                verify_keys = server_results.verify_keys
-                old_verify_keys = server_results.old_verify_keys
-                valid_until_ts = server_results.valid_until_ts
-                valid_until_pretty = "None Found"
-                if valid_until_ts > 0:
-                    valid_until_pretty = pretty_print_timestamp(valid_until_ts)
+                time_now = int(time.time() * 1000)
+                verify_keys = server_results.server_verify_keys.verify_keys
 
-                # Use a for loop, even though there will only be a single key. I suppose
-                # with the way the spec is written, multiple keys may be possible? There
-                # will only be a single valid_until_ts for any of them if so.
-                for key_id in verify_keys:
+                # There will not be more than a single key.
+                for key_id, key_data in verify_keys.items():
+                    valid_until_pretty = "None Found"
+                    valid_until_ts = key_data.valid_until_ts
+                    if valid_until_ts > 0:
+                        valid_until_pretty = pretty_print_timestamp(valid_until_ts)
+
+                    # This will mark the display with a * to visually express expired
+                    pretty_expired_marker = "*" if valid_until_ts < time_now else ""
                     buffered_message += f"{server_key_col.pad(key_id)} | "
-                    buffered_message += f"{valid_until_pretty}\n"
-
-                for old_key_id, old_key_data in old_verify_keys.items():
-                    # Render the old_verify_keys inline with the normal keys. Unlike the
-                    # normal keys, old_verify_keys each have an expired timestamp
-                    buffered_message += f"{server_name_col.pad('')} | "
-                    buffered_message += f"{server_key_col.pad(old_key_id)} | "
-                    expired_ts = old_key_data.expired_ts
-                    expired_ts_pretty = "None Found"
-                    if expired_ts > 0:
-                        expired_ts_pretty = pretty_print_timestamp(expired_ts)
-                    buffered_message += f"*{expired_ts_pretty}\n"
+                    buffered_message += f"{pretty_expired_marker}{valid_until_pretty}\n"
 
             list_of_result_data.extend([buffered_message])
 
             # Only if there was a single server because of the above condition
             if display_raw:
-                if isinstance(server_results, ServerVerifyKeys):
+                if isinstance(server_results, FederationServerKeyResponse):
                     list_of_result_data.extend(
-                        [f"{json.dumps(server_results._raw_data, indent=4)}\n"]
+                        [
+                            f"{json.dumps(server_results.server_verify_keys._raw_data, indent=4)}\n"
+                        ]
                     )
                 else:
                     list_of_result_data.extend(
@@ -3112,44 +3100,27 @@ class FederationBot(Plugin):
         for server_name, server_response in sorted(server_to_server_data.items()):
             # There will only be data for servers that didn't time out
             first_line = True
+            test_new_object = ServerVerifyKeys({})
             buffered_message = f"{server_name_col.front_pad(server_name)} | "
             if isinstance(server_response, FederationErrorResponse):
                 buffered_message += f"{server_response.reason}\n"
 
             else:
-                for server_keys in server_response.response_dict.get("server_keys", []):
-                    verify_keys = server_keys.get("verify_keys", {})
-                    old_verify_keys = server_keys.get("old_verify_keys", {})
-                    valid_until_ts: Optional[int] = server_keys.get(
-                        "valid_until_ts", None
-                    )
+                test_new_object.update_key_data_from_list(server_response.response_dict)
+                time_now = int(time.time() * 1000)
+                for v_key_id, server_data in test_new_object.verify_keys.items():
+                    valid_until_ts = server_data.valid_until_ts
                     valid_until_pretty = "None Found"
 
                     if valid_until_ts:
-                        valid_until_pretty = str(
-                            datetime.fromtimestamp(float(valid_until_ts / 1000))
-                        )
+                        valid_until_pretty = pretty_print_timestamp(valid_until_ts)
+                    pretty_expired_mark = "*" if valid_until_ts < time_now else ""
 
                     if not first_line:
                         buffered_message += f"{pad('', server_name_col.size)} | "
-                    for key_id in verify_keys.keys():
-                        buffered_message += f"{server_key_col.pad(key_id)} | "
-                        buffered_message += f"{valid_until_pretty}\n"
+                    buffered_message += f"{server_key_col.pad(v_key_id)} | "
+                    buffered_message += f"{pretty_expired_mark}{valid_until_pretty}\n"
 
-                    for key_id in old_verify_keys.keys():
-                        expired_valid_until: Optional[int] = old_verify_keys[
-                            key_id
-                        ].get("expired_ts", None)
-                        expired_ts_pretty = "None Found"
-                        if expired_valid_until:
-                            expired_ts_pretty = str(
-                                datetime.fromtimestamp(
-                                    float(expired_valid_until / 1000)
-                                )
-                            )
-                        buffered_message += f"{pad('', server_name_col.size)} | "
-                        buffered_message += f"{server_key_col.pad(key_id)} | "
-                        buffered_message += f"{expired_ts_pretty}\n"
                     first_line = False
 
             list_of_result_data.extend([buffered_message])
