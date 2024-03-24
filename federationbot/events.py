@@ -205,7 +205,7 @@ class EventBase:
 
         is_event_id_ok = f"{'✅' if verify_event_id else '❌'}"
         summary += dc.render_pretty_line(
-            event_id_header, f"{self.event_id} {is_event_id_ok}"
+            event_id_header, f"{is_event_id_ok} {self.event_id}"
         )
         summary += dc.render_pretty_line(type_header, self.event_type)
         summary += dc.render_pretty_line(room_id_header, self.room_id)
@@ -533,7 +533,7 @@ class Event(EventBase):
         #
         for hash_type, hash_value in self.hashes.items():
             pretty_hash_result = "✅" if self.verify_content_hash() else "❌"
-            summary += f"{dc.front_pad(hashes_header)}: {hash_type}: {pretty_hash_result} {hash_value}\n"
+            summary += f"{dc.front_pad(hashes_header)}: {pretty_hash_result} {hash_type}: {hash_value}\n"
 
         # The previous output does not add a new line(well, it does now) but create some
         # space anyways
