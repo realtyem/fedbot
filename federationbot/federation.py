@@ -488,9 +488,13 @@ class FederationHandler:
     async def get_server_keys_from_notary(
         self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
     ) -> FederationBaseResponse:
+        minimum_valid_until_ts = int(time.time() * 1000) + (
+            30 * 60 * 1000
+        )  # Add 30 minutes
         response = await self.federation_request(
             destination_server_name=from_server_name,
             path=f"/_matrix/key/v2/query/{fetch_server_name}",
+            query_args=[("minimum_valid_until_ts", minimum_valid_until_ts)],
             method="GET",
             timeout_seconds=timeout,
         )
@@ -629,6 +633,7 @@ class FederationHandler:
             origin_server: The server placing the request
             destination_server: The server receiving the request
             event_id: The opaque string of the id given to the Event
+            timeout:
 
         Returns: A tuple containing the FederationResponse received and the Event
             contained in a List
