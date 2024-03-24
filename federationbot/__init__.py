@@ -203,7 +203,10 @@ class FederationBot(Plugin):
             for server, key_data in self.config["server_signing_keys"].items():
                 self.server_signing_keys[server] = key_data
         self.federation_handler = FederationHandler(
-            self.http, self.log, self.server_signing_keys
+            self.http,
+            self.log,
+            get_domain_from_id(self.client.mxid),
+            self.server_signing_keys,
         )
 
     async def pre_stop(self) -> None:

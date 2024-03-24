@@ -45,10 +45,12 @@ class FederationHandler:
         self,
         http_client: ClientSession,
         logger: TraceLogger,
+        hosting_server_name: str,
         server_signing_keys: Dict[str, str],
     ):
         self.http_client = http_client
         self.logger = logger
+        self.hosting_server = hosting_server_name
         self.server_signing_keys = server_signing_keys
         self.json_decoder = json.JSONDecoder()
         self.delegation_handler = DelegationHandler(self.logger)
