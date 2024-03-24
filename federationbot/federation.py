@@ -32,7 +32,6 @@ from federationbot.responses import (
     FederationErrorResponse,
     FederationServerKeyResponse,
     FederationVersionResponse,
-    KeyContainer,
     ServerVerifyKeys,
 )
 from federationbot.server_result import (
@@ -41,7 +40,7 @@ from federationbot.server_result import (
     ServerResult,
     ServerResultError,
 )
-from federationbot.types import KeyID, SignatureVerifyResult
+from federationbot.types import KeyContainer, KeyID, SignatureVerifyResult
 from federationbot.utils import full_dict_copy
 
 
