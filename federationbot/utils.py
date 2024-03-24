@@ -81,8 +81,8 @@ class DisplayLineColumnConfig:
         what_to_display = data_piece if data_piece is not None else self.header_name
         if self.justification == Justify.RIGHT:
             return f"{pad(what_to_display, self.size + additional_padding, front=True)}"
-        else:
-            return f"{pad(what_to_display, self.size + additional_padding)}"
+
+        return f"{pad(what_to_display, self.size + additional_padding)}"
 
     def front_pad(self, data_piece: Optional[str] = None) -> str:
         """
@@ -186,9 +186,7 @@ class DataSet:
         for line in self.preliminary_data:
             self.final_data.extend([f"{self.dc.pad(line)}"])
 
-    def load_fresh_data(self, new_header: str, new_data: List[str]) -> None:
-        new_data_tuple = (new_header, new_data)
-
+    def load_fresh_data(self, new_data: List[str]) -> None:
         self.preliminary_data = new_data
         self._recalculate_column_width()
 
@@ -346,8 +344,8 @@ class ProgressBar:
 
 
 class BitmapProgressBarStyle(Enum):
-    linear = auto()
-    scatter = auto()
+    LINEAR = auto()
+    SCATTER = auto()
 
 
 class BitmapProgressBar:
@@ -428,7 +426,7 @@ class BitmapProgressBar:
         max_size: int,
         front: str = "{",
         rear: str = "}",
-        style: BitmapProgressBarStyle = BitmapProgressBarStyle.scatter,
+        style: BitmapProgressBarStyle = BitmapProgressBarStyle.SCATTER,
     ) -> None:
         self.line_size = line_size
         self.max_size = max_size
@@ -436,11 +434,11 @@ class BitmapProgressBar:
         self.rear = rear
         self.style = style
         # Create the empty bitmap and fill it with False
-        self._map = dict()
+        self._map = {}
         for i in range(1, self.max_size + 1):
             self._map[i] = False
 
-        if self.style == BitmapProgressBarStyle.scatter:
+        if self.style == BitmapProgressBarStyle.SCATTER:
             self.constants = {
                 1: "⡀",
                 2: "⣀",
@@ -451,7 +449,7 @@ class BitmapProgressBar:
                 7: "⣷",
                 8: "⣿",
             }
-        elif self.style == BitmapProgressBarStyle.linear:
+        elif self.style == BitmapProgressBarStyle.LINEAR:
             self.constants = {
                 1: "⡀",
                 2: "⡄",
@@ -505,7 +503,7 @@ class BitmapProgressBar:
         Returns: None
 
         """
-        if self.style == BitmapProgressBarStyle.scatter:
+        if self.style == BitmapProgressBarStyle.SCATTER:
             for value in values:
                 self._map[value] = True
         else:

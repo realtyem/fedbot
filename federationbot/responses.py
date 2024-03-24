@@ -1,12 +1,11 @@
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
-import time
 
 from aiohttp import RequestInfo
 from multidict import CIMultiDictProxy
 
 from federationbot.server_result import ServerResult
-from federationbot.types import KeyID, ServerVerifyKeys, Signatures
+from federationbot.types import ServerVerifyKeys, Signatures
 
 # The spec recommends caching responses for a while, to avoid excess traffic
 # For good results, keep for 24 hours
@@ -38,9 +37,6 @@ class FederationBaseResponse:
         if list_of_errors is None:
             list_of_errors = []
         self.server_result = server_result
-        now = int(time.time_ns() / 1000)
-        self.server_result.last_contact = now
-        self.server_result.drop_after = now + GOOD_RESULT_TIMEOUT_MS
         self.status_code = status_code
         self.reason = status_reason
         self.response_dict = response_dict
@@ -69,9 +65,6 @@ class FederationErrorResponse(FederationBaseResponse):
             list_of_errors=list_of_errors,
             headers=headers,
             request_info=request_info,
-        )
-        self.server_result.drop_after = int(
-            (time.time_ns() / 1000) + BAD_RESULT_TIMEOUT_MS
         )
         if self.response_dict:
             self.reason = self.response_dict.get("error", self.reason)

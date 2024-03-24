@@ -40,8 +40,8 @@ def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[s
     except ValueError:
         # Accept this gracefully, as it is probably the common path
         pass
-    finally:
-        return server_host, server_port
+
+    return server_host, server_port
 
 
 def is_this_an_ip_address(host: str) -> bool:
@@ -57,8 +57,8 @@ def is_this_an_ip_address(host: str) -> bool:
         # This isn't a real ipv4 or ipv6 address
         # This is probably the common path
         return False
-    else:
-        return True
+
+    return True
 
 
 def _parse_and_check_well_known_response(
@@ -520,57 +520,56 @@ class DelegationHandler:
                 )
                 return server_result
 
-            else:
-                # Step 3c(and 3d), check SRV records then resolve regular DNS
-                # records, except for CNAME. Still no explicit port.
-                # HOST header should be the well_known host only, no port
-                diag_info.mark_step_num(
-                    "Step 3.3(and 3.4)",
-                    "Checking for SRV records of host from Well-Known",
-                )
-                srv_host, srv_port, diag_info = await self.check_dns_for_srv_records(
-                    well_known_host, diag_info=diag_info
-                )
+            # Step 3c(and 3d), check SRV records then resolve regular DNS
+            # records, except for CNAME. Still no explicit port.
+            # HOST header should be the well_known host only, no port
+            diag_info.mark_step_num(
+                "Step 3.3(and 3.4)",
+                "Checking for SRV records of host from Well-Known",
+            )
+            srv_host, srv_port, diag_info = await self.check_dns_for_srv_records(
+                well_known_host, diag_info=diag_info
+            )
 
-                if srv_host and srv_port:
-                    # SRV records should always have a port, that is literally
-                    # their purpose
-                    (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                        srv_host, check_cname=False, diag_info=diag_info
-                    )
-
-                    server_result = ServerResult(
-                        host=host,
-                        well_known_host=well_known_host,
-                        srv_host=srv_host,
-                        port=srv_port,
-                        host_header=well_known_host,
-                        sni_server_name=well_known_host,
-                        diag_info=diag_info,
-                    )
-                    return server_result
-
-                # Step 3e, no SRV records and no explicit port, use well-known with
-                # implied port 8448
-                # HOST header should be the well_known host, no port
-                diag_info.mark_step_num(
-                    "Step 3.5",
-                    "Checking for implied port 8448 of host from Well-Known",
-                )
-
+            if srv_host and srv_port:
+                # SRV records should always have a port, that is literally
+                # their purpose
                 (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                    well_known_host, diag_info=diag_info
+                    srv_host, check_cname=False, diag_info=diag_info
                 )
 
                 server_result = ServerResult(
                     host=host,
                     well_known_host=well_known_host,
-                    port="8448",
+                    srv_host=srv_host,
+                    port=srv_port,
                     host_header=well_known_host,
                     sni_server_name=well_known_host,
                     diag_info=diag_info,
                 )
                 return server_result
+
+            # Step 3e, no SRV records and no explicit port, use well-known with
+            # implied port 8448
+            # HOST header should be the well_known host, no port
+            diag_info.mark_step_num(
+                "Step 3.5",
+                "Checking for implied port 8448 of host from Well-Known",
+            )
+
+            (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
+                well_known_host, diag_info=diag_info
+            )
+
+            server_result = ServerResult(
+                host=host,
+                well_known_host=well_known_host,
+                port="8448",
+                host_header=well_known_host,
+                sni_server_name=well_known_host,
+                diag_info=diag_info,
+            )
+            return server_result
 
         # So well-known was a bust, move on to SRV records
         # Step 4 and 5(the deprecated SRV)

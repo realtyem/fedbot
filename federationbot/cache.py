@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Generic, Optional, TypeVar
+from typing import Callable, Dict, Generic, Optional, TypeVar
 import asyncio
 import time
 
@@ -41,7 +41,7 @@ class LRUCache(Generic[KT, VT]):
             expire_after_seconds:
             cleanup_task_sleep_time_seconds:
         """
-        cache: Dict[KT, LRUCacheEntry[VT]] = dict()
+        cache: Dict[KT, LRUCacheEntry[VT]] = {}
         self._cache = cache
         self.time_cb = time.time
         self.eviction_condition_cb = (

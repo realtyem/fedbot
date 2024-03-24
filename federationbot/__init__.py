@@ -37,13 +37,11 @@ from federationbot.events import (
     EventError,
     GenericStateEvent,
     RoomMemberStateEvent,
-    construct_event_id_from_event_v3,
     determine_what_kind_of_event,
     redact_event,
 )
 from federationbot.federation import (
     FederationHandler,
-    authorization_headers,
     filter_events_based_on_type,
     filter_state_events_based_on_membership,
     parse_list_response_into_list_of_event_bases,
@@ -55,18 +53,12 @@ from federationbot.responses import (
     FederationVersionResponse,
     ServerVerifyKeys,
 )
-from federationbot.server_result import (
-    DiagnosticInfo,
-    ResponseStatusType,
-    ServerResult,
-    ServerResultError,
-)
+from federationbot.server_result import DiagnosticInfo, ServerResultError
 from federationbot.utils import (
     BitmapProgressBar,
     BitmapProgressBarStyle,
     DisplayLineColumnConfig,
     Justify,
-    ProgressBar,
     get_domain_from_id,
     pad,
     pretty_print_timestamp,
@@ -251,7 +243,7 @@ class FederationBot(Plugin):
             command_event.room_id, pinned_message, ReactionCommandStatus.START.value
         )
         self.task_control[pinned_message] = ReactionCommandStatus.START
-        header_line = "Bot status(wip)\n"
+
         finish_on_this_round = False
         while True:
             if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
@@ -447,7 +439,6 @@ class FederationBot(Plugin):
             for_direction: PaginationDirection, queue: Queue
         ) -> None:
             retry_token = False
-            retry_count = 0
             back_off_time = 0.0
             next_token = None
             while True:
@@ -465,7 +456,6 @@ class FederationBot(Plugin):
                         direction=for_direction,
                         from_token=next_token,
                         limit=per_iteration_int,
-                        # filter_json=,
                     )
                     iter_finish_time = time.time()
                 except MatrixRequestError as e:
@@ -744,7 +734,6 @@ class FederationBot(Plugin):
         # Notes: If an Event has multiple prev_events, check them all before moving on.
         # They should all collectively have the same prev_event as a batch
 
-        event_id_analyzed: Set[str] = set()
         event_id_ok_list: Set[str] = set()
         event_id_error_list: Set[str] = set()
         event_id_resolved_error_list: Set[str] = set()
@@ -1372,9 +1361,9 @@ class FederationBot(Plugin):
         interval_float = 5.0
         num_of_intervals = seconds_float / interval_float
         if style == "linear":
-            style_type = BitmapProgressBarStyle.linear
+            style_type = BitmapProgressBarStyle.LINEAR
         else:
-            style_type = BitmapProgressBarStyle.scatter
+            style_type = BitmapProgressBarStyle.SCATTER
         how_many_to_pull = max(int(max_size_int / num_of_intervals), 1)
         progress_bar = BitmapProgressBar(30, max_size_int, style=style_type)
         range_list = []
@@ -1382,7 +1371,7 @@ class FederationBot(Plugin):
         constants_display_string = ""
         for digit, value in progress_bar.constants.items():
             constants_display_string += f"'{value}', "
-        spaces_display_string = f"' ', ' ', ' ', ' ', ' '"
+        spaces_display_string = "' ', ' ', ' ', ' ', ' '"
         await command_event.respond(
             wrap_in_code_block_markdown(
                 f"fullb char: {constants_display_string}\n"
@@ -1392,7 +1381,7 @@ class FederationBot(Plugin):
             )  #
         )
 
-        if style_type == BitmapProgressBarStyle.scatter:
+        if style_type == BitmapProgressBarStyle.SCATTER:
             for i in range(1, max_size_int + 1):
                 range_list.extend([i])
         else:
@@ -1409,7 +1398,7 @@ class FederationBot(Plugin):
         while True:
             set_to_pull = set()
             start_time = time.time()
-            if style_type == BitmapProgressBarStyle.scatter:
+            if style_type == BitmapProgressBarStyle.SCATTER:
                 for j in range(0, min(int(how_many_to_pull), len(range_list))):
                     entry_index = random.randint(0, len(range_list) - 1)
                     entry = range_list.pop(entry_index)
@@ -2997,7 +2986,7 @@ class FederationBot(Plugin):
 
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                f"Only can see raw JSON data if a single server is selected(as the "
+                "Only can see raw JSON data if a single server is selected(as the "
                 "response would be super spammy)."
             )
             return
@@ -3566,22 +3555,22 @@ class FederationBot(Plugin):
         event_id_in_timeline: str,
     ) -> List[str]:
         # Should be a faithful recreation of what Synapse does.
-        sql = """
-            SELECT
-                /* Match the domain part of the MXID */
-                substring(c.state_key FROM '@[^:]*:(.*)$') as server_domain
-            FROM current_state_events c
-            /* Get the depth of the event from the events table */
-            INNER JOIN events AS e USING (event_id)
-            WHERE
-                /* Find any join state events in the room */
-                c.type = 'm.room.member'
-                AND c.membership = 'join'
-                AND c.room_id = ?
-            /* Group all state events from the same domain into their own buckets (groups) */
-            GROUP BY server_domain
-            /* Sorted by lowest depth first */
-            ORDER BY min(e.depth) ASC;
+        """
+        SELECT
+            /* Match the domain part of the MXID */
+            substring(c.state_key FROM '@[^:]*:(.*)$') as server_domain
+        FROM current_state_events c
+        /* Get the depth of the event from the events table */
+        INNER JOIN events AS e USING (event_id)
+        WHERE
+            /* Find any join state events in the room */
+            c.type = 'm.room.member'
+            AND c.membership = 'join'
+            AND c.room_id = ?
+        /* Group all state events from the same domain into their own buckets (groups) */
+        GROUP BY server_domain
+        /* Sorted by lowest depth first */
+        ORDER BY min(e.depth) ASC;
         """
         # (Given the toolbox at the time of writing) I think the best way to simulate
         # this will be to use get_state_ids_from_server(), which returns a tuple of the
@@ -3726,28 +3715,8 @@ class FederationBot(Plugin):
         return event
 
 
-def format_result_lines(
-    server_name: str,
-    server_name_max_size: int,
-    server_software: str,
-    server_software_max_size: int,
-    server_version: str,
-    server_version_max_size: int,
-) -> str:
-    buffered_message = (
-        f"{pad(server_name, server_name_max_size, front=True)} | "
-        f"{pad(server_software, server_software_max_size)}"
-        f" | {pad(server_version, server_version_max_size, trim_backend=True)}\n"
-    )
-    return buffered_message
 
 
-def format_result_lines_var(line_segments: List[Tuple[str, int]]) -> str:
-    buffered_message = ""
-    count = len(line_segments)
-    for line_data, column_size in line_segments:
-        pass
-    return buffered_message
 
 
 def wrap_in_code_block_markdown(existing_buffer: str) -> str:
@@ -3777,28 +3746,6 @@ def wrap_in_pre_tags(incoming: str) -> str:
     buffer = ""
     if incoming != "":
         buffer = f"<pre>\n{incoming}\n</pre>\n"
-    return buffer
-
-
-def wrap_in_ul_tags(incoming: str) -> str:
-    buffer = ""
-    if incoming != "":
-        buffer = f"<ul>\n{incoming}\n</ul>\n"
-    return buffer
-
-
-def wrap_in_li_tags(incoming: str) -> str:
-    buffer = ""
-    if incoming != "":
-        buffer += f"<li>\n{incoming}\n</li>\n"
-    return buffer
-
-
-def wrap_in_details(incoming: str, summary_tag: str) -> str:
-    buffer = ""
-    if incoming != "":
-        buffer = f"<details>\n<summary>{summary_tag}</summary>\n"
-        buffer += f"{incoming}\n</details>\n"
     return buffer
 
 
