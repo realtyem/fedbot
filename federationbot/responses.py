@@ -6,8 +6,9 @@ from aiohttp import RequestInfo
 from multidict import CIMultiDictProxy
 from unpaddedbase64 import decode_base64
 
-from federationbot.events import KeyID, Signatures, full_dict_copy
 from federationbot.server_result import ServerResult
+from federationbot.types import KeyID, Signatures
+from federationbot.utils import full_dict_copy
 
 # The spec recommends caching responses for a while, to avoid excess traffic
 # For good results, keep for 24 hours
