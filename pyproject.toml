@@ -8,3 +8,8 @@ line_length = 88
 [tool.black]
 line-length = 88
 target-version = ["py38"]
+
+[tool.pylint]
+disable = ["line-too-long", "missing-function-docstring", "missing-module-docstring",
+    "missing-class-docstring", "too-few-public-methods", "too-many-arguments",
+    "too-many-instance-attributes", "too-many-return-statements", "too-many-statements"]
