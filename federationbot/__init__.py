@@ -266,7 +266,8 @@ class FederationBot(Plugin):
                 f"New server_result cache: {len(self.federation_handler._server_discovery_cache)}\n"
                 # TODO: Lose this after Tom seen it(engrish is grate)
                 f" Good server results: {len([1 for _ in good_server_results])}\n"
-                f" Bad server results: {len([1 for _ in bad_server_results])}"
+                f" Bad server results: {len([1 for _ in bad_server_results])}\n"
+                f"Server Signing keys: {len(self.federation_handler._server_keys_cache)}\n"
             )
             await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(buffered_line)),

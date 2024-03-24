@@ -62,11 +62,13 @@ class FederationHandler:
         self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
         # Map this cache to server_name -> ServerResult
         self._server_discovery_cache: LRUCache[str, ServerResult] = LRUCache()
+        self._server_keys_cache: LRUCache[str, ServerVerifyKeys] = LRUCache()
 
     async def stop(self) -> None:
         # For stopping the cleanup task on these caches
         await self._events_cache.stop()
         await self._server_discovery_cache.stop()
+        await self._server_keys_cache.stop()
 
     async def _federation_request(
         self,
@@ -498,12 +500,18 @@ class FederationHandler:
         self, for_server_name: str, key_id_needed: str, timeout: float = 10.0
     ) -> Dict[KeyID, KeyContainer]:
         # TODO: I feel like this is incomplete in error handling
-        # TODO: still need to implement the caching
-        server_verify_keys = await self.get_server_keys(for_server_name, timeout)
         key_id_formatted = KeyID(key_id_needed)
+        cached_server_keys = self._server_keys_cache.get(for_server_name)
+        if (
+            cached_server_keys is not None
+            and key_id_formatted in cached_server_keys.verify_keys
+        ):
+            return cached_server_keys.verify_keys
+        server_verify_keys = await self.get_server_keys(for_server_name, timeout)
         if isinstance(server_verify_keys, FederationErrorResponse):
             raise ServerUnavailable(server_verify_keys.reason)
         else:
+            self._server_keys_cache.set(for_server_name, server_verify_keys)
             verify_keys = server_verify_keys.verify_keys
             if key_id_formatted in verify_keys:
                 return server_verify_keys.verify_keys
@@ -515,12 +523,16 @@ class FederationHandler:
                 if isinstance(notary_server_verify_keys, FederationErrorResponse):
                     raise ServerUnavailable(notary_server_verify_keys.reason)
                 else:
-                    new_server_verify_keys = ServerVerifyKeys({})
-                    new_server_verify_keys.update_key_data_from_list(
+                    cached_server_keys = self._server_keys_cache.get(for_server_name)
+                    if cached_server_keys is None:
+                        cached_server_keys = ServerVerifyKeys({})
+                    cached_server_keys.update_key_data_from_list(
                         notary_server_verify_keys.response_dict
                     )
-                    if key_id_formatted in new_server_verify_keys.verify_keys:
-                        return new_server_verify_keys.verify_keys
+                    self._server_keys_cache.set(for_server_name, cached_server_keys)
+
+                    if key_id_formatted in cached_server_keys.verify_keys:
+                        return cached_server_keys.verify_keys
         # TODO: I don't think this is right
         return {}
 
