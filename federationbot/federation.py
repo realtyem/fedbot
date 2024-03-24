@@ -8,8 +8,8 @@ import time
 from aiohttp import ClientResponse, ClientSession, client_exceptions
 from mautrix.types import EventID
 from mautrix.util.logging import TraceLogger
-from signedjson.key import decode_signing_key_base64
-from signedjson.sign import sign_json
+from signedjson.key import decode_signing_key_base64, decode_verify_key_bytes
+from signedjson.sign import SignatureVerifyException, sign_json, verify_signed_json
 from yarl import URL
 
 from federationbot.cache import LRUCache
@@ -20,16 +20,19 @@ from federationbot.delegation import (
 from federationbot.errors import ServerUnavailable
 from federationbot.events import (
     CreateRoomStateEvent,
+    Event,
     EventBase,
     EventError,
     RoomMemberStateEvent,
     determine_what_kind_of_event,
+    redact_event,
 )
 from federationbot.responses import (
     FederationBaseResponse,
     FederationErrorResponse,
     FederationServerKeyResponse,
     FederationVersionResponse,
+    KeyContainer,
     ServerVerifyKeys,
 )
 from federationbot.server_result import (
@@ -38,6 +41,8 @@ from federationbot.server_result import (
     ServerResult,
     ServerResultError,
 )
+from federationbot.types import KeyID, SignatureVerifyResult
+from federationbot.utils import full_dict_copy
 
 
 class FederationHandler:
@@ -489,6 +494,115 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
         return response
+
+    async def get_server_key(
+        self, for_server_name: str, key_id_needed: str, timeout: float = 10.0
+    ) -> Dict[KeyID, KeyContainer]:
+        # TODO: I feel like this is incomplete in error handling
+        # TODO: still need to implement the caching
+        server_verify_keys = await self.get_server_keys(for_server_name, timeout)
+        key_id_formatted = KeyID(key_id_needed)
+        if isinstance(server_verify_keys, FederationErrorResponse):
+            raise ServerUnavailable(server_verify_keys.reason)
+        else:
+            verify_keys = server_verify_keys.verify_keys
+            if key_id_formatted in verify_keys:
+                return server_verify_keys.verify_keys
+            else:
+                notary_server_verify_keys = await self.get_server_keys_from_notary(
+                    fetch_server_name=for_server_name,
+                    from_server_name=self.hosting_server,
+                )
+                if isinstance(notary_server_verify_keys, FederationErrorResponse):
+                    raise ServerUnavailable(notary_server_verify_keys.reason)
+                else:
+                    new_server_verify_keys = ServerVerifyKeys({})
+                    new_server_verify_keys.update_key_data_from_list(
+                        notary_server_verify_keys.response_dict
+                    )
+                    if key_id_formatted in new_server_verify_keys.verify_keys:
+                        return new_server_verify_keys.verify_keys
+        # TODO: I don't think this is right
+        return {}
+
+    async def verify_signatures_and_annotate_event(
+        self,
+        event: Event,
+        room_version: int,
+    ) -> None:
+        # There are two places that discuss verifying the signatures:
+
+        # 1. S2S section 27.2
+        #  First the signature is checked. The event is redacted following the
+        #  redaction algorithm, and the resultant object is checked for a signature
+        #  from the originating server, following the algorithm described in Checking
+        #  for a signature. Note that this step should succeed whether we have been
+        #  sent the full event or a redacted copy.
+        #
+        #  The signatures expected on an event are:
+        #
+        #  The sender’s server, unless the invite was created as a result of 3rd party
+        #  invite. The sender must already match the 3rd party invite, and the server
+        #  which actually sends the event may be a different server.
+        #
+        #  For room versions 1 and 2, the server which created the event_id. Other
+        #  room versions do not track the event_id over federation and therefore do
+        #  not need a signature from those servers.
+
+        # 2. Appendices 3.3
+
+        # To check if an entity has signed a JSON object an implementation does the
+        # following:
+        #
+        #  1. Checks if the signatures member of the object contains an entry with the
+        #     name of the entity. If the entry is missing then the check fails.
+        #  2. Removes any signing key identifiers from the entry with algorithms it
+        #     doesn’t understand. If there are no signing key identifiers left then the
+        #     check fails.
+        #  3. Looks up verification keys for the remaining signing key identifiers
+        #     either from a local cache or by consulting a trusted key server. If it
+        #     cannot find a verification key then the check fails.
+        #  4. Decodes the base64 encoded signature bytes. If base64 decoding fails then
+        #     the check fails.
+        #  5. Removes the signatures and unsigned members of the object.
+        #  6. Encodes the remainder of the JSON object using the Canonical JSON
+        #     encoding.
+        #  7. Checks the signature bytes against the encoded object using the
+        #     verification key. If this fails then the check fails. Otherwise the check
+        #     succeeds.
+
+        # So it looks like in summary:
+        # 1. Redact the event to strip off keys that aren't needed
+        # 2. Make sure we have the various servers that have signed the event's public
+        #    keys. Should already have the key decoded from base64 in the KeyContainer
+        # 3. Create the VerifyKey from the decoded server key
+        # 4. Run each servers key's through verify_signed_json(), which will:
+        #    * Strip off all signatures and the 'unsigned' section of an event
+        #    * Does the actual verifying
+        base_event = full_dict_copy(event.raw_data)
+        signatures = base_event.get("signatures", {})
+        redacted_base_event = redact_event(room_version, base_event)
+        for server_name, server_key_set in signatures.items():
+            for server_key_id in server_key_set.keys():
+                remote_server_keys = await self.get_server_key(
+                    server_name, server_key_id
+                )
+
+                remote_server_key = remote_server_keys.get(KeyID(server_key_id), None)
+                if remote_server_key is not None:
+                    verify_key = decode_verify_key_bytes(
+                        server_key_id, remote_server_key.key.decoded_key
+                    )
+                    try:
+                        verify_signed_json(redacted_base_event, server_name, verify_key)
+                    except SignatureVerifyException:
+                        event.signatures_verified[
+                            server_name
+                        ] = SignatureVerifyResult.FAIL
+                    else:
+                        event.signatures_verified[
+                            server_name
+                        ] = SignatureVerifyResult.SUCCESS
 
     async def get_event_from_server(
         self,
