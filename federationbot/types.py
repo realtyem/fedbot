@@ -22,7 +22,7 @@ class SignatureContainer:
     keyid: Dict[KeyID, Signature]
 
     def __init__(self, container_data: Dict[str, str]) -> None:
-        self.keyid = dict()
+        self.keyid = {}
         for key_id, signature in container_data.items():
             self.keyid[KeyID(key_id)] = Signature(signature)
 
@@ -31,7 +31,7 @@ class Signatures:
     servers: Dict[ServerName, SignatureContainer]
 
     def __init__(self, data: Dict[str, Any]) -> None:
-        self.servers = dict()
+        self.servers = {}
         for server, container in data.items():
             self.servers[ServerName(server)] = SignatureContainer(container)
 
@@ -142,8 +142,9 @@ class ServerVerifyKeys:
                 # It is extremely unlikely that a notary response will have a
                 # primary 'key set' with an older timestamp than we already have.
                 # But, if it should be newer update what's here.
-                if valid_until_ts > self.verify_keys[key_id].valid_until_ts:
-                    self.verify_keys[key_id].valid_until_ts = valid_until_ts
+                self.verify_keys[key_id].valid_until_ts = max(
+                    valid_until_ts, self.verify_keys[key_id].valid_until_ts
+                )
             else:
                 # First instance seen of this key at this point, add it
                 self.verify_keys[key_id] = KeyContainer(key_data, valid_until_ts)
@@ -151,9 +152,10 @@ class ServerVerifyKeys:
         for o_key_id, o_key_data in old_verify_keys.items():
             if o_key_id in self.verify_keys:
                 expired_ts = o_key_data.get("expired_ts", 0)
-                if self.verify_keys[o_key_id].valid_until_ts <= expired_ts:
-                    # Update the data if the timestamp is newer
-                    self.verify_keys[o_key_id].valid_until_ts = expired_ts
+                # Update the data if the timestamp is newer
+                self.verify_keys[o_key_id].valid_until_ts = max(
+                    expired_ts, self.verify_keys[o_key_id].valid_until_ts
+                )
             else:
                 # The KeyContainer class can deal with the attached 'expired_ts'
                 # directly

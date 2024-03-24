@@ -17,9 +17,8 @@ from federationbot.delegation import (
     DelegationHandler,
     check_and_maybe_split_server_name,
 )
-from federationbot.errors import ServerUnavailable
+from federationbot.errors import ServerUnreachable
 from federationbot.events import (
-    CreateRoomStateEvent,
     Event,
     EventBase,
     EventError,
@@ -117,7 +116,7 @@ class FederationHandler:
             if server_result.unhealthy:
                 # If this server was attempted at some point and errored, there is no
                 # point trying again until the cache entry is replaced.
-                raise ServerUnavailable(f"{server_result.unhealthy}")
+                raise ServerUnreachable(f"{server_result.unhealthy}")
 
             destination_port = int(server_result.port)
             resolved_destination_server = server_result.get_host()
@@ -165,8 +164,8 @@ class FederationHandler:
             )
         except Exception as e:
             raise e
-        else:
-            return response
+
+        return response
 
     async def federation_request(
         self,
@@ -333,7 +332,7 @@ class FederationHandler:
             diag_info.error("Client Error")
             error_reason = "Client Error"
 
-        except ServerUnavailable as e:
+        except ServerUnreachable as e:
             diag_info.error(f"{e}")
             error_reason = f"{e}"
 
@@ -390,7 +389,7 @@ class FederationHandler:
                         error_reason = "No/bad JSON returned"
 
                 if not result_dict:
-                    diag_info.add(f"No usable data in response")
+                    diag_info.add("No usable data in response")
 
         finally:
             # The request is complete. If the server wasn't actually there, the code
@@ -488,8 +487,8 @@ class FederationHandler:
 
         if isinstance(response, FederationErrorResponse):
             return response
-        else:
-            return response.server_verify_keys
+
+        return response.server_verify_keys
 
     async def get_server_keys_from_notary(
         self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
@@ -519,7 +518,7 @@ class FederationHandler:
             return cached_server_keys.verify_keys
         server_verify_keys = await self.get_server_keys(for_server_name, timeout)
         if isinstance(server_verify_keys, FederationErrorResponse):
-            raise ServerUnavailable(server_verify_keys.reason)
+            raise ServerUnreachable(server_verify_keys.reason)
         else:
             self._server_keys_cache.set(for_server_name, server_verify_keys)
             verify_keys = server_verify_keys.verify_keys
@@ -531,7 +530,7 @@ class FederationHandler:
                     from_server_name=self.hosting_server,
                 )
                 if isinstance(notary_server_verify_keys, FederationErrorResponse):
-                    raise ServerUnavailable(notary_server_verify_keys.reason)
+                    raise ServerUnreachable(notary_server_verify_keys.reason)
                 else:
                     cached_server_keys = self._server_keys_cache.get(for_server_name)
                     if cached_server_keys is None:

@@ -1,8 +1,6 @@
 from typing import List, Optional
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum
-import time
 
 
 class ResponseStatusType(Enum):
@@ -93,11 +91,6 @@ class ServerResult:
     """
     The information for how to connect to a server, either directly or through discovery
 
-    Policy for caching this object:
-    if just retrieved delegation results, leave drop_after at 0 so it will get reloaded
-    if actual federation request took place:
-        and was successful: update drop_after to now+GOOD_RESULT_TIMEOUT_MS
-        and was not successful: drop_after to now+BAD_RESULT_TIMEOUT_MS
     """
 
     host: str
@@ -109,8 +102,6 @@ class ServerResult:
     errors: List[str]
     error_reason: Optional[str]
     diag_info: DiagnosticInfo
-    last_contact: Optional[int]
-    drop_after: int
     unhealthy: Optional[str] = None
     use_sni: bool = True
 
@@ -133,20 +124,12 @@ class ServerResult:
         self.errors = []
         self.error_reason = None
         self.diag_info = diag_info
-        self.last_contact = None
-        self.drop_after = 0
 
     def is_well_known(self) -> bool:
         return self.well_known_host is not None
 
     def is_srv(self) -> bool:
         return self.srv_host is not None
-
-    def update_last_contacted(self) -> None:
-        self.last_contact = int(time.time() * 1000)
-
-    def update_drop_after(self, time_to_drop_after_ms: int) -> None:
-        self.drop_after = time_to_drop_after_ms
 
     def to_line(self) -> str:
         if self.srv_host:
@@ -179,12 +162,6 @@ class ServerResult:
         if self.well_known_host:
             return self.well_known_host
         return self.host
-
-    def last_contact_formatted(self) -> str:
-        if self.last_contact and self.last_contact > 0:
-            return str(datetime.fromtimestamp(float(self.last_contact)))
-        else:
-            return "Never"
 
 
 @dataclass
