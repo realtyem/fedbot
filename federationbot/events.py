@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, NewType, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from datetime import datetime
 import hashlib
 import json
@@ -7,6 +7,13 @@ from canonicaljson import encode_canonical_json
 from mautrix.types import EventID
 from unpaddedbase64 import decode_base64, encode_base64
 
+from federationbot.types import (
+    KeyID,
+    ServerName,
+    Signature,
+    Signatures,
+    SignatureVerifyResult,
+)
 from federationbot.utils import (
     DisplayLineColumnConfig,
     extract_max_key_len_from_dict,
@@ -18,8 +25,6 @@ EVENT_TYPE = "Event Type"
 EVENT_SENDER = "Sender"
 EVENT_DEPTH = "Depth"
 
-ServerName = NewType("ServerName", str)
-KeyID = NewType("KeyID", str)
 
 json_decoder = json.JSONDecoder()
 
@@ -418,33 +423,6 @@ class RelatesTo:
         summary += dc.render_pretty_line(reaction_key_header, self.key)
 
         return summary
-
-
-class Signature:
-    signature: str
-    decoded_signature: bytes
-
-    def __init__(self, signature: str) -> None:
-        self.signature = signature
-        self.decoded_signature = decode_base64(self.signature)
-
-
-class SignatureContainer:
-    keyid: Dict[KeyID, Signature]
-
-    def __init__(self, container_data: Dict[str, str]) -> None:
-        self.keyid = dict()
-        for key_id, signature in container_data.items():
-            self.keyid[KeyID(key_id)] = Signature(signature)
-
-
-class Signatures:
-    servers: Dict[ServerName, SignatureContainer]
-
-    def __init__(self, data: Dict[str, Any]) -> None:
-        self.servers = dict()
-        for server, container in data.items():
-            self.servers[ServerName(server)] = SignatureContainer(container)
 
 
 class Event(EventBase):
