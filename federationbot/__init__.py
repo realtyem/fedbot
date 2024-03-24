@@ -1656,11 +1656,18 @@ class FederationBot(Plugin):
             # function
             return
 
-        room_version = await self.federation_handler.discover_room_version(
-            origin_server=origin_server,
-            destination_server=origin_server,
-            room_id=room_id,
-        )
+        try:
+            room_version = await self.federation_handler.discover_room_version(
+                origin_server=origin_server,
+                destination_server=origin_server,
+                room_id=room_id,
+            )
+        except Exception as e:
+            await command_event.reply(
+                f"Error getting room version from room {room_id}: {str(e)}"
+            )
+            return
+
         await command_event.reply(f"{room_id} version is {room_version}")
 
     @test_command.subcommand(
@@ -1705,13 +1712,19 @@ class FederationBot(Plugin):
 
         room_id = event.room_id
 
-        room_version = int(
-            await self.federation_handler.discover_room_version(
-                origin_server=origin_server,
-                destination_server=origin_server,
-                room_id=room_id,
+        try:
+            room_version = int(
+                await self.federation_handler.discover_room_version(
+                    origin_server=origin_server,
+                    destination_server=origin_server,
+                    room_id=room_id,
+                )
             )
-        )
+        except Exception as e:
+            await command_event.reply(
+                f"Error getting room version from room {room_id}: {str(e)}"
+            )
+            return
 
         await command_event.respond(
             f"Original:\n{wrap_in_code_block_markdown(event.to_json())}"
