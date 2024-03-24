@@ -18,6 +18,7 @@ from federationbot.utils import (
     DisplayLineColumnConfig,
     extract_max_key_len_from_dict,
     extract_max_value_len_from_dict,
+    full_dict_copy,
 )
 
 EVENT_ID = "Event ID"
@@ -27,18 +28,6 @@ EVENT_DEPTH = "Depth"
 
 
 json_decoder = json.JSONDecoder()
-
-
-def full_dict_copy(data_to_copy: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Make a copy of a Dict, to avoid mutating any sub-keys
-    Args:
-        data_to_copy:
-
-    Returns: A duplicate of the original Dict with all new reference objects
-
-    """
-    return json_decoder.decode(json.dumps(data_to_copy))
 
 
 class EventBase:

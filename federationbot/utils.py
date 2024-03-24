@@ -1,9 +1,12 @@
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from datetime import datetime
 from enum import Enum, auto
+import json
 import math
 
 from mautrix.types import EventID
+
+json_decoder = json.JSONDecoder()
 
 
 class Justify(Enum):
@@ -554,3 +557,15 @@ def truncate(n, decimals=0):
 
 def pretty_print_timestamp(timestamp: int) -> str:
     return str(datetime.fromtimestamp(float(timestamp / 1000)))
+
+
+def full_dict_copy(data_to_copy: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Make a copy of a Dict, to avoid mutating any sub-keys
+    Args:
+        data_to_copy:
+
+    Returns: A duplicate of the original Dict with all new reference objects
+
+    """
+    return json_decoder.decode(json.dumps(data_to_copy))
