@@ -263,6 +263,7 @@ class FederationBot(Plugin):
             )
             buffered_line = (
                 f"Event Cache size: {len(self.federation_handler._events_cache)}\n"
+                f"Room Version Cache size: {len(self.federation_handler.room_version_cache)}\n"
                 f"New server_result cache: {len(self.federation_handler._server_discovery_cache)}\n"
                 # TODO: Lose this after Tom seen it(engrish is grate)
                 f" Good server results: {len([1 for _ in good_server_results])}\n"

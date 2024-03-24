@@ -64,12 +64,17 @@ class FederationHandler:
         # Map this cache to server_name -> ServerResult
         self._server_discovery_cache: LRUCache[str, ServerResult] = LRUCache()
         self._server_keys_cache: LRUCache[str, ServerVerifyKeys] = LRUCache()
+        self.room_version_cache: LRUCache[str, int] = LRUCache(
+            expire_after_seconds=float(60 * 60 * 6),
+            cleanup_task_sleep_time_seconds=float(60 * 60),
+        )
 
     async def stop(self) -> None:
         # For stopping the cleanup task on these caches
         await self._events_cache.stop()
         await self._server_discovery_cache.stop()
         await self._server_keys_cache.stop()
+        await self.room_version_cache.stop()
 
     async def _federation_request(
         self,
@@ -902,17 +907,27 @@ class FederationHandler:
     async def discover_room_version(
         self, origin_server: str, destination_server: str, room_id: str
     ) -> str:
-        creation_event_list = await self.filter_state_for_type(
+        room_version = self.room_version_cache.get(room_id)
+        if room_version:
+            return str(room_version)
+
+        response = await self.make_join_to_server(
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
-            state_type_str="m.room.create",
+            user_id=self.bot_mxid,
         )
-        # In this case, there will ever be one creation event, so slice the list
-        creation_event = creation_event_list[0]
-        # Really need to figure out a better way of doing this. Some kind of Type dance
-        assert isinstance(creation_event, CreateRoomStateEvent)
-        room_version = creation_event.room_version
+        if isinstance(response, FederationErrorResponse):
+            raise Exception(
+                f"{response.status_code}: {response.response_dict.get('errcode')}: {response.response_dict.get('error')}"
+            )
+        try:
+            room_version = int(response.response_dict.get("room_version"))
+        except Exception:
+            raise
+
+        if room_version is not None:
+            self.room_version_cache.set(room_id, room_version)
         return str(room_version)
 
     async def filter_state_for_type(
