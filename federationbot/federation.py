@@ -953,6 +953,41 @@ class FederationHandler:
 
         return event_base_list
 
+    async def _make_join_to_server(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        user_id: str,
+    ) -> FederationBaseResponse:
+        response = await self.federation_request(
+            destination_server_name=destination_server,
+            path=f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
+            query_args={
+                "ver": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+            },
+            origin_server=origin_server,
+        )
+        return response
+
+    async def make_join_to_server(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        user_id: str,
+    ):
+        response = await self._make_join_to_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            user_id=user_id,
+        )
+        if isinstance(response, FederationErrorResponse):
+            return response
+        else:
+            return response
+
 
 # https://spec.matrix.org/v1.9/server-server-api/#request-authentication
 # {
