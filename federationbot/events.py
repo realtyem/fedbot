@@ -344,6 +344,16 @@ class EventError(EventBase):
         return summary
 
 
+def represent_signature_verify_result_as_symbol(result: SignatureVerifyResult) -> str:
+    if result == SignatureVerifyResult.SUCCESS:
+        return "✅"  # Green check mark
+    elif result == SignatureVerifyResult.FAIL:
+        return "❌"  # Red X
+    else:
+        # This represents SignatureVerifyResult.UNKNOWN
+        return "❓"  # Red Question Mark
+
+
 class RelatesTo:
     """
     Helper class to assist in parsing m.relates_to
@@ -425,6 +435,7 @@ class Event(EventBase):
     origin_server_ts: int
     signatures: Signatures
     relations: Optional[RelatesTo] = None
+    signatures_verified: Dict[ServerName, SignatureVerifyResult]
 
     def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:
         super().__init__(event_id, data)
@@ -442,6 +453,9 @@ class Event(EventBase):
         relations = self.content.pop("m.relates_to", {})
         if relations:
             self.relations = RelatesTo(relations)
+        self.signatures_verified = {}
+        for server_name in self.signatures.servers.keys():
+            self.signatures_verified[server_name] = SignatureVerifyResult.UNKNOWN
 
     def verify_content_hash(self) -> bool:
         base_event = dict(self.raw_data)
@@ -506,7 +520,10 @@ class Event(EventBase):
         #    Signatures: example.com ed25519:k3y1D
         #
         for server, signature_container in self.signatures.servers.items():
-            summary += f"{dc.front_pad(sig_header)}: {server} "
+            result_symbol = represent_signature_verify_result_as_symbol(
+                self.signatures_verified[server]
+            )
+            summary += f"{dc.front_pad(sig_header)}: {result_symbol} {server} "
             for key_id in signature_container.keyid:
                 summary += f"{key_id}\n"
 
@@ -515,7 +532,8 @@ class Event(EventBase):
         #       Hashes: sha256: somethingorotherreallylonghashthatsnotlongeno
         #
         for hash_type, hash_value in self.hashes.items():
-            summary += f"{dc.front_pad(hashes_header)}: {hash_type}: {hash_value} {'✅' if self.verify_content_hash() else '❌'}\n"
+            pretty_hash_result = "✅" if self.verify_content_hash() else "❌"
+            summary += f"{dc.front_pad(hashes_header)}: {hash_type}: {pretty_hash_result} {hash_value}\n"
 
         # The previous output does not add a new line(well, it does now) but create some
         # space anyways
