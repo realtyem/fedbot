@@ -267,7 +267,7 @@ class EventBase:
 
     def to_pretty_summary_footer(
         self,
-        event_data_map: Dict[str, str] = {},
+        event_data_map: Dict[str, str],
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
     ) -> str:
         """
