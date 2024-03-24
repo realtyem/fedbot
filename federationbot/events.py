@@ -960,69 +960,34 @@ class StrippedStateEvent(EventBase):
         return buffered_message
 
 
-class GenericStateEvent(StrippedStateEvent):
+class GenericStateEvent(StrippedStateEvent, Event):
     """
     The most basic of State Events. Subclass of Stripped State Event to bring in the
     state key. More specific kinds of State Events will use this super class.
-
-    Most of the attributes of Event will be here
-    (Someday, see if we can use Event as a mix-in instead)
     """
 
-    hashes: Dict[str, str]
-    origin: str
-    origin_server_ts: int
     prev_state: List[str]
-    signatures: Dict[str, Dict[str, str]]
     replaces_state: Optional[str]
 
     def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:
         super().__init__(event_id, data)
         # Recall that auth_events and prev_events are part of the base class EventBase
-        self.auth_events = self.unrecognized.pop("auth_events", [])
-        self.prev_events = self.unrecognized.pop("prev_events", [])
         self.replaces_state = self.unrecognized.get("unsigned", {}).pop(
             "replaces_state", None
         )
-        # self.depth can be found on the superclass, EventBase
-        self.depth = self.unrecognized.pop("depth", 0)
-        self.hashes = self.unrecognized.pop("hashes", {})
-        self.origin = self.unrecognized.pop("origin", "Origin Server Not Found")
-        self.origin_server_ts = self.unrecognized.pop("origin_server_ts", 0)
-        self.signatures = self.unrecognized.pop("signatures", {})
         self.prev_state = self.unrecognized.pop("prev_state", [])
-
-    def to_pretty_summary(
-        self,
-        dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
-    ) -> str:
-        dc.maybe_update_column_width(18)
-        summary = super().to_pretty_summary(dc, room_version)
-        summary += f"{dc.front_pad('Depth')}: {self.depth}\n"
-        summary += f"{dc.front_pad('Origin')}: {self.origin}\n"
-        summary += f"{dc.front_pad('Origin Server TS')}: {datetime.fromtimestamp(self.origin_server_ts / 1000)}\n"
-        for server, key_id_and_hash in self.signatures.items():
-            summary += f"{dc.front_pad('Signatures')}: {server} "
-            for key_id in key_id_and_hash.keys():
-                summary += f"{key_id}\n"
-        for hash_type, hash_value in self.hashes.items():
-            summary += f"{dc.front_pad('Hashes')}: {hash_type}: {hash_value}"
-
-        summary += "\n\n"
-        return summary
 
     def to_pretty_summary_footer(
         self,
-        event_data_map: Dict[str, str] = {},
+        event_data_map: Dict[str, str],
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
     ) -> str:
         dc.maybe_update_column_width(17)
         summary = super().to_pretty_summary_footer(event_data_map, dc)
         for prev_state in self.prev_state:
-            summary += f"{dc.front_pad('<- Prev State')}: {prev_state}: {event_data_map.get(prev_state, '')}\n"
+            summary += f"{dc.front_pad('<- Prev State')}: {prev_state}: {event_data_map.get(prev_state, 'Data Missing')}\n"
         if self.replaces_state:
-            summary += f"{dc.front_pad('-> Replaces State')}: {self.replaces_state}: {event_data_map.get(self.replaces_state, '')}\n"
+            summary += f"{dc.front_pad('-> Replaces State')}: {self.replaces_state}: {event_data_map.get(self.replaces_state, 'Data Missing')}\n"
 
         return summary
 
