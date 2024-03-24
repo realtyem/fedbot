@@ -205,7 +205,7 @@ class FederationBot(Plugin):
         self.federation_handler = FederationHandler(
             self.http,
             self.log,
-            get_domain_from_id(self.client.mxid),
+            self.client.mxid,
             self.server_signing_keys,
         )
 

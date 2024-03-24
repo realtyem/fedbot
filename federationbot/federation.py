@@ -41,7 +41,7 @@ from federationbot.server_result import (
     ServerResultError,
 )
 from federationbot.types import KeyContainer, KeyID, SignatureVerifyResult
-from federationbot.utils import full_dict_copy
+from federationbot.utils import full_dict_copy, get_domain_from_id
 
 
 class FederationHandler:
@@ -49,12 +49,13 @@ class FederationHandler:
         self,
         http_client: ClientSession,
         logger: TraceLogger,
-        hosting_server_name: str,
+        bot_mxid: str,
         server_signing_keys: Dict[str, str],
     ):
         self.http_client = http_client
         self.logger = logger
-        self.hosting_server = hosting_server_name
+        self.hosting_server = get_domain_from_id(bot_mxid)
+        self.bot_mxid = bot_mxid
         self.server_signing_keys = server_signing_keys
         self.json_decoder = json.JSONDecoder()
         self.delegation_handler = DelegationHandler(self.logger)
