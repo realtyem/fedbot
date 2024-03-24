@@ -2189,6 +2189,7 @@ class FederationBot(Plugin):
             )
 
         else:
+            assert isinstance(returned_event, Event)
             # a_event will stand for ancestor event
             # A mapping of 'a_event_id' to the string of short data about the a_event to
             # be shown
@@ -2203,7 +2204,7 @@ class FederationBot(Plugin):
             list_of_a_event_ids.extend(returned_event.prev_events)
 
             # For the verification display, grab the room version in these events
-            found_room_version = 0
+            found_room_version = 1
             a_returned_events = await self.federation_handler.get_events_from_server(
                 origin_server=origin_server,
                 destination_server=destination_server,
@@ -2217,6 +2218,14 @@ class FederationBot(Plugin):
                         found_room_version = a_event_base.room_version
 
             # Begin rendering
+            # TODO: test by modifying the object. Have to reach into the raw_data and
+            #  modify that, as the attrib versions will have already been parsed and
+            #  won't be read by the verifier. Spoiler alert: works as intended.
+            # returned_event.raw_data["depth"] += 1
+            await self.federation_handler.verify_signatures_and_annotate_event(
+                returned_event, found_room_version
+            )
+
             # It may be, but is unlikely outside of connection errors, that room_version
             # was not found. This is handled gracefully inside of to_pretty_summary()
             buffered_message += returned_event.to_pretty_summary(
