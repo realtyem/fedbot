@@ -903,6 +903,53 @@ class FederationHandler:
 
         return response
 
+    async def _send_transaction_to_server(
+        self,
+        origin_server: str,
+        destination_server: str,
+        pdu_to_send: Dict[str, Any],
+        timeout: float = 10.0,
+    ) -> FederationBaseResponse:
+        formatted_data: Dict[str, Any] = {}
+        now = int(time.time() * 1000)
+        formatted_data["origin"] = origin_server
+        formatted_data["origin_server_ts"] = now
+        formatted_data["pdus"] = []
+        formatted_data["pdus"].append(pdu_to_send)
+
+        self.logger.info(
+            f"outgoing transaction:\n{json.dumps(formatted_data, indent=4)}"
+        )
+
+        response = await self.federation_request(
+            destination_server_name=destination_server,
+            path=f"/_matrix/federation/v1/send/{now}",
+            method="PUT",
+            content=formatted_data,
+            timeout_seconds=timeout,
+            origin_server=origin_server,
+        )
+        self.logger.info(
+            f"_send_transaction_to_server responded: {response.response_dict}"
+        )
+        return response
+
+    async def send_event_to_server(
+        self,
+        origin_server: str,
+        destination_server: str,
+        event_data: Dict[str, Any],
+        timeout: float = 10.0,
+    ) -> FederationBaseResponse:
+        response = await self._send_transaction_to_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            pdu_to_send=event_data,
+            timeout=timeout,
+        )
+
+        return response
+
     async def discover_room_version(
         self, origin_server: str, destination_server: str, room_id: str
     ) -> str:
