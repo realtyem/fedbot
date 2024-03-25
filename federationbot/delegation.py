@@ -6,7 +6,7 @@ from dns.asyncresolver import Resolver
 from mautrix.util.logging import TraceLogger
 import dns.resolver
 
-from federationbot.errors import MalformedServerNameError
+from federationbot.errors import WellKnownHasSchemeError
 from federationbot.responses import FederationBaseResponse
 from federationbot.server_result import (
     DiagnosticInfo,
@@ -32,7 +32,7 @@ def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[s
     server_port: Optional[str] = None
 
     if server_name.startswith(("http:", "https")) or "://" in server_name:
-        raise MalformedServerNameError
+        raise WellKnownHasSchemeError
 
     # str.split() will raise a ValueError if the value to split by isn't there
     try:
@@ -99,7 +99,7 @@ def _parse_and_check_well_known_response(
             # have to cover the basics by hand.
             try:
                 host, port = check_and_maybe_split_server_name(well_known_result)
-            except MalformedServerNameError:
+            except WellKnownHasSchemeError:
                 diag_info.error(
                     "Well-Known 'm.server' has a scheme when it should not:"
                 )
@@ -389,7 +389,7 @@ class DelegationHandler:
         # Try and split the server_name from any potential port
         try:
             host, port = check_and_maybe_split_server_name(server_name)
-        except MalformedServerNameError:
+        except WellKnownHasSchemeError:
             diag_info.error(f"Server name was malformed: {server_name}")
             return ServerResultError(
                 error_reason=f"Server name was malformed: {server_name}",
