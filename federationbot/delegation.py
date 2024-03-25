@@ -343,7 +343,7 @@ class DelegationHandler:
 
         return host or dep_host, port or dep_port, diag_info
 
-    async def maybe_handle_delegation(
+    async def handle_delegation(
         self,
         server_name: str,
         fed_req_callback: Callable,
