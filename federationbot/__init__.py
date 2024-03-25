@@ -706,31 +706,40 @@ class FederationBot(Plugin):
         # Need:
         # *1. Initial Event ID to start at. Want the depth from that Event to base
         #    progress bars on
-        # *2. progress bars based on depth reversal, as this is going backwards. Depth
+        # *2. progress bars based on depth progress, note this is going backwards. Depth
         #    and prev_events won't always have a correlation(remember the ping room)
         # 3. Count of:
         #    *a. All Events seen
         #    *b. Events just with errors
-        #    *c. Events that had errors but were resolved later(these count as 'probably
-        #       new')
-        #    d. Events that had errors but were found on other hosts in the room
+        #    *c. Events that had errors but were found on other hosts in the room
         # 4. Times for:
-        #    *a. Time spent on backwalk as a whole(incremental=so far)
+        #    *a. Time spent on roomwalk as a whole
         #    b. Time spent on last request
         #    c. Time spent in backoff
         # 5. Allow-list for users to block bad actors
 
+        # Definitions for below:
+        # targeted server: The server that is missing events
+        # donor server: The arbitrary server that has the events
         # The process heuristic:
-        # 1. backfill with limit=1(variable?) for event_id
-        # 2. Take that event(s) and parse out prev_events and auth_events
-        #    A. Try and pull prev_events and auth_events from the local server
-        #       1. This acts as a prefetch(and will probably be very iterative, caching)
-        #          and a basic check that the next event is not a failure
-        #       2. If this is a failure, use backfill directly on that Event ID to try
-        #          and get the Events from federation. Add to Error List, if found also
-        #          add to Resolved Errors List
-        #       3. If this continues to fail, check the hosts in the room to see if any
-        #          other hosts have it.
+        # 1. Retrieve Event for event_id from target server
+        # 2. Parse out prev_events and auth_events from that original Event
+        #    A. Attempt retrieval of these ancestor Events from target server, add new
+        #       prev_events(but not auth_events) to Queue and back to (1) if found.
+        #    B. Otherwise:
+        #       i. Use roomwalk directly on that Event ID to try and get the Events from
+        #          federation.
+        #          A. Verify signatures
+        #          B. Pull prev_events from THAT Event to verify the targeted server has
+        #             those, otherwise check federation again
+        #          C. Add to List of Events to send to target server.
+        #          D. Repeat until all prev_events have been found and verified
+        #       ii. Reverse the List(so the oldest is seen first) then use the
+        #           federation /send endpoint on the target server to receive the Event.
+        #       iii. Re-add original Event to Queue to retry(Back to (1)). It should
+        #            succeed this time.
+        #       iv. Failure at that last stage means there is probably a state auth
+        #           problem.
         # Notes: If an Event has multiple prev_events, check them all before moving on.
         # They should all collectively have the same prev_event as a batch
 
@@ -739,66 +748,50 @@ class FederationBot(Plugin):
         event_id_resolved_error_list: Set[str] = set()
         event_id_retries_exhausted: Set[str] = set()
 
-        async def _filter_ancestor_events(
+        async def _parse_ancestor_events(
             worker_name: str,
             event_id_list_of_ancestors: List[str],
-            _event_id_ok_list: Set[str],
-            _event_id_error_list: Set[str],
-            _event_id_resolved_error_list: Set[str],
-            _event_id_retries_exhausted: Set[str],
-        ) -> Tuple[Set[str], Set[str], Set[int]]:
+        ) -> Tuple[Set[str], Set[str]]:
             """
-            Condense and filter given Event IDs from the OK list of Events already
-            checked then check that any remaining are retrievable.
+            Condense and parse given Event IDs from the prev_event and auth_event fields
+             into a batches representing found on target server and not found
+
             Args:
                 worker_name: string name for logging
                 event_id_list_of_ancestors: Event ID's to look for
-                _event_id_ok_list:
-                _event_id_error_list:
-                _event_id_resolved_error_list:
-                _event_id_retries_exhausted:
 
-            Returns: a Tuple of (events that are good, events that are bad)
+            Returns: a Tuple of:
+                (events that were found, events that were not)
 
             """
             next_batch: Set[str] = set()
             error_batch: Set[str] = set()
-            depths_seen: Set[int] = set()
-            # Do not add the error list to these, as they may be getting retried
-            sorted_event_id_set = set(event_id_list_of_ancestors)
-            sorted_event_id_set.difference_update(_event_id_ok_list)
-            if not sorted_event_id_set:
-                # These events have already all been seen, waste no time on it
-                return next_batch, error_batch, depths_seen
 
             pulled_event_map = await self.federation_handler.get_events_from_server(
                 origin_server=origin_server,
                 destination_server=destination_server,
-                events_list=sorted_event_id_set,
+                events_list=event_id_list_of_ancestors,
             )
-            for _event_id in sorted_event_id_set:
+            # This is to provide a nice reference, in case an event was not found
+            for _event_id in event_id_list_of_ancestors:
                 pulled_event = pulled_event_map.get(_event_id)
                 if isinstance(pulled_event, EventError):
                     # Had an error, keep a tally
-                    _event_id_error_list.add(_event_id)
                     error_batch.add(_event_id)
-                    # self.log.warning(
-                    #     f"{worker_name}: "
-                    #     f"Error on event_id: {_event_id}\n {pulled_event.error}"
-                    # )
+                    self.log.warning(
+                        f"{worker_name}: "
+                        f"Error on event_id: {_event_id}\n {pulled_event.error}"
+                    )
                 else:
                     # Got one, make a note
                     next_batch.add(_event_id)
-                    _event_id_ok_list.add(_event_id)
-                    assert pulled_event is not None
-                    depths_seen.add(pulled_event.depth)
                     # self.log.warning(
                     #     f"{worker_name}: Depth on event_id: {_event_id}\n"
                     #     f" current: {pulled_event.depth}\n"
                     #     f" max iter: {max_depth}"
                     # )
 
-            return next_batch, error_batch, depths_seen
+            return next_batch, error_batch
 
         # Get the last event that was in the room, for its depth and as a starting spot
         now = int(time.time() * 1000)
@@ -815,6 +808,14 @@ class FederationBot(Plugin):
             )
             return
 
+        pinned_message = await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown(
+                    "Just a moment while I prepare a few things\n"
+                )
+            )
+        )
+        # The initial starting point for the room walk
         event_id = ts_response.response_dict.get("event_id", None)
         assert isinstance(event_id, str)
         event_result = await self.federation_handler.get_event_from_server(
@@ -824,6 +825,28 @@ class FederationBot(Plugin):
         assert event is not None
         room_depth = event.depth
         seen_depths_for_progress = set()
+
+        # Prep the host list, just in case we need it later on so the worker doesn't
+        # have to do it on-demand, increasing its complexity
+        host_list = await self.get_hosts_in_room_ordered(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            event_id_in_timeline=event_id,
+        )
+
+        good_host_list: List[str] = []
+        # This will act as a prefetch to prime the server result cache, which can be
+        # then checked directly for hosts which are not online
+        await self._get_versions_from_servers(host_list)
+
+        for host in host_list:
+            server_check = self.federation_handler._server_discovery_cache.get(
+                host, None
+            )
+            if server_check and not server_check.unhealthy:
+                good_host_list.extend((host,))
+        # Can now use good_host_list as an ordered list of servers to check for Events
 
         # Initial messages and lines setup. Never end in newline, as the helper handles
         header_lines = ["Room Back-walking Procedure: Running"]
@@ -851,10 +874,12 @@ class FederationBot(Plugin):
 
             return combined_lines
 
-        pinned_message = await command_event.respond(
+        # Begin the render, replace the original message
+        await command_event.respond(
             make_into_text_event(
                 wrap_in_code_block_markdown(_combine_lines_for_backwalk())
-            )
+            ),
+            edits=pinned_message,
         )
         await self.client.react(
             command_event.room_id, pinned_message, ReactionCommandStatus.STOP.value
@@ -937,29 +962,15 @@ class FederationBot(Plugin):
                         seen_depths_for_progress.add(pulled_event.depth)
                         prev_events = pulled_event.prev_events
                         auth_events = pulled_event.auth_events
-                        # _event_id_ok_list: Set[str],
-                        # _event_id_error_list: Set[str],
-                        # _event_id_resolved_error_list: Set[str],
-                        # _event_id_retries_exhausted: Set[str],
+                        event_id_ok_list.add(next_event_id)
 
-                        # These have filters inside so as not to duplicate work too,
-                        # hence why passing all these Set's in
                         (
                             prev_good_events,
                             prev_bad_events,
-                            prev_depths,
-                        ) = await _filter_ancestor_events(
+                        ) = await _parse_ancestor_events(
                             worker_name,
                             prev_events,
-                            event_id_ok_list,
-                            event_id_error_list,
-                            event_id_resolved_error_list,
-                            event_id_retries_exhausted,
                         )
-                        # seen_depths_for_progress.add(prev_depths)
-                        # self.log.warning(
-                        #     f"{worker_name}: Depth from prev_depth\n {prev_depths}"
-                        # )
 
                         # We don't iterate the walk based on auth_events themselves,
                         # eventually we'll find them in prev_events. At worst, this is a
@@ -967,33 +978,39 @@ class FederationBot(Plugin):
                         (
                             auth_good_events,
                             auth_bad_events,
-                            auth_depths,
-                        ) = await _filter_ancestor_events(
+                        ) = await _parse_ancestor_events(
                             worker_name,
                             auth_events,
-                            event_id_ok_list,
-                            event_id_error_list,
-                            event_id_resolved_error_list,
-                            event_id_retries_exhausted,
                         )
-                        # seen_depths_for_progress.add(auth_depths)
 
                         for _event_id in chain(prev_bad_events, auth_bad_events):
+                            event_id_error_list.add(_event_id)
                             _backfill_queue.put_nowait(_event_id)
                         # Prep for next iteration. Don't worry about adding auth events
                         # to this, as they will come along in due time
+                        if not prev_good_events:
+                            self.log.warning(
+                                f"{worker_name}: Unexpectedly found an empty prev_good_events on {next_event_id}"
+                            )
                         next_list_to_get.update(prev_good_events)
 
-                    # else is an EventError. Chances of hitting this are extremely low,
-                    # in fact it may only happen on the initial pull to start a walk.
-                    # All other opportunities to hit this will have been handled in the
-                    # above filter function.
+                    else:
+                        # is an EventError. Chances of hitting this are extremely low,
+                        # in fact it may only happen on the initial pull to start a walk.
+                        # All other opportunities to hit this will have been handled in the
+                        # above filter function.
+                        # TODO: not any more they aren't
+                        self.log.warning(
+                            f"hit an EventError when shouldn't have: {next_event_id}"
+                        )
+
                 _time_spent = time.time() - iter_start_time
                 total_time_spent += _time_spent
 
                 if next_list_to_get:
                     # The queue item is:
                     # (new_back_off_time, is_this_a_retry, next_event_ids)
+                    # Note that BACKOFF_MULTIPLIER is a reducing multiplier
                     _event_fetch_queue.put_nowait(
                         (
                             _time_spent * BACKOFF_MULTIPLIER,
