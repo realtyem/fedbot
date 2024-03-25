@@ -219,7 +219,7 @@ class FederationHandler:
                 # self.logger.warning(
                 #     f"cache entry not found for {destination_server_name}"
                 # )
-                server_result = await self.delegation_handler.maybe_handle_delegation(
+                server_result = await self.delegation_handler.handle_delegation(
                     destination_server_name,
                     self.federation_request,
                     diag_info=diag_info,
