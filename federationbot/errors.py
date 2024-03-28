@@ -40,14 +40,20 @@ class MatrixError(Exception):
     Generic Matrix-related error
     """
 
+    http_code: int
 
-class MNotFound(MatrixError):
+    def __init__(self, http_code: int, reason: str) -> None:
+        super().__init__(reason)
+        self.http_code = http_code
+
+
+class MatrixNotFoundError(MatrixError):
     """
     The homeserver returned a 404 M_NOT_FOUND
     """
 
 
-class MForbidden(MatrixError):
+class MatrixForbiddenError(MatrixError):
     """
     The homeserver returned a 403 M_FORBIDDEN
     """
