@@ -17,7 +17,7 @@ from federationbot.delegation import (
     DelegationHandler,
     check_and_maybe_split_server_name,
 )
-from federationbot.errors import ServerUnreachable
+from federationbot.errors import MatrixError, ServerUnreachable
 from federationbot.events import (
     Event,
     EventBase,
@@ -468,7 +468,7 @@ class FederationHandler:
 
     async def _get_server_keys(
         self, server_name: str, timeout: float = 10.0
-    ) -> Union[FederationServerKeyResponse, FederationErrorResponse]:
+    ) -> FederationServerKeyResponse:
         response = await self.federation_request(
             destination_server_name=server_name,
             path="/_matrix/key/v2/server",
@@ -476,23 +476,19 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
         if isinstance(response, FederationErrorResponse):
-            return response
+            raise MatrixError(response.status_code, response.reason)
         else:
             return FederationServerKeyResponse.from_response(response)
 
     async def get_server_keys(
         self, server_name: str, timeout: float = 10.0
-    ) -> Union[ServerVerifyKeys, FederationErrorResponse]:
+    ) -> ServerVerifyKeys:
         response = await self._get_server_keys(server_name=server_name, timeout=timeout)
-
-        if isinstance(response, FederationErrorResponse):
-            return response
-
         return response.server_verify_keys
 
     async def get_server_keys_from_notary(
         self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
-    ) -> FederationBaseResponse:
+    ) -> ServerVerifyKeys:
         minimum_valid_until_ts = int(time.time() * 1000) + (
             30 * 60 * 1000
         )  # Add 30 minutes
@@ -503,47 +499,52 @@ class FederationHandler:
             method="GET",
             timeout_seconds=timeout,
         )
-        return response
+        if isinstance(response, FederationErrorResponse):
+            raise MatrixError(response.status_code, response.reason)
+        server_verify_keys = ServerVerifyKeys({})
+        server_verify_keys.update_key_data_from_list(response.response_dict)
+
+        return server_verify_keys
 
     async def get_server_key(
         self, for_server_name: str, key_id_needed: str, timeout: float = 10.0
     ) -> Dict[KeyID, KeyContainer]:
-        # TODO: I feel like this is incomplete in error handling
+
         key_id_formatted = KeyID(key_id_needed)
         cached_server_keys = self._server_keys_cache.get(for_server_name)
-        if (
-            cached_server_keys is not None
-            and key_id_formatted in cached_server_keys.verify_keys
-        ):
-            return cached_server_keys.verify_keys
-        server_verify_keys = await self.get_server_keys(for_server_name, timeout)
-        if isinstance(server_verify_keys, FederationErrorResponse):
-            raise ServerUnreachable(server_verify_keys.reason)
-        else:
-            self._server_keys_cache.set(for_server_name, server_verify_keys)
-            verify_keys = server_verify_keys.verify_keys
-            if key_id_formatted in verify_keys:
-                return server_verify_keys.verify_keys
-            else:
-                notary_server_verify_keys = await self.get_server_keys_from_notary(
-                    fetch_server_name=for_server_name,
-                    from_server_name=self.hosting_server,
-                )
-                if isinstance(notary_server_verify_keys, FederationErrorResponse):
-                    raise ServerUnreachable(notary_server_verify_keys.reason)
-                else:
-                    cached_server_keys = self._server_keys_cache.get(for_server_name)
-                    if cached_server_keys is None:
-                        cached_server_keys = ServerVerifyKeys({})
-                    cached_server_keys.update_key_data_from_list(
-                        notary_server_verify_keys.response_dict
-                    )
-                    self._server_keys_cache.set(for_server_name, cached_server_keys)
+        if cached_server_keys is not None:
+            if key_id_formatted in cached_server_keys.verify_keys:
+                return cached_server_keys.verify_keys
 
-                    if key_id_formatted in cached_server_keys.verify_keys:
-                        return cached_server_keys.verify_keys
-        # TODO: I don't think this is right
-        return {}
+        server_verify_keys = None
+        try:
+            server_verify_keys = await self.get_server_keys(for_server_name, timeout)
+        except MatrixError as e:
+            self.logger.warning(
+                f"Keys not available directly from {for_server_name}, trying notary: {e}"
+            )
+
+        if server_verify_keys is None:
+            try:
+                server_verify_keys = await self.get_server_keys_from_notary(
+                    for_server_name, self.hosting_server, timeout
+                )
+            except MatrixError:
+                self.logger.warning(
+                    f"Keys not available from notary for {for_server_name}, giving up"
+                )
+
+        if server_verify_keys is None:
+            return {}
+
+        # At this point we know
+        # 1. Wasn't in the cache before(or at least this one key id wasn't)
+        # 2. We have some kind of result
+        verify_keys = server_verify_keys.verify_keys
+
+        self._server_keys_cache.set(for_server_name, server_verify_keys)
+
+        return verify_keys
 
     async def verify_signatures_and_annotate_event(
         self,
