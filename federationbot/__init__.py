@@ -3487,39 +3487,20 @@ class FederationBot(Plugin):
             f"Using {notary_server_to_use}"
         )
 
-        server_to_server_data: Dict[str, FederationBaseResponse] = {}
+        server_to_server_data: Dict[str, Union[ServerVerifyKeys, str]] = {}
 
         async def _server_keys_from_notary_worker(queue: Queue) -> None:
             while True:
                 worker_server_name = await queue.get()
                 try:
-                    server_to_server_data[worker_server_name] = await asyncio.wait_for(
-                        self.federation_handler.get_server_keys_from_notary(
-                            worker_server_name, notary_server_to_use
-                        ),
-                        timeout=10.0,
-                    )
-
-                except asyncio.TimeoutError:
-                    server_to_server_data[worker_server_name] = FederationErrorResponse(
-                        status_code=0,
-                        status_reason="Request timed out",
-                        response_dict={},
-                        server_result=ServerResultError(
-                            error_reason="Timeout err", diag_info=DiagnosticInfo(True)
-                        ),
+                    server_to_server_data[
+                        worker_server_name
+                    ] = await self.federation_handler.get_server_keys_from_notary(
+                        worker_server_name, notary_server_to_use
                     )
 
                 except Exception as e:
-                    server_to_server_data[worker_server_name] = FederationErrorResponse(
-                        status_code=0,
-                        status_reason="Plugin Error",
-                        response_dict={},
-                        server_result=ServerResultError(
-                            error_reason=f"Plugin Error: {e}",
-                            diag_info=DiagnosticInfo(True),
-                        ),
-                    )
+                    server_to_server_data[worker_server_name] = f"{e}"
 
                 finally:
                     queue.task_done()
@@ -3553,41 +3534,34 @@ class FederationBot(Plugin):
         #       matrix.org | aYp3g  | Pretty formatted DateTime
         #                  | 0ldK3y | EXPIRED: Expired DateTime
 
-        server_name_col = DisplayLineColumnConfig("Server Name")
+        server_name_col = DisplayLineColumnConfig("Server Name", justify=Justify.RIGHT)
         server_key_col = DisplayLineColumnConfig("Key ID")
         valid_until_ts_col = DisplayLineColumnConfig("Valid until(UTC)")
 
         for server_name, server_results in server_to_server_data.items():
-            for server_keys in server_results.response_dict.get("server_keys", []):
-                server_name_col.maybe_update_column_width(len(server_name))
+            server_name_col.maybe_update_column_width(len(server_name))
 
-                verify_keys = server_keys.get("verify_keys", {})
-                old_verify_keys = server_keys.get("old_verify_keys", {})
-                valid_until: Optional[int] = server_keys.get("valid_until_ts", None)
-                valid_until_pretty = "None Found"
+            # Not worried about column size for errors
+            if isinstance(server_results, ServerVerifyKeys):
+                for server_key_id, server_key in server_results.verify_keys.items():
 
-                if valid_until:
+                    valid_until = server_key.valid_until_ts
+
                     valid_until_pretty = str(
                         datetime.fromtimestamp(float(valid_until / 1000))
                     )
 
-                for key_id in verify_keys.keys():
-                    server_key_col.maybe_update_column_width(len(key_id))
+                    server_key_col.maybe_update_column_width(len(server_key_id))
 
-                valid_until_ts_col.maybe_update_column_width(len(valid_until_pretty))
-                for key_id, old_key_data in old_verify_keys.items():
-                    server_key_col.maybe_update_column_width(len(key_id))
-
-                    if old_key_data:
-                        valid_until_ts_col.maybe_update_column_width(
-                            len(str(old_key_data.get("expired_ts", 0)))
-                        )
+                    valid_until_ts_col.maybe_update_column_width(
+                        len(valid_until_pretty)
+                    )
 
         # Begin constructing the message
 
         # Build the header line
         header_message = (
-            f"{server_name_col.front_pad()} | "
+            f"{server_name_col.pad()} | "
             f"{server_key_col.pad()} | "
             f"{valid_until_ts_col.header_name}\n"
         )
@@ -3601,28 +3575,24 @@ class FederationBot(Plugin):
         # The collection of lines to be chunked later
         list_of_result_data = []
         # Use a sorted list of server names, so it displays in alphabetical order.
-        for server_name, server_response in sorted(server_to_server_data.items()):
+        for server_name, server_results in sorted(server_to_server_data.items()):
             # There will only be data for servers that didn't time out
             first_line = True
-            test_new_object = ServerVerifyKeys({})
-            buffered_message = f"{server_name_col.front_pad(server_name)} | "
-            if isinstance(server_response, FederationErrorResponse):
-                buffered_message += f"{server_response.reason}\n"
+            buffered_message = f"{server_name_col.pad(server_name)} | "
+            if isinstance(server_results, str):
+                buffered_message += f"{server_results}\n"
 
             else:
-                test_new_object.update_key_data_from_list(server_response.response_dict)
                 time_now = int(time.time() * 1000)
-                for v_key_id, server_data in test_new_object.verify_keys.items():
-                    valid_until_ts = server_data.valid_until_ts
-                    valid_until_pretty = "None Found"
+                for server_key_id, server_key in server_results.verify_keys.items():
+                    valid_until_ts = server_key.valid_until_ts
 
-                    if valid_until_ts:
-                        valid_until_pretty = pretty_print_timestamp(valid_until_ts)
+                    valid_until_pretty = pretty_print_timestamp(valid_until_ts)
                     pretty_expired_mark = "*" if valid_until_ts < time_now else ""
 
                     if not first_line:
-                        buffered_message += f"{pad('', server_name_col.size)} | "
-                    buffered_message += f"{server_key_col.pad(v_key_id)} | "
+                        buffered_message += f"{server_name_col.pad('')} | "
+                    buffered_message += f"{server_key_col.pad(server_key_id)} | "
                     buffered_message += f"{pretty_expired_mark}{valid_until_pretty}\n"
 
                     first_line = False
@@ -3631,9 +3601,12 @@ class FederationBot(Plugin):
 
             # Only if there was a single server because of the above condition
             if display_raw:
-                list_of_result_data.extend(
-                    [f"{json.dumps(server_response.response_dict, indent=4)}\n"]
-                )
+                if isinstance(server_results, str):
+                    list_of_result_data.extend([f"{server_results}\n"])
+                else:
+                    list_of_result_data.extend(
+                        [f"{json.dumps(server_results._raw_data, indent=4)}\n"]
+                    )
 
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])

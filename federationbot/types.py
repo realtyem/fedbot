@@ -177,3 +177,4 @@ class ServerVerifyKeys:
         server_keys = data_from_notary_response.get("server_keys", [])
         for entry in server_keys:
             self.update_key_data_from_dict(entry)
+        self._raw_data = full_dict_copy(data_from_notary_response)
