@@ -503,9 +503,9 @@ class FederationBot(Plugin):
                 else:
                     finish = True
 
-                for event in response.events:  # type: ignore[attr-defined]
-                    assert isinstance(event, EventBase)
-                    new_event_ids.add(event.event_id)
+                for pag_res_event in response.events:  # type: ignore[attr-defined]
+                    # assert isinstance(event, EventBase)
+                    new_event_ids.add(pag_res_event.event_id)
 
             discovery_collection_of_event_ids.update(new_event_ids)
 
