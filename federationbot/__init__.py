@@ -1452,6 +1452,247 @@ class FederationBot(Plugin):
         )
 
     @test_command.subcommand(
+        name="repair_event",
+        help="Find a given Event ID in a room and inject any necessary ancestors into the server_to_fix",
+    )
+    @command.argument(
+        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
+    )
+    @command.argument(name="event_id", parser=is_event_id, required=True)
+    @command.argument(name="server_to_fix", required=False)
+    async def repair_event_command(
+        self,
+        command_event: MessageEvent,
+        room_id_or_alias: Optional[str],
+        event_id: Optional[str],
+        server_to_fix: Optional[str] = None,
+    ) -> None:
+        # The process:
+        # 1. The event ID that was provided, prove it's not already on the target server
+        # 2. Get the hosts in the room, test which ones are live and filter out the dead
+        # 3. Hunt for the event on those hosts, start at the top. Make a note when
+        #   you've passed the 5th one that didn't have it.
+        # 4. Check the found Event for ancestor Events that are not on the target server
+        # 5. Add to a List, so we can clearly walk backwards(filling them in order)
+        # 6. Repeat from 3 until no more ancestor Events are found that are missing
+        # 7. Walk backwards through that list 'send'ing those events to the target
+        # server. Check each result for errors, only do one at a time to wait for
+        # responses.
+
+        # Let the user know the bot is paying attention
+        await command_event.mark_read()
+
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        origin_server = get_domain_from_id(self.client.mxid)
+        if origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first."
+            )
+            return
+
+        if server_to_fix:
+            destination_server = server_to_fix
+        else:
+            destination_server = origin_server
+
+        # 1. The event ID that was provided, prove it's not already on the target server
+        if not event_id:
+            await command_event.reply(
+                f"I need you to provide me with an event_id, got {event_id}"
+            )
+            return
+        else:
+            await command_event.respond("Making sure event is not already in room")
+            event_map = await self.federation_handler.get_event_from_server(
+                origin_server=origin_server,
+                destination_server=destination_server,
+                event_id=event_id,
+            )
+            sampled_event = event_map.get(event_id, None)
+            if not isinstance(sampled_event, EventError):
+                await command_event.reply(
+                    f"It appears that the Event referenced by '{event_id}' is already "
+                    f"on the target server: {destination_server}"
+                )
+                return
+
+        # This does place a request, so need to use origin for auth
+        await command_event.respond("Resolving room alias(if it was one)")
+        room_id = await self._resolve_room_id_or_alias(
+            room_id_or_alias, command_event, origin_server
+        )
+        if not room_id:
+            # The user facing error message was already sent
+            return
+
+        # One way or another, we have a room id by now
+        assert room_id is not None
+        await command_event.respond(f"Collecting last event from room {room_id}")
+        head_data = await self.federation_handler.make_join_to_server(
+            origin_server,
+            destination_server,
+            room_id,
+            str(self.client.mxid),
+        )
+        # 2. Get the hosts in the room, test which ones are live and filter out the dead
+        await command_event.respond("Retrieving list of hosts in room")
+        host_list = await self.get_hosts_in_room_ordered(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_id=room_id,
+            event_id_in_timeline=head_data.response_dict.get("event", {}).get(
+                "prev_events", []
+            )[0],
+        )
+
+        good_host_list: List[str] = []
+        # This will act as a prefetch to prime the server result cache, which can be
+        # then checked directly
+        await command_event.respond("Filtering out dead/unresponsive hosts")
+        await self._get_versions_from_servers(host_list)
+        for host in host_list:
+            server_result = self.federation_handler._server_discovery_cache.get(
+                host, None
+            )
+            if server_result and not server_result.unhealthy:
+                good_host_list.extend((host,))
+                # TODO: do we want to track the bad host list too?
+
+        # 3. Hunt for the event on those hosts, start at the top. Make a note when
+        #   you've passed the 5th one that didn't have it.
+        await command_event.respond("Hunting for event on list of good hosts")
+
+        room_version_of_found_event = 0
+        list_of_server_and_event_id_to_send = []
+        event_ids_to_try_next: Queue[str] = Queue()
+        event_ids_to_try_next.put_nowait(event_id)
+        not_done = True
+        while not_done:
+            popped_event_id = await event_ids_to_try_next.get()
+            # 4. Check the found Event for ancestor Events that are not on the target server
+            server_to_event_result_map = await self._find_event_on_servers(
+                origin_server, popped_event_id, good_host_list
+            )
+
+            await command_event.respond(
+                f"Found event {popped_event_id} on {len(server_to_event_result_map)} servers"
+            )
+            for server_name, event_base in server_to_event_result_map.items():
+                # But first, verify the events are valid
+                if isinstance(event_base, Event):
+                    if not room_version_of_found_event:
+                        room_version_of_found_event = int(
+                            await self.federation_handler.discover_room_version(
+                                origin_server, server_name, event_base.room_id
+                            )
+                        )
+                    await self.federation_handler.verify_signatures_and_annotate_event(
+                        event_base, room_version_of_found_event
+                    )
+
+            # count_of_how_many_servers_tried = 0
+            for server_name, event_base in server_to_event_result_map.items():
+                if isinstance(event_base, Event):
+                    if event_base.signatures_verified:
+                        # 5. Add to a List, so we can clearly walk backwards(filling them in order)
+                        list_of_server_and_event_id_to_send.append((event_base,))
+                        # But, do we need more
+                        for _prev_event_id in event_base.prev_events:
+                            response_check_for_this_event = (
+                                await self.federation_handler.get_event_from_server(
+                                    origin_server, destination_server, _prev_event_id
+                                )
+                            )
+                            _inner_event_base_check = response_check_for_this_event.get(
+                                _prev_event_id
+                            )
+                            if isinstance(_inner_event_base_check, EventError):
+                                # We hit an error, that's what we want to keep looking
+                                self.log.warning(
+                                    f"event retrieved during inner check: {_inner_event_base_check.error}"
+                                )
+
+                                event_ids_to_try_next.put_nowait(_prev_event_id)
+                                self.log.info(
+                                    f"repair_event: adding event_id to next to try: {_prev_event_id}"
+                                )
+                            else:
+                                self.log.warning(
+                                    f"event retrieved during inner check: {_inner_event_base_check.raw_data}"
+                                )
+
+                        break
+
+            # 6. Repeat from 3 until no more ancestor Events are found that are missing
+            if event_ids_to_try_next.qsize() == 0:
+                # should be done
+                not_done = False
+
+        # 7. Walk backwards through that list 'send'ing those events to the target
+        # server. Check each result for errors, only do one at a time to wait for
+        # responses.
+        await command_event.respond("Attempting to send event to destination")
+
+        list_of_buffer_lines = [
+            "Done for now, check logs\n",
+            f"found {len(host_list)} servers in that room\n",
+            f"found {len(good_host_list)} of good servers\n",
+        ]
+
+        # Need to do these in reverse, or the destination server will barf
+        list_of_server_and_event_id_to_send.reverse()
+        for (event_base,) in list_of_server_and_event_id_to_send:
+            if isinstance(event_base, Event):
+                response = await self.federation_handler.send_events_to_server(
+                    origin_server,
+                    destination_server,
+                    [event_base.raw_data],
+                )
+                self.log.info(f"SENT, got response of {response.response_dict}")
+                list_of_buffer_lines.extend(
+                    [
+                        f"response from server_to_fix:\n{json.dumps(response.response_dict, indent=4)}"
+                    ]
+                )
+            else:
+                self.log.info(f"Unexpectedly not sent {event_base}")
+
+        # await command_event.respond(
+        #     f"Retrieving Hosts for \n"
+        #     f"* Room: {room_id_or_alias or room_id}\n"
+        #     f"* From {destination_server} using {origin_server}"
+        # )
+
+        # Time to start rendering. Build the header lines first
+        header_message = "Placeholder header message\n"
+
+        # if limit:
+        #     # if limit is more than the number of hosts, fix it
+        #     limit = min(limit, len(host_list))
+        #     for host_number in range(0, limit):
+        #         list_of_buffer_lines.extend(
+        #             [f"{host_list[host_number:host_number+1]}\n"]
+        #         )
+        # else:
+        #     for host in host_list:
+        #         list_of_buffer_lines.extend([f"['{host}']\n"])
+
+        # Chunk the data as there may be a few 'pages' of it
+        final_list_of_data = combine_lines_to_fit_event(
+            list_of_buffer_lines, header_message
+        )
+
+        for chunk in final_list_of_data:
+            await command_event.respond(
+                make_into_text_event(
+                    wrap_in_code_block_markdown(chunk), ignore_body=True
+                ),
+            )
+
+    @test_command.subcommand(
         name="room_hosts", help="List all hosts in a room, in order from earliest"
     )
     @command.argument(
