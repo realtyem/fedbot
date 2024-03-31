@@ -2188,6 +2188,38 @@ class FederationBot(Plugin):
             f"Supplied: {event_id}\n\nResolved: {'$' + reference_hash}"
         )
 
+    @test_command.subcommand(
+        name="head", help="experiment for retrieving information about a room"
+    )
+    @command.argument(
+        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
+    )
+    async def head_command(
+        self, command_event: MessageEvent, room_id_or_alias: str
+    ) -> None:
+        await command_event.mark_read()
+        origin_server = get_domain_from_id(self.client.mxid)
+        room_id = await self._resolve_room_id_or_alias(
+            room_id_or_alias, command_event, origin_server
+        )
+        if not room_id:
+            # The user facing error message was already sent
+            return
+
+        response = await self.federation_handler.make_join_to_server(
+            origin_server=origin_server,
+            destination_server=origin_server,
+            room_id=room_id,
+            user_id=str(self.client.mxid),
+        )
+        await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown(
+                    f"{json.dumps(response.response_dict, indent=4)}\n\ncode: {response.status_code}\n{response.reason}\n"
+                )
+            )
+        )
+
     # I think the command map should look a little like this:
     # (defaults will be marked with * )
     # !fed
