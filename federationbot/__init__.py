@@ -4016,23 +4016,23 @@ class FederationBot(Plugin):
         event_id_in_timeline: str,
     ) -> List[str]:
         # Should be a faithful recreation of what Synapse does.
-        """
-        SELECT
-            /* Match the domain part of the MXID */
-            substring(c.state_key FROM '@[^:]*:(.*)$') as server_domain
-        FROM current_state_events c
-        /* Get the depth of the event from the events table */
-        INNER JOIN events AS e USING (event_id)
-        WHERE
-            /* Find any join state events in the room */
-            c.type = 'm.room.member'
-            AND c.membership = 'join'
-            AND c.room_id = ?
-        /* Group all state events from the same domain into their own buckets (groups) */
-        GROUP BY server_domain
-        /* Sorted by lowest depth first */
-        ORDER BY min(e.depth) ASC;
-        """
+
+        # SELECT
+        #     /* Match the domain part of the MXID */
+        #     substring(c.state_key FROM '@[^:]*:(.*)$') as server_domain
+        # FROM current_state_events c
+        # /* Get the depth of the event from the events table */
+        # INNER JOIN events AS e USING (event_id)
+        # WHERE
+        #     /* Find any join state events in the room */
+        #     c.type = 'm.room.member'
+        #     AND c.membership = 'join'
+        #     AND c.room_id = ?
+        # /* Group all state events from the same domain into their own buckets (groups) */
+        # GROUP BY server_domain
+        # /* Sorted by lowest depth first */
+        # ORDER BY min(e.depth) ASC;
+
         # (Given the toolbox at the time of writing) I think the best way to simulate
         # this will be to use get_state_ids_from_server(), which returns a tuple of the
         # current state ids and the auth chain ids. The state ids should have all the
