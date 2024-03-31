@@ -908,7 +908,7 @@ class FederationHandler:
         self,
         origin_server: str,
         destination_server: str,
-        pdu_to_send: Dict[str, Any],
+        pdus_to_send: Sequence[Dict[str, Any]],
         timeout: float = 10.0,
     ) -> FederationBaseResponse:
         formatted_data: Dict[str, Any] = {}
@@ -916,11 +916,12 @@ class FederationHandler:
         formatted_data["origin"] = origin_server
         formatted_data["origin_server_ts"] = now
         formatted_data["pdus"] = []
-        formatted_data["pdus"].append(pdu_to_send)
+        for pdu in pdus_to_send:
+            formatted_data["pdus"].append(pdu)
 
-        self.logger.info(
-            f"outgoing transaction:\n{json.dumps(formatted_data, indent=4)}"
-        )
+        # self.logger.info(
+        #     f"outgoing transaction:\n{json.dumps(formatted_data, indent=4)}"
+        # )
 
         response = await self.federation_request(
             destination_server_name=destination_server,
@@ -930,22 +931,22 @@ class FederationHandler:
             timeout_seconds=timeout,
             origin_server=origin_server,
         )
-        self.logger.info(
-            f"_send_transaction_to_server responded: {response.response_dict}"
-        )
+        # self.logger.info(
+        #     f"_send_transaction_to_server responded: {response.response_dict}"
+        # )
         return response
 
-    async def send_event_to_server(
+    async def send_events_to_server(
         self,
         origin_server: str,
         destination_server: str,
-        event_data: Dict[str, Any],
+        event_data: Sequence[Dict[str, Any]],
         timeout: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self._send_transaction_to_server(
             origin_server=origin_server,
             destination_server=destination_server,
-            pdu_to_send=event_data,
+            pdus_to_send=event_data,
             timeout=timeout,
         )
 
