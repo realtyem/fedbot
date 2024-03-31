@@ -1,5 +1,5 @@
 from typing import Collection, Dict, List, Optional, Set, Tuple, Type, Union, cast
-from asyncio import Queue
+from asyncio import Queue, QueueEmpty, Task
 from datetime import datetime
 from enum import Enum
 from itertools import chain
@@ -665,14 +665,14 @@ class FederationBot(Plugin):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # if get_domain_from_id(command_event.sender) != get_domain_from_id(
-        #     self.client.mxid
-        # ):
-        #     await command_event.reply(
-        #         "I'm sorry, running this command from a user not on the same "
-        #         "server as the bot will not help"
-        #     )
-        #     return
+        if get_domain_from_id(command_event.sender) != get_domain_from_id(
+            self.client.mxid
+        ):
+            await command_event.reply(
+                "I'm sorry, running this command from a user not on the same "
+                "server as the bot will not help"
+            )
+            return
 
         # The only way to request from a different server than what the bot is on is to
         # have the other server's signing keys. So just use the bot's server.
@@ -746,7 +746,7 @@ class FederationBot(Plugin):
         event_id_ok_list: Set[str] = set()
         event_id_error_list: Set[str] = set()
         event_id_resolved_error_list: Set[str] = set()
-        event_id_retries_exhausted: Set[str] = set()
+        event_id_attempted_once: Set[str] = set()
 
         async def _parse_ancestor_events(
             worker_name: str,
@@ -776,20 +776,10 @@ class FederationBot(Plugin):
             for _event_id in event_id_list_of_ancestors:
                 pulled_event = pulled_event_map.get(_event_id)
                 if isinstance(pulled_event, EventError):
-                    # Had an error, keep a tally
                     error_batch.add(_event_id)
-                    self.log.warning(
-                        f"{worker_name}: "
-                        f"Error on event_id: {_event_id}\n {pulled_event.error}"
-                    )
+
                 else:
-                    # Got one, make a note
                     next_batch.add(_event_id)
-                    # self.log.warning(
-                    #     f"{worker_name}: Depth on event_id: {_event_id}\n"
-                    #     f" current: {pulled_event.depth}\n"
-                    #     f" max iter: {max_depth}"
-                    # )
 
             return next_batch, error_batch
 
@@ -899,7 +889,7 @@ class FederationBot(Plugin):
         async def _event_walking_fetcher(
             worker_name: str,
             _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
-            _backfill_queue: Queue[str],
+            _event_error_queue: Queue[str],
         ) -> None:
             while True:
                 if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
@@ -918,38 +908,45 @@ class FederationBot(Plugin):
 
                 bot_working[worker_name] = True
 
-                # nonlocal event_id_analyzed
                 # If this event_id has already been through analysis, no need to
                 # again. A good example of how this helps: In the ping room, each bot
                 # that sends a 'pong' will have the invocation as a prev_event. The
                 # next thing sent into the room will have all those 'pong' responses
                 # as prev_events. However, if this is a retry because it wasn't
                 # available the first time around...
-                # if not is_this_a_retry:
-                #    Filter out already analyzed event_ids
-                #    next_event_ids.difference_update(event_id_analyzed)
+                if not is_this_a_retry:
+                    # Filter out already analyzed event_ids
+                    next_event_ids.difference_update(event_id_attempted_once)
 
                 # But still add it to the pile so that we don't do it twice
-                # event_id_analyzed.update(next_event_ids)
+                event_id_attempted_once.update(next_event_ids)
 
                 if back_off_time > 5.0:  # SECONDS_BEFORE_IGNORE_BACKOFF:
                     self.log.info(f"{worker_name}: Backing off for {back_off_time}")
                     await asyncio.sleep(back_off_time)
 
-                nonlocal seen_depths_for_progress
                 iter_start_time = time.time()
-                pulled_event_map = await self.federation_handler.get_events_from_server(
-                    origin_server=origin_server,
-                    destination_server=destination_server,
-                    events_list=next_event_ids,
-                )
+                if next_event_ids:
+                    pulled_event_map = (
+                        await self.federation_handler.get_events_from_server(
+                            origin_server=origin_server,
+                            destination_server=destination_server,
+                            events_list=next_event_ids,
+                        )
+                    )
+                else:
+                    # This way, if there was nothing to do after being filtered out, it
+                    # should just fall through to task_done()
+                    pulled_event_map = {}
+
                 for next_event_id in next_event_ids:
 
-                    # self.log.info(f"{worker_name} on {next_event_id}")
-                    pulled_event = pulled_event_map.get(next_event_id)
+                    pulled_event = pulled_event_map.get(next_event_id, None)
+
                     # pulled_event should never be None, but mypy doesn't know that
-                    assert pulled_event is not None
-                    if not isinstance(pulled_event, EventError):
+                    if pulled_event is not None and not isinstance(
+                        pulled_event, EventError
+                    ):
                         if is_this_a_retry:
                             # This should only be hit after a backfill attempt, and
                             # means the second try succeeded.
@@ -984,8 +981,10 @@ class FederationBot(Plugin):
                         )
 
                         for _event_id in chain(prev_bad_events, auth_bad_events):
-                            event_id_error_list.add(_event_id)
-                            _backfill_queue.put_nowait(_event_id)
+                            if _event_id not in event_id_error_list:
+                                # Because it's already been tried in this case
+                                _event_error_queue.put_nowait(_event_id)
+                                event_id_error_list.add(_event_id)
                         # Prep for next iteration. Don't worry about adding auth events
                         # to this, as they will come along in due time
                         if not prev_good_events:
@@ -1025,99 +1024,294 @@ class FederationBot(Plugin):
                 _event_fetch_queue.task_done()
                 bot_working[worker_name] = False
 
-        async def _backfill_fetcher(
+        room_version_of_found_event = 0
+
+        async def _room_repair_worker(
             worker_name: str,
+            room_version: int,
             _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
-            _backfill_queue: Queue[str],
+            _event_error_queue: Queue[str],
+            _retrying_task_list: List[Task],
         ) -> None:
+            """
+            Responsible for hunting down an Event(by its ID) and walking its
+            prev_events looking for additionals that are missing. Then sending these in
+            reverse order to the target server.
+
+            Args:
+                worker_name:
+                room_version:
+                _event_fetch_queue:
+                _event_error_queue:
+                _retrying_task_list:
+
+            Returns:
+
+            """
             while True:
                 if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
                     break
 
-                next_event_id = await _backfill_queue.get()
+                next_event_id = await _event_error_queue.get()
                 bot_working[worker_name] = True
 
                 if next_event_id in event_id_ok_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found backfill fetch event in OK list {next_event_id}"
+                        f"{worker_name}: Unexpectedly found room walk fetch event in OK list {next_event_id}"
                     )
                 if next_event_id in event_id_resolved_error_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found backfill fetch event in RESOLVED list {next_event_id}"
+                        f"{worker_name}: Unexpectedly found room walk fetch event in RESOLVED list {next_event_id}"
                     )
-                if next_event_id in event_id_retries_exhausted:
-                    _backfill_queue.task_done()
-                    continue
 
-                # self.log.warning(f"{worker_name}: (Retry count: {retry_count}) Trying a backfill on {_event_id}")
                 start_time = time.time()
-                backfilled_event = await self._get_event_from_backfill(
-                    origin_server=origin_server,
-                    destination_server=destination_server,
-                    room_id=room_id,
-                    event_id=next_event_id,
-                )
-                request_time = time.time() - start_time
 
-                # Go ahead and add to this tally, just in case somehow there ends up
-                # being another duplicate of this in the queue
-                event_id_retries_exhausted.add(next_event_id)
+                list_of_server_and_event_id_to_send = []
 
-                # Maintain the tally. We don't remove Events that were resolved
-                # from the Errors List
-                if isinstance(backfilled_event, EventError):
-                    # Fed error, really not a lot we can do here, if getting an
-                    # event worked but backfilled didn't, there are bigger
-                    # problems. Just log it and move on, nothing will be added to the
-                    # queue in this case(as there is nothing to work with)
-                    self.log.warning(
-                        f"{worker_name}: Error after backfill event_id: {next_event_id}\n {backfilled_event.to_json()}"
+                local_set_of_events_already_tried = set()
+                # These will be local queues to organize what this worker is currently working on.
+                event_ids_to_try_next: Queue[str] = Queue()
+                event_ids_to_try_next.put_nowait(next_event_id)
+                done = False
+                while not done:
+                    try:
+                        popped_event_id = event_ids_to_try_next.get_nowait()
+                    except QueueEmpty:
+                        # Nothing new, must be done
+                        break
+
+                    # Let's not repeat something locally
+                    if popped_event_id in local_set_of_events_already_tried:
+                        break
+                    local_set_of_events_already_tried.add(popped_event_id)
+                    # self.log.info(f"{worker_name}: looking at {popped_event_id}")
+                    # 4. Check the found Event for ancestor Events that are not on the
+                    #    target server
+                    server_to_event_result_map = await self._find_event_on_servers(
+                        origin_server, popped_event_id, good_host_list
                     )
 
-                elif backfilled_event is None:
-                    # The event wasn't found. Drop it for now(might add something neat
-                    # later, like look for this event on other hosts in the room)
-                    self.log.warning(
-                        f"{worker_name}: No Event found on target server after backfill event_id: {next_event_id}"
-                    )
+                    for server_name, event_base in server_to_event_result_map.items():
+                        # But first, verify the events are valid
+                        if isinstance(event_base, Event):
+                            if not room_version:
+                                room_version = int(
+                                    await self.federation_handler.discover_room_version(
+                                        origin_server, server_name, event_base.room_id
+                                    )
+                                )
+                            # await self.federation_handler.verify_signatures_and_annotate_event(
+                            #     event_base, room_version
+                            # )
 
+                    count_of_how_many_servers_tried = 0
+                    for host_in_order in good_host_list:
+                        server_name = host_in_order
+                        event_base = server_to_event_result_map.get(host_in_order)
+                        count_of_how_many_servers_tried += 1
+                        if isinstance(event_base, Event):
+                            # TODO: for the moment, skip verification until notary services are fixed on the bot
+                            if event_base.signatures_verified or True:
+                                # 5. Add to a List, so we can clearly walk backwards
+                                # (filling them in order)
+                                list_of_server_and_event_id_to_send.append(
+                                    (event_base,)
+                                )
+                                self.log.info(
+                                    f"{worker_name}: found {popped_event_id} on "
+                                    f"{server_name} after "
+                                    f"{count_of_how_many_servers_tried - 1} other servers"
+                                )
+                                # But, do we need more
+                                for _ancestor_event_id in chain(
+                                    event_base.prev_events, event_base.auth_events
+                                ):
+                                    response_check_for_this_event = await self.federation_handler.get_event_from_server(
+                                        origin_server,
+                                        destination_server,
+                                        _ancestor_event_id,
+                                    )
+                                    _inner_event_base_check = (
+                                        response_check_for_this_event.get(
+                                            _ancestor_event_id
+                                        )
+                                    )
+
+                                    if isinstance(_inner_event_base_check, EventError):
+                                        # We hit an error, that's what we want to keep looking
+                                        event_ids_to_try_next.put_nowait(
+                                            _ancestor_event_id
+                                        )
+                                        self.log.warning(
+                                            f"{worker_name}: for: "
+                                            f"{next_event_id}, need: {_ancestor_event_id}"
+                                        )
+                                    # else:
+                                    #     self.log.info(
+                                    #         f"{worker_name}: for: {next_event_id}, {_prev_event_id} found locally"
+                                    #     )
+
+                                break
+
+                    event_ids_to_try_next.task_done()
+                    # 6. Repeat from 3 until no more ancestor Events are found that are missing
+                    if event_ids_to_try_next.qsize() == 0:
+                        # should be done
+                        done = False
+
+                event_sent = False
+                # Need to do these in reverse, or the destination server will barf
+                list_of_server_and_event_id_to_send.reverse()
+                list_of_pdus_to_send = []
+                for (event_base,) in list_of_server_and_event_id_to_send:
+                    if isinstance(event_base, Event):
+                        list_of_pdus_to_send.extend([event_base.raw_data])
+
+                if list_of_pdus_to_send:
+                    response = await self.federation_handler.send_events_to_server(
+                        origin_server,
+                        destination_server,
+                        list_of_pdus_to_send,
+                    )
+                    event_sent = True
+
+                    self.log.info(f"SENT, got response of {response.response_dict}")
+                # list_of_buffer_lines.extend(
+                #     [
+                #         f"response from server_to_fix:\n{json.dumps(response.response_dict, indent=4)}"
+                #     ]
+                # )
                 else:
-                    # found the event, send it back to the event fetch queue for retry
-                    self.log.warning(
-                        f"{worker_name}: Potentially found event on backfill, testing {next_event_id}"
-                    )
-                    _event_fetch_queue.put_nowait(
-                        (request_time * BACKOFF_MULTIPLIER, True, {next_event_id})
+                    self.log.info(f"Unexpectedly not sent {list_of_pdus_to_send}")
+
+                # Update for the render
+                end_time = time.time() - start_time
+                render_list.extend([(end_time, False)])
+                _event_error_queue.task_done()
+
+                # Set up the retry task, but only if an event was actually sent
+                if event_sent:
+                    new_worker_id = len(_retrying_task_list)
+                    _retrying_task_list.append(
+                        asyncio.create_task(
+                            _waiting_retry_worker(
+                                f"_waiting_retry_worker_{new_worker_id}",
+                                _event_fetch_queue,
+                                bot_working,
+                                next_event_id,
+                                len(list_of_server_and_event_id_to_send),
+                            )
+                        )
                     )
 
-                _backfill_queue.task_done()
-                bot_working[worker_name] = False
+                    bot_working[worker_name] = False
+                else:
+                    self.log.warning(
+                        f"{worker_name}: Nothing to do, as no events were sent out"
+                    )
+
+        async def _waiting_retry_worker(
+            worker_name: str,
+            _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
+            _bot_working_status_counter: Dict[str, bool],
+            event_id_to_check: str,
+            num_of_events_prev_sent: int,
+        ) -> None:
+            """
+            Responsible for retrying the 'fixed' Event ID before being sent back to the
+            normal event fetching worker. Given a count of the events sent in order to
+            repair an Event, base a sleep timer on that. See notes inside function for
+            rationale.
+            Args:
+                worker_name:
+                _event_fetch_queue:
+                event_id_to_check:
+                num_of_events_prev_sent:
+
+            Returns:
+
+            """
+            retry_counter = 0
+            not_found = True
+            _bot_working_status_counter[worker_name] = True
+
+            # We'll use a pretty healthy number of retries, as huge rooms have complex
+            # state to work through and may have some delays
+            for retry_counter in range(0, 10):
+                if not not_found:
+                    break
+                # We'll give slow servers a little bit of time to work through the
+                # stack of events that already were sent. Depending on state resolution
+                # (looking at you, Synapse) this may take up to a minute to fully
+                # resolve before the Event ID is actually available on the server.
+                sleep_time = max(1.0 * num_of_events_prev_sent, 5.0)
+
+                await asyncio.sleep(sleep_time)
+
+                retry_check_on_event = (
+                    await self.federation_handler.get_event_from_server(
+                        origin_server,
+                        destination_server,
+                        event_id_to_check,
+                    )
+                )
+                retry_counter += 1
+
+                retried_event = retry_check_on_event.get(event_id_to_check, None)
+                if isinstance(retried_event, Event):
+                    # found the event, send it back to the event fetch queue for retry
+                    not_found = False
+                    self.log.info(
+                        f"{worker_name}: Potentially found event on roomwalk(after "
+                        f"{retry_counter} attempts), sending {event_id_to_check} back "
+                        "to event fetcher"
+                    )
+                    # The back off mech shouldn't need to wait in this instance, as the
+                    # event will already be in the cache. This is considered a 'retry'
+                    # for the event fetcher
+                    _event_fetch_queue.put_nowait((0.0, True, {event_id_to_check}))
+
+            if not_found:
+                self.log.warning(
+                    f"{worker_name}: Not found after {retry_counter} tries, giving up on {event_id_to_check}"
+                )
+            # Register the bot as not working, so the render loop knows it's not waiting
+            # for anything.
+            _bot_working_status_counter[worker_name] = False
 
         # Tuple[suggested_backoff, is_this_a_retry, event_ids_to_fetch]
         roomwalk_fetch_queue: Queue[Tuple[float, bool, Set[str]]] = Queue()
+        # The Queue of errors, matches with _event_error_queue on workers
         # Tuple[suggested_backoff, event_id_to_fetch]
-        backfill_fetch_queue: Queue[str] = Queue()
+        roomwalk_error_queue: Queue[str] = Queue()
+
+        # This is a grouping of one-off fired tasks, specifically the ones with a long
+        # wait timer. The room walker worker will create these
+        resolving_tasks = []
 
         tasks = []
-        i = 0
-        tasks.append(
-            asyncio.create_task(
-                _event_walking_fetcher(
-                    f"event_worker_{i}", roomwalk_fetch_queue, backfill_fetch_queue
+        for i in range(0, 1):
+            tasks.append(
+                asyncio.create_task(
+                    _event_walking_fetcher(
+                        f"event_worker_{i}", roomwalk_fetch_queue, roomwalk_error_queue
+                    )
                 )
             )
-        )
-        bot_working.setdefault(f"event_worker_{i}", False)
-        tasks.append(
-            asyncio.create_task(
-                _backfill_fetcher(
-                    f"backfill_worker_{i}",
-                    roomwalk_fetch_queue,
-                    backfill_fetch_queue,
+            bot_working.setdefault(f"event_worker_{i}", False)
+        for i in range(0, 1):
+            tasks.append(
+                asyncio.create_task(
+                    _room_repair_worker(
+                        f"roomwalk_worker_{i}",
+                        room_version_of_found_event,
+                        roomwalk_fetch_queue,
+                        roomwalk_error_queue,
+                        resolving_tasks,
+                    )
                 )
             )
-        )
-        bot_working.setdefault(f"backfill_worker_{i}", False)
+            bot_working.setdefault(f"roomwalk_worker_{i}", False)
 
         roomwalk_cumulative_iter_time = 0.0
         # Number of times we've re-rendered status
@@ -1151,7 +1345,7 @@ class FederationBot(Plugin):
                 await asyncio.sleep(1)
                 continue
 
-            if roomwalk_fetch_queue.qsize() == 0 and backfill_fetch_queue.qsize() == 0:
+            if roomwalk_fetch_queue.qsize() == 0 and roomwalk_error_queue.qsize() == 0:
                 if all([not x for x in bot_working.values()]):
                     retry_for_finish += 1
                     self.log.warning(
@@ -1203,7 +1397,7 @@ class FederationBot(Plugin):
                 f"  Resolved Errors: ({len(event_id_resolved_error_list)})",
                 f"  Time taken: {roomwalk_cumulative_iter_time:.3f} seconds (iter# {roomwalk_iterations})",
                 f"  (Items currently in backlog event queue: {roomwalk_fetch_queue.qsize()})",
-                f"  (Items currently in backlog backfill queue: {backfill_fetch_queue.qsize()})",
+                f"  (Items currently in backlog roomwalk queue: {roomwalk_error_queue.qsize()})",
                 f"Total number of workers: {len(tasks)}",
             ]
             if retry_for_finish:
@@ -1227,8 +1421,12 @@ class FederationBot(Plugin):
         # Cancel our worker tasks.
         for task in tasks:
             task.cancel()
+        for resolving_task in resolving_tasks:
+            resolving_task.cancel()
+
         # Wait until all worker tasks are cancelled.
         await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*resolving_tasks, return_exceptions=True)
 
         # Clean up the task controller
         self.task_control.pop(pinned_message)
