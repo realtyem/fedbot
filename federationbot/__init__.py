@@ -1025,6 +1025,7 @@ class FederationBot(Plugin):
                 bot_working[worker_name] = False
 
         room_version_of_found_event = 0
+        local_set_of_events_already_tried = set()
 
         async def _room_repair_worker(
             worker_name: str,
@@ -1068,7 +1069,6 @@ class FederationBot(Plugin):
 
                 list_of_server_and_event_id_to_send = []
 
-                local_set_of_events_already_tried = set()
                 # These will be local queues to organize what this worker is currently working on.
                 event_ids_to_try_next: Queue[str] = Queue()
                 event_ids_to_try_next.put_nowait(next_event_id)
@@ -1082,7 +1082,7 @@ class FederationBot(Plugin):
 
                     # Let's not repeat something locally
                     if popped_event_id in local_set_of_events_already_tried:
-                        break
+                        continue
                     local_set_of_events_already_tried.add(popped_event_id)
                     # self.log.info(f"{worker_name}: looking at {popped_event_id}")
                     # 4. Check the found Event for ancestor Events that are not on the
