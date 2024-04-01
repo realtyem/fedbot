@@ -1186,14 +1186,23 @@ class FederationBot(Plugin):
                     )
                     event_sent = True
 
-                    self.log.info(f"SENT, got response of {response.response_dict}")
-                # list_of_buffer_lines.extend(
-                #     [
-                #         f"response from server_to_fix:\n{json.dumps(response.response_dict, indent=4)}"
-                #     ]
-                # )
+                    response_break_down = response.response_dict.get("pdus", {})
+                    # The response from a federation send transaction has a dictionary at 'pdus' with
+                    # each key being the 'event_id' and the value being an empty {} for ok, but some
+                    # string value if there was an error of some kind. Only log the errors
+                    for (
+                        pdu_event_id,
+                        pdu_received_result,
+                    ) in response_break_down.items():
+                        if pdu_received_result:
+                            self.log.info(
+                                f"{worker_name}: Received error from {pdu_event_id} got response of {pdu_received_result}"
+                            )
+
                 else:
-                    self.log.info(f"Unexpectedly not sent {list_of_pdus_to_send}")
+                    self.log.info(
+                        f"{worker_name}: Unexpectedly not sent {list_of_pdus_to_send}"
+                    )
 
                 # Update for the render
                 end_time = time.time() - start_time
