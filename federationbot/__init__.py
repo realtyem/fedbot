@@ -1123,35 +1123,46 @@ class FederationBot(Plugin):
                                     f"{count_of_how_many_servers_tried - 1} other servers"
                                 )
                                 # But, do we need more
-                                for _ancestor_event_id in chain(
-                                    event_base.prev_events, event_base.auth_events
-                                ):
-                                    response_check_for_this_event = await self.federation_handler.get_event_from_server(
-                                        origin_server,
-                                        destination_server,
-                                        _ancestor_event_id,
-                                    )
-                                    _inner_event_base_check = (
-                                        response_check_for_this_event.get(
-                                            _ancestor_event_id
-                                        )
+
+                                (
+                                    prev_good_events,
+                                    prev_bad_events,
+                                ) = await _parse_ancestor_events(
+                                    worker_name, event_base.prev_events
+                                )
+                                (
+                                    auth_good_events,
+                                    auth_bad_events,
+                                ) = await _parse_ancestor_events(
+                                    worker_name, event_base.auth_events
+                                )
+                                for _ancestor_event_id in prev_bad_events:
+                                    self.log.warning(
+                                        f"{worker_name}: for: "
+                                        f"{event_base.event_id}, need prev_event: {_ancestor_event_id}"
                                     )
 
-                                    if isinstance(_inner_event_base_check, EventError):
-                                        # We hit an error, that's what we want to keep looking
-                                        event_ids_to_try_next.put_nowait(
-                                            _ancestor_event_id
-                                        )
-                                        self.log.warning(
-                                            f"{worker_name}: for: "
-                                            f"{next_event_id}, need: {_ancestor_event_id}"
-                                        )
-                                    # else:
-                                    #     self.log.info(
-                                    #         f"{worker_name}: for: {next_event_id}, {_prev_event_id} found locally"
-                                    #     )
+                                    event_ids_to_try_next.put_nowait(_ancestor_event_id)
 
+                                for _ancestor_event_id in auth_bad_events:
+                                    self.log.warning(
+                                        f"{worker_name}: for: "
+                                        f"{event_base.event_id}, need auth_event: {_ancestor_event_id}"
+                                    )
+
+                                    event_ids_to_try_next.put_nowait(_ancestor_event_id)
+
+                                if not prev_bad_events and not auth_bad_events:
+                                    self.log.info(
+                                        f"{worker_name}: All events for {event_base.event_id} were found locally"
+                                    )
+                                # The event was found, we can skip the rest of the host list on this iteration
                                 break
+                        # else:
+                        #     self.log.warning(
+                        #         f"{worker_name}: Event in server_to_event_result_map was unexpectedly an EventError "
+                        #         f"from {server_name}"
+                        #     )
 
                     event_ids_to_try_next.task_done()
                     # 6. Repeat from 3 until no more ancestor Events are found that are missing
