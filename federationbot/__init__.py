@@ -4196,10 +4196,6 @@ class FederationBot(Plugin):
         return event
 
 
-
-
-
-
 def wrap_in_code_block_markdown(existing_buffer: str) -> str:
     prepend_string = "```text\n"
     append_string = "```\n"
