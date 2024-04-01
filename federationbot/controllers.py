@@ -13,6 +13,7 @@ class ReactionCommandStatus(Enum):
     START = "Start "
     PAUSE = "Pause "
     STOP = "Stop "
+    CLEANUP = "Remove "
 
 
 class ReactionControlEntry:
@@ -77,6 +78,14 @@ class ReactionControlEntry:
 
     def pause(self) -> None:
         self.current_status = ReactionCommandStatus.PAUSE
+
+    async def add_cleanup_control(self, pinned_message: EventID) -> None:
+        cleanup_reaction_event = await self.client.react(
+            self.related_command_event.room_id,
+            pinned_message,
+            ReactionCommandStatus.CLEANUP.value,
+        )
+        self.reaction_collection_of_event_ids.add(cleanup_reaction_event)
 
     def get_status(self) -> ReactionCommandStatus:
         return self.current_status
@@ -153,10 +162,28 @@ class ReactionTaskController:
             return True
         return False
 
-    async def cancel(self, pinned_message: EventID) -> None:
+    async def cancel(
+        self, pinned_message: EventID, add_cleanup_control: bool = False
+    ) -> None:
         if pinned_message not in self.tracked_reactions:
             raise MessageNotWatched
         await self.tracked_reactions[pinned_message].cancel()
+        if add_cleanup_control:
+            await self.tracked_reactions[pinned_message].add_cleanup_control(
+                pinned_message
+            )
+
+    async def remove_last_display_of(self, pinned_message: EventID) -> None:
+        react_entry = self.tracked_reactions.get(pinned_message, None)
+        if react_entry is None:
+            raise MessageNotWatched
+
+        await react_entry.client.redact(
+            react_entry.related_command_event.room_id,
+            pinned_message,
+            "Cleaning up screen real estate",
+        )
+        react_entry.reaction_collection_of_event_ids.clear()
 
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to
@@ -172,5 +199,7 @@ class ReactionTaskController:
                 self.tracked_reactions[reaction_data.event_id].pause()
             elif reaction_data.key == ReactionCommandStatus.START.value:
                 self.tracked_reactions[reaction_data.event_id].start()
+            elif reaction_data.key == ReactionCommandStatus.CLEANUP.value:
+                await self.remove_last_display_of(reaction_data.event_id)
 
         return

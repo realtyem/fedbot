@@ -249,7 +249,7 @@ class FederationBot(Plugin):
                 break
             await asyncio.sleep(5.0)
 
-        await self.reaction_task_controller.cancel(pinned_message)
+        await self.reaction_task_controller.cancel(pinned_message, True)
 
     @command.new(
         name="test",
@@ -1424,7 +1424,7 @@ class FederationBot(Plugin):
         await asyncio.gather(*resolving_tasks, return_exceptions=True)
 
         # Clean up the task controller
-        await self.reaction_task_controller.cancel(pinned_message)
+        await self.reaction_task_controller.cancel(pinned_message, True)
 
         header_lines = ["Room Back-walking Procedure: Done"]
 
