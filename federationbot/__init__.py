@@ -20,7 +20,6 @@ from mautrix.types import (
     MessageType,
     PaginatedMessages,
     PaginationDirection,
-    ReactionEvent,
     RoomID,
     SyncToken,
     TextMessageEventContent,
@@ -30,6 +29,7 @@ from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
+from federationbot.controllers import ReactionTaskController
 from federationbot.events import (
     CreateRoomStateEvent,
     Event,
@@ -160,18 +160,8 @@ def is_command_type(maybe_subcommand: str) -> Optional[str]:
         return None
 
 
-class ReactionCommandStatus(Enum):
-    # Notice the extra space, this obfuscates the reaction slightly so as not to pick up
-    # stray commands from other rooms. I hope.
-    START = "Start "
-    PAUSE = "Pause "
-    STOP = "Stop "
-
-
 class FederationBot(Plugin):
-    task_control: Dict[EventID, ReactionCommandStatus]
-    reaction_handler_count: int
-
+    reaction_task_controller: ReactionTaskController
     cached_servers: Dict[str, str]
     server_signing_keys: Dict[str, str]
     federation_handler: FederationHandler
@@ -183,10 +173,12 @@ class FederationBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.server_signing_keys = {}
-        self.task_control: Dict[EventID, ReactionCommandStatus] = {}
-        self.reaction_handler_count = 0
+        self.reaction_task_controller = ReactionTaskController()
+
         self.client.add_event_handler(
-            EventType.REACTION, self.react_control_handler, True
+            EventType.REACTION,
+            self.reaction_task_controller.react_control_handler,
+            True,
         )
 
         if self.config:
@@ -202,24 +194,11 @@ class FederationBot(Plugin):
         )
 
     async def pre_stop(self) -> None:
-        self.client.remove_event_handler(EventType.REACTION, self.react_control_handler)
+        self.client.remove_event_handler(
+            EventType.REACTION, self.reaction_task_controller.react_control_handler
+        )
         # To stop any caching cleanup tasks
         await self.federation_handler.stop()
-
-    async def react_control_handler(self, react_evt: ReactionEvent) -> None:
-        reaction_data = react_evt.content.relates_to
-        if (
-            react_evt.sender != self.client.mxid
-            and reaction_data.event_id in self.task_control
-        ):
-            if reaction_data.key == ReactionCommandStatus.STOP.value:
-                self.task_control[reaction_data.event_id] = ReactionCommandStatus.STOP
-            elif reaction_data.key == ReactionCommandStatus.PAUSE.value:
-                self.task_control[reaction_data.event_id] = ReactionCommandStatus.PAUSE
-            elif reaction_data.key == ReactionCommandStatus.START.value:
-                self.task_control[reaction_data.event_id] = ReactionCommandStatus.START
-
-        return
 
     @command.new(
         name="status",
@@ -233,21 +212,20 @@ class FederationBot(Plugin):
         pinned_message = await command_event.respond(
             f"Received Status Command on: {self.client.mxid}"
         )
-        await self.client.react(
-            command_event.room_id, pinned_message, ReactionCommandStatus.STOP.value
+        await self.reaction_task_controller.setup(
+            pinned_message, self.client, command_event
         )
-        await self.client.react(
-            command_event.room_id, pinned_message, ReactionCommandStatus.PAUSE.value
-        )
-        await self.client.react(
-            command_event.room_id, pinned_message, ReactionCommandStatus.START.value
-        )
-        self.task_control[pinned_message] = ReactionCommandStatus.START
 
         finish_on_this_round = False
         while True:
-            if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+            if self.reaction_task_controller.is_stopped(pinned_message):
                 finish_on_this_round = True
+
+            if self.reaction_task_controller.is_paused(pinned_message):
+                # A pause just means not adding anything to the screen, until restarted
+                await asyncio.sleep(1)
+                continue
+
             # TODO: Lose this after Tom saw
             good_server_results, bad_server_results = partition(
                 lambda x: x.cache_value.unhealthy is not None,
@@ -268,8 +246,10 @@ class FederationBot(Plugin):
             )
 
             if finish_on_this_round:
-                return
+                break
             await asyncio.sleep(5.0)
+
+        await self.reaction_task_controller.cancel(pinned_message)
 
     @command.new(
         name="test",
@@ -871,18 +851,10 @@ class FederationBot(Plugin):
             ),
             edits=pinned_message,
         )
-        await self.client.react(
-            command_event.room_id, pinned_message, ReactionCommandStatus.STOP.value
-        )
-        await self.client.react(
-            command_event.room_id, pinned_message, ReactionCommandStatus.PAUSE.value
-        )
-        await self.client.react(
-            command_event.room_id, pinned_message, ReactionCommandStatus.START.value
-        )
 
-        # The initial command
-        self.task_control.setdefault(pinned_message, ReactionCommandStatus.START)
+        await self.reaction_task_controller.setup(
+            pinned_message, self.client, command_event
+        )
 
         bot_working: Dict[str, bool] = dict()
 
@@ -892,7 +864,7 @@ class FederationBot(Plugin):
             _event_error_queue: Queue[str],
         ) -> None:
             while True:
-                if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+                if self.reaction_task_controller.is_stopped(pinned_message):
                     break
 
                 # Use a set for this, as sometimes prev_events ARE auth_events
@@ -1050,7 +1022,7 @@ class FederationBot(Plugin):
 
             """
             while True:
-                if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+                if self.reaction_task_controller.is_stopped(pinned_message):
                     break
 
                 next_event_id = await _event_error_queue.get()
@@ -1260,6 +1232,9 @@ class FederationBot(Plugin):
             for retry_counter in range(0, 10):
                 if not not_found:
                     break
+                if self.reaction_task_controller.is_stopped(pinned_message):
+                    return
+
                 # We'll give slow servers a little bit of time to work through the
                 # stack of events that already were sent. Depending on state resolution
                 # (looking at you, Synapse) this may take up to a minute to fully
@@ -1357,10 +1332,10 @@ class FederationBot(Plugin):
         retry_for_finish = 0
         while True:
             finish_on_this_round = False
-            if self.task_control.get(pinned_message) == ReactionCommandStatus.STOP:
+            if self.reaction_task_controller.is_stopped(pinned_message):
                 finish_on_this_round = True
 
-            if self.task_control.get(pinned_message) == ReactionCommandStatus.PAUSE:
+            if self.reaction_task_controller.is_paused(pinned_message):
                 # A pause just means not adding anything to the screen, until restarted
                 await asyncio.sleep(1)
                 continue
@@ -1449,7 +1424,7 @@ class FederationBot(Plugin):
         await asyncio.gather(*resolving_tasks, return_exceptions=True)
 
         # Clean up the task controller
-        self.task_control.pop(pinned_message)
+        await self.reaction_task_controller.cancel(pinned_message)
 
         header_lines = ["Room Back-walking Procedure: Done"]
 
