@@ -57,3 +57,15 @@ class MatrixForbiddenError(MatrixError):
     """
     The homeserver returned a 403 M_FORBIDDEN
     """
+
+
+class MessageAlreadyHasReactions(Exception):
+    """
+    The Message given already has Reactions attached
+    """
+
+
+class MessageNotWatched(Exception):
+    """
+    The Message given is not being watched
+    """
