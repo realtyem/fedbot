@@ -5,7 +5,7 @@ import asyncio
 import random
 
 from maubot.matrix import MaubotMatrixClient
-from mautrix.types import EventID, MessageEvent, ReactionEvent, UserID
+from mautrix.types import EventID, MessageEvent, ReactionEvent, RoomID
 
 from federationbot.errors import (
     MessageAlreadyHasReactions,
@@ -133,15 +133,14 @@ class ReactionTaskController:
     tasks_sets: Dict[Hashable, TaskSetEntry]
     client: MaubotMatrixClient
 
-    def __init__(self, bot_mxid: UserID):
+    def __init__(self, client: MaubotMatrixClient) -> None:
         self.tracked_reactions = {}
         self.tasks_sets = {}
-        self.bot_mxid = bot_mxid
+        self.client = client
 
     async def setup_control_reactions(
         self,
         pinned_message: EventID,
-        client: MaubotMatrixClient,
         command_event: MessageEvent,
         default_starting_status: ReactionCommandStatus = ReactionCommandStatus.START,
     ) -> None:
@@ -150,7 +149,7 @@ class ReactionTaskController:
 
         # The creation will place the starting status as STOP, make it a start instead
         control_entry = ReactionControlEntry(
-            command_event, client, default_starting_status
+            command_event, self.client, default_starting_status
         )
         await control_entry.setup(pinned_message)
         self.tracked_reactions[pinned_message] = control_entry
@@ -231,17 +230,16 @@ class ReactionTaskController:
             await self.tasks_sets[pinned_message].clear_all_tasks()
             self.tasks_sets.pop(pinned_message)
 
-    async def remove_last_display_of(self, pinned_message: EventID) -> None:
-        react_entry = self.tracked_reactions.get(pinned_message, None)
-        if react_entry is None:
-            raise MessageNotWatched
-
-        await react_entry.client.redact(
-            react_entry.related_command_event.room_id,
-            pinned_message,
+    async def remove_last_display_of(
+        self, event_id_to_remove: EventID, room_id: RoomID
+    ) -> None:
+        await self.client.redact(
+            room_id,
+            event_id_to_remove,
             "Cleaning up screen real estate",
         )
-        react_entry.reaction_collection_of_event_ids.clear()
+        if event_id_to_remove in self.tracked_reactions:
+            del self.tracked_reactions[event_id_to_remove]
 
     def add_tasks(
         self, reference_key: Hashable, new_task: Callable, *args, limit: int = 1
@@ -257,7 +255,7 @@ class ReactionTaskController:
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to
         # The first condition makes sure that the initial placement of the reactions is not registered
-        if react_evt.sender != self.bot_mxid:
+        if react_evt.sender != self.client.mxid and reaction_data.event_id is not None:
             if reaction_data.event_id in self.tracked_reactions:
                 if reaction_data.key == ReactionCommandStatus.STOP.value:
                     self.tracked_reactions[reaction_data.event_id].stop()
@@ -265,9 +263,10 @@ class ReactionTaskController:
                     self.tracked_reactions[reaction_data.event_id].pause()
                 elif reaction_data.key == ReactionCommandStatus.START.value:
                     self.tracked_reactions[reaction_data.event_id].start()
-            # This one is separate as we don't track these. This allows cleanup of past messages after plugin reloads
-            if reaction_data.event_id is not None:
-                if reaction_data.key == ReactionCommandStatus.CLEANUP.value:
-                    await self.remove_last_display_of(reaction_data.event_id)
+
+            if reaction_data.key == ReactionCommandStatus.CLEANUP.value:
+                await self.remove_last_display_of(
+                    reaction_data.event_id, react_evt.room_id
+                )
 
         return

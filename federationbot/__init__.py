@@ -173,7 +173,7 @@ class FederationBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.server_signing_keys = {}
-        self.reaction_task_controller = ReactionTaskController(self.client.mxid)
+        self.reaction_task_controller = ReactionTaskController(self.client)
 
         self.client.add_event_handler(
             EventType.REACTION,
@@ -214,7 +214,7 @@ class FederationBot(Plugin):
             f"Received Status Command on: {self.client.mxid}"
         )
         await self.reaction_task_controller.setup_control_reactions(
-            pinned_message, self.client, command_event
+            pinned_message, command_event
         )
 
         finish_on_this_round = False
@@ -857,7 +857,7 @@ class FederationBot(Plugin):
         )
 
         await self.reaction_task_controller.setup_control_reactions(
-            pinned_message, self.client, command_event
+            pinned_message, command_event
         )
 
         bot_working: Dict[str, bool] = dict()
