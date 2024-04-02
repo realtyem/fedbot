@@ -1,5 +1,5 @@
 from typing import Collection, Dict, List, Optional, Set, Tuple, Type, Union, cast
-from asyncio import Queue, QueueEmpty, Task
+from asyncio import Queue, QueueEmpty
 from datetime import datetime
 from enum import Enum
 from itertools import chain
@@ -173,7 +173,7 @@ class FederationBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.server_signing_keys = {}
-        self.reaction_task_controller = ReactionTaskController()
+        self.reaction_task_controller = ReactionTaskController(self.client.mxid)
 
         self.client.add_event_handler(
             EventType.REACTION,
@@ -197,6 +197,7 @@ class FederationBot(Plugin):
         self.client.remove_event_handler(
             EventType.REACTION, self.reaction_task_controller.react_control_handler
         )
+        await self.reaction_task_controller.shutdown()
         # To stop any caching cleanup tasks
         await self.federation_handler.stop()
 
@@ -212,7 +213,7 @@ class FederationBot(Plugin):
         pinned_message = await command_event.respond(
             f"Received Status Command on: {self.client.mxid}"
         )
-        await self.reaction_task_controller.setup(
+        await self.reaction_task_controller.setup_control_reactions(
             pinned_message, self.client, command_event
         )
 
@@ -239,6 +240,9 @@ class FederationBot(Plugin):
                 f" Good server results: {len([1 for _ in good_server_results])}\n"
                 f" Bad server results: {len([1 for _ in bad_server_results])}\n"
                 f"Server Signing keys: {len(self.federation_handler._server_keys_cache)}\n"
+                f"Reaction Task Controller:\n"
+                f" Number of task sets: {len(self.reaction_task_controller.tasks_sets)}\n"
+                f" Number of commands with tracked reactions: {len(self.reaction_task_controller.tracked_reactions)}\n"
             )
             await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(buffered_line)),
@@ -852,7 +856,7 @@ class FederationBot(Plugin):
             edits=pinned_message,
         )
 
-        await self.reaction_task_controller.setup(
+        await self.reaction_task_controller.setup_control_reactions(
             pinned_message, self.client, command_event
         )
 
@@ -1004,7 +1008,6 @@ class FederationBot(Plugin):
             room_version: int,
             _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
             _event_error_queue: Queue[str],
-            _retrying_task_list: List[Task],
         ) -> None:
             """
             Responsible for hunting down an Event(by its ID) and walking its
@@ -1016,7 +1019,6 @@ class FederationBot(Plugin):
                 room_version:
                 _event_fetch_queue:
                 _event_error_queue:
-                _retrying_task_list:
 
             Returns:
 
@@ -1183,17 +1185,17 @@ class FederationBot(Plugin):
 
                 # Set up the retry task, but only if an event was actually sent
                 if event_sent:
-                    new_worker_id = len(_retrying_task_list)
-                    _retrying_task_list.append(
-                        asyncio.create_task(
-                            _waiting_retry_worker(
-                                f"_waiting_retry_worker_{new_worker_id}",
-                                _event_fetch_queue,
-                                bot_working,
-                                next_event_id,
-                                len(list_of_server_and_event_id_to_send),
-                            )
-                        )
+                    new_worker_id = len(
+                        self.reaction_task_controller.tasks_sets[pinned_message].tasks
+                    )
+                    self.reaction_task_controller.add_tasks(
+                        pinned_message,
+                        _waiting_retry_worker,
+                        f"_waiting_retry_worker_{new_worker_id}",
+                        _event_fetch_queue,
+                        bot_working,
+                        next_event_id,
+                        len(list_of_server_and_event_id_to_send),
                     )
 
                     bot_working[worker_name] = False
@@ -1282,29 +1284,25 @@ class FederationBot(Plugin):
 
         # This is a grouping of one-off fired tasks, specifically the ones with a long
         # wait timer. The room walker worker will create these
-        resolving_tasks = []
+        self.reaction_task_controller.setup_task_set(pinned_message)
 
-        tasks = []
         for i in range(0, 1):
-            tasks.append(
-                asyncio.create_task(
-                    _event_walking_fetcher(
-                        f"event_worker_{i}", roomwalk_fetch_queue, roomwalk_error_queue
-                    )
-                )
+            self.reaction_task_controller.add_tasks(
+                pinned_message,
+                _event_walking_fetcher,
+                f"event_worker_{i}",
+                roomwalk_fetch_queue,
+                roomwalk_error_queue,
             )
             bot_working.setdefault(f"event_worker_{i}", False)
         for i in range(0, 1):
-            tasks.append(
-                asyncio.create_task(
-                    _room_repair_worker(
-                        f"roomwalk_worker_{i}",
-                        room_version_of_found_event,
-                        roomwalk_fetch_queue,
-                        roomwalk_error_queue,
-                        resolving_tasks,
-                    )
-                )
+            self.reaction_task_controller.add_tasks(
+                pinned_message,
+                _room_repair_worker,
+                f"roomwalk_worker_{i}",
+                room_version_of_found_event,
+                roomwalk_fetch_queue,
+                roomwalk_error_queue,
             )
             bot_working.setdefault(f"roomwalk_worker_{i}", False)
 
@@ -1393,7 +1391,7 @@ class FederationBot(Plugin):
                 f"  Time taken: {roomwalk_cumulative_iter_time:.3f} seconds (iter# {roomwalk_iterations})",
                 f"  (Items currently in backlog event queue: {roomwalk_fetch_queue.qsize()})",
                 f"  (Items currently in backlog roomwalk queue: {roomwalk_error_queue.qsize()})",
-                f"Total number of workers: {len(tasks)}",
+                f"Total number of workers: {len(self.reaction_task_controller.tasks_sets[pinned_message].tasks)}",
             ]
             if retry_for_finish:
                 roomwalk_lines.extend(
@@ -1412,16 +1410,6 @@ class FederationBot(Plugin):
                 break
 
             await asyncio.sleep(SECONDS_BETWEEN_EDITS)
-
-        # Cancel our worker tasks.
-        for task in tasks:
-            task.cancel()
-        for resolving_task in resolving_tasks:
-            resolving_task.cancel()
-
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await asyncio.gather(*resolving_tasks, return_exceptions=True)
 
         # Clean up the task controller
         await self.reaction_task_controller.cancel(pinned_message, True)
@@ -3504,20 +3492,24 @@ class FederationBot(Plugin):
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 
-        tasks = []
-        for i in range(MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST):
-            task = asyncio.create_task(_server_keys_from_notary_worker(keys_queue))
-            tasks.append(task)
+        # Setup the task into the controller
+        self.reaction_task_controller.setup_task_set(command_event.event_id)
+        self.reaction_task_controller.add_tasks(
+            command_event.event_id,
+            _server_keys_from_notary_worker,
+            keys_queue,
+            limit=min(
+                len(list_of_servers_to_check),
+                MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST,
+            ),
+        )
 
         started_at = time.monotonic()
         await keys_queue.join()
 
         total_time = time.monotonic() - started_at
         # Cancel our worker tasks.
-        for task in tasks:
-            task.cancel()
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await self.reaction_task_controller.cancel(command_event.event_id)
 
         # Preprocess the data to get the column sizes
         # Want it to look like this for now, for the whole room version. Obviously a

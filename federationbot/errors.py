@@ -69,3 +69,15 @@ class MessageNotWatched(Exception):
     """
     The Message given is not being watched
     """
+
+
+class ReferenceKeyAlreadyExists(Exception):
+    """
+    The Reference Key given already exists
+    """
+
+
+class ReferenceKeyNotFound(Exception):
+    """
+    The Reference Key was not found
+    """

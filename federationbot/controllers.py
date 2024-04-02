@@ -1,10 +1,18 @@
-from typing import Dict, Set
+from typing import Any, Callable, Dict, Hashable, List, Optional, Set
+from asyncio import Task
 from enum import Enum
+import asyncio
+import random
 
 from maubot.matrix import MaubotMatrixClient
-from mautrix.types import EventID, MessageEvent, ReactionEvent
+from mautrix.types import EventID, MessageEvent, ReactionEvent, UserID
 
-from federationbot.errors import MessageAlreadyHasReactions, MessageNotWatched
+from federationbot.errors import (
+    MessageAlreadyHasReactions,
+    MessageNotWatched,
+    ReferenceKeyAlreadyExists,
+    ReferenceKeyNotFound,
+)
 
 
 class ReactionCommandStatus(Enum):
@@ -91,19 +99,46 @@ class ReactionControlEntry:
         return self.current_status
 
 
+class TaskSetEntry:
+    tasks: List[Task]
+
+    def __init__(self) -> None:
+        self.tasks = []
+
+    def add_tasks(self, new_task: Callable, *args, limit: int = 1) -> None:
+        for _ in range(0, limit):
+            self.tasks.append(asyncio.create_task(new_task(*args)))
+
+    async def gather_results(self, return_exceptions: bool = False):
+        return await asyncio.gather(*self.tasks, return_exceptions=return_exceptions)
+
+    async def clear_all_tasks(self) -> None:
+        for task in self.tasks:
+            task.cancel()
+        # Use return_exceptions set to True so all tasks actually are finished before exiting the system(or some
+        # get left behind and keep running as orphans)
+        await self.gather_results(True)
+
+
 class ReactionTaskController:
     """
     Attributes:
         tracked_reactions: Map of EventID of the response of a command that will have the reactions attached to the current
             Status of the task
+        tasks_sets: Map of Hashable key for reference to a TaskSetEntry of associated Task objects used by the
+            command
     """
 
     tracked_reactions: Dict[EventID, ReactionControlEntry]
+    tasks_sets: Dict[Hashable, TaskSetEntry]
+    client: MaubotMatrixClient
 
-    def __init__(self):
+    def __init__(self, bot_mxid: UserID):
         self.tracked_reactions = {}
+        self.tasks_sets = {}
+        self.bot_mxid = bot_mxid
 
-    async def setup(
+    async def setup_control_reactions(
         self,
         pinned_message: EventID,
         client: MaubotMatrixClient,
@@ -119,6 +154,21 @@ class ReactionTaskController:
         )
         await control_entry.setup(pinned_message)
         self.tracked_reactions[pinned_message] = control_entry
+
+    def setup_task_set(self, reference_key: Optional[Hashable] = None) -> Hashable:
+        if reference_key is None:
+            # Use a nice large base for the random key
+            reference_key = random.randint(0, 1024 * 1024)
+        if reference_key in self.tasks_sets:
+            raise ReferenceKeyAlreadyExists
+        self.tasks_sets.setdefault(reference_key, TaskSetEntry())
+        return reference_key
+
+    async def shutdown(self) -> None:
+        for task_set in self.tasks_sets.values():
+            await task_set.clear_all_tasks()
+        for reaction_control_entry in self.tracked_reactions.values():
+            await reaction_control_entry.cancel()
 
     def start(self, pinned_message: EventID) -> None:
         if pinned_message not in self.tracked_reactions:
@@ -163,15 +213,23 @@ class ReactionTaskController:
         return False
 
     async def cancel(
-        self, pinned_message: EventID, add_cleanup_control: bool = False
+        self,
+        pinned_message: Any,
+        add_cleanup_control: bool = False,
     ) -> None:
-        if pinned_message not in self.tracked_reactions:
-            raise MessageNotWatched
-        await self.tracked_reactions[pinned_message].cancel()
-        if add_cleanup_control:
-            await self.tracked_reactions[pinned_message].add_cleanup_control(
-                pinned_message
-            )
+        # TODO: I don't like the Any up there, but I wasn't able to find a better typing that Unioned Hashable and
+        #  EventID(since EventID is a 'NewType')
+        if pinned_message in self.tracked_reactions:
+            # The cancel() includes a built-in stop()
+            await self.tracked_reactions[pinned_message].cancel()
+            if add_cleanup_control:
+                await self.tracked_reactions[pinned_message].add_cleanup_control(
+                    pinned_message
+                )
+            self.tracked_reactions.pop(pinned_message, None)
+        if isinstance(pinned_message, Hashable) and pinned_message in self.tasks_sets:
+            await self.tasks_sets[pinned_message].clear_all_tasks()
+            self.tasks_sets.pop(pinned_message)
 
     async def remove_last_display_of(self, pinned_message: EventID) -> None:
         react_entry = self.tracked_reactions.get(pinned_message, None)
@@ -185,21 +243,31 @@ class ReactionTaskController:
         )
         react_entry.reaction_collection_of_event_ids.clear()
 
+    def add_tasks(
+        self, reference_key: Hashable, new_task: Callable, *args, limit: int = 1
+    ) -> None:
+        if reference_key not in self.tasks_sets:
+            raise ReferenceKeyNotFound("Need to run setup_task_set() first")
+
+        self.tasks_sets[reference_key].add_tasks(new_task, *args, limit=limit)
+
+    async def get_task_results(self, reference_key: Hashable):
+        return await self.tasks_sets[reference_key].gather_results()
+
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to
-        # The second condition makes sure that the initial placement of the reactions is not registered
-        if (
-            reaction_data.event_id in self.tracked_reactions
-            and react_evt.sender
-            != self.tracked_reactions[reaction_data.event_id].client.mxid
-        ):
-            if reaction_data.key == ReactionCommandStatus.STOP.value:
-                self.tracked_reactions[reaction_data.event_id].stop()
-            elif reaction_data.key == ReactionCommandStatus.PAUSE.value:
-                self.tracked_reactions[reaction_data.event_id].pause()
-            elif reaction_data.key == ReactionCommandStatus.START.value:
-                self.tracked_reactions[reaction_data.event_id].start()
-            elif reaction_data.key == ReactionCommandStatus.CLEANUP.value:
-                await self.remove_last_display_of(reaction_data.event_id)
+        # The first condition makes sure that the initial placement of the reactions is not registered
+        if react_evt.sender != self.bot_mxid:
+            if reaction_data.event_id in self.tracked_reactions:
+                if reaction_data.key == ReactionCommandStatus.STOP.value:
+                    self.tracked_reactions[reaction_data.event_id].stop()
+                elif reaction_data.key == ReactionCommandStatus.PAUSE.value:
+                    self.tracked_reactions[reaction_data.event_id].pause()
+                elif reaction_data.key == ReactionCommandStatus.START.value:
+                    self.tracked_reactions[reaction_data.event_id].start()
+            # This one is separate as we don't track these. This allows cleanup of past messages after plugin reloads
+            if reaction_data.event_id is not None:
+                if reaction_data.key == ReactionCommandStatus.CLEANUP.value:
+                    await self.remove_last_display_of(reaction_data.event_id)
 
         return
