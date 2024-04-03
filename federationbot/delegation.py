@@ -440,6 +440,7 @@ class DelegationHandler:
             path="/.well-known/matrix/server",
             skip_discovery=True,
             diagnostics=True,
+            timeout_seconds=3.0,
         )
 
         diag_info.append_from(response.errors)
