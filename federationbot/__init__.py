@@ -2024,33 +2024,39 @@ class FederationBot(Plugin):
         for host in servers_to_check:
             host_queue.put_nowait(host)
 
-        async def _event_finding_worker(queue: Queue) -> None:
-            while True:
-                worker_host = await queue.get()
-                returned_events = await self.federation_handler.get_event_from_server(
-                    origin_server=origin_server,
-                    destination_server=worker_host,
-                    event_id=event_id,
-                )
-                inner_returned_event = returned_events.get(event_id)
-                assert inner_returned_event is not None
-                host_to_event_status_map[worker_host] = inner_returned_event
-                queue.task_done()
+        async def _event_finding_worker(queue: Queue[str]) -> Tuple[str, EventBase]:
+            worker_host = await queue.get()
+            returned_events = await self.federation_handler.get_event_from_server(
+                origin_server=origin_server,
+                destination_server=worker_host,
+                event_id=event_id,
+                timeout=2.0,
+            )
+            inner_returned_event = returned_events.get(event_id)
+            assert inner_returned_event is not None
+            queue.task_done()
+            return worker_host, inner_returned_event
 
-        tasks_list = []
-        for _ in range(
-            min(len(servers_to_check), MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST)
-        ):
-            tasks_list.append(asyncio.create_task(_event_finding_worker(host_queue)))
+        # Create a collection of Task's, to run the coroutine in
+        reference_task_key = self.reaction_task_controller.setup_task_set()
 
-        await host_queue.join()
+        # These are one-off tasks, not workers. Create as many as we have servers to check
+        self.reaction_task_controller.add_tasks(
+            reference_task_key,
+            _event_finding_worker,
+            host_queue,
+            limit=len(servers_to_check),
+        )
 
-        # Cancel our worker tasks.
-        for task in tasks_list:
-            task.cancel()
+        results = await self.reaction_task_controller.get_task_results(
+            reference_task_key
+        )
 
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks_list, return_exceptions=True)
+        for host, response in results:
+            host_to_event_status_map[host] = response
+
+        # Make sure to cancel all tasks
+        await self.reaction_task_controller.cancel(reference_task_key)
 
         return host_to_event_status_map
 
