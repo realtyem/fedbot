@@ -88,12 +88,12 @@ class ReactionControlEntry:
         self.current_status = ReactionCommandStatus.PAUSE
 
     async def add_cleanup_control(self, pinned_message: EventID) -> None:
-        cleanup_reaction_event = await self.client.react(
+        # Don't actually have to save this, as the handler will be capable of removing old stuff without saving it
+        await self.client.react(
             self.related_command_event.room_id,
             pinned_message,
             ReactionCommandStatus.CLEANUP.value,
         )
-        self.reaction_collection_of_event_ids.add(cleanup_reaction_event)
 
     def get_status(self) -> ReactionCommandStatus:
         return self.current_status
@@ -251,6 +251,16 @@ class ReactionTaskController:
 
     async def get_task_results(self, reference_key: Hashable):
         return await self.tasks_sets[reference_key].gather_results()
+
+    async def add_cleanup_control(
+        self, related_message: EventID, room_id: RoomID
+    ) -> None:
+        # Just sticking the reaction the handler will look for onto the message
+        await self.client.react(
+            room_id,
+            related_message,
+            ReactionCommandStatus.CLEANUP.value,
+        )
 
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to
