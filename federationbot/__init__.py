@@ -1732,12 +1732,14 @@ class FederationBot(Plugin):
         # One way or another, we have a room id by now
         # assert room_id is not None
 
-        await command_event.respond(
+        list_of_message_ids = []
+        preresponse_message = await command_event.respond(
             f"Retrieving Hosts for \n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
             f"* From {destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([preresponse_message])
 
         # This will be assigned by now
         assert event_id is not None
@@ -1771,10 +1773,15 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     @test_command.subcommand(
@@ -1811,7 +1818,9 @@ class FederationBot(Plugin):
         for digit, value in progress_bar.constants.items():
             constants_display_string += f"'{value}', "
         spaces_display_string = "' ', ' ', ' ', ' ', ' '"
-        await command_event.respond(
+
+        list_of_message_ids = []
+        debug_message = await command_event.respond(
             wrap_in_code_block_markdown(
                 f"fullb char: {constants_display_string}\n"
                 f"other char: '{progress_bar.blank}'\n"
@@ -1819,6 +1828,7 @@ class FederationBot(Plugin):
                 f"segment_size: {progress_bar._segment_size}\n"
             )  #
         )
+        list_of_message_ids.extend([debug_message])
 
         if style_type == BitmapProgressBarStyle.SCATTER:
             for i in range(1, max_size_int + 1):
@@ -1833,6 +1843,8 @@ class FederationBot(Plugin):
                 f" how many to pull: {how_many_to_pull}\n"
             )
         )
+        list_of_message_ids.extend([pinned_message])
+
         finish = False
         while True:
             set_to_pull = set()
@@ -1862,6 +1874,11 @@ class FederationBot(Plugin):
             if finish:
                 break
             await asyncio.sleep(interval_float)
+
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
 
     @test_command.subcommand(
         name="find_event", help="Search all hosts in a given room for a given Event"
@@ -1898,13 +1915,15 @@ class FederationBot(Plugin):
             # function
             return
 
-        await command_event.respond(
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Checking all hosts:\n"
             f"* from Room: {room_id_or_alias or room_id}\n\n"
             f"for:\n"
             f"* Event ID: {event_id}\n"
             f"* Using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         # This will be assigned by now
         assert event_id is not None
@@ -1935,10 +1954,11 @@ class FederationBot(Plugin):
             # Either the origin server doesn't have the state, or some other problem
             # occurred. Fall back to the client api with current state. Obviously there
             # are problems with this, but it will allow forward progress.
-            await command_event.respond(
+            current_message = await command_event.respond(
                 "Failed getting hosts from State over federation, "
                 "falling back to client API"
             )
+            list_of_message_ids.extend([current_message])
             try:
                 joined_members = await self.client.get_joined_members(RoomID(room_id))
 
@@ -2008,11 +2028,18 @@ class FederationBot(Plugin):
             list_of_result_data, header_message
         )
 
+        list_of_message_ids = []
         for chunk in final_list_of_data:
-            await command_event.respond(
+            message_id = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([message_id])
+
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     async def _find_event_on_servers(
@@ -2102,7 +2129,12 @@ class FederationBot(Plugin):
             )
             return
 
-        await command_event.reply(f"{room_id} version is {room_version}")
+        pinned_message = await command_event.reply(
+            f"{room_id} version is {room_version}"
+        )
+        await self.reaction_task_controller.add_cleanup_control(
+            pinned_message, command_event.room_id
+        )
 
     @test_command.subcommand(
         name="discover_event_id", help="experiment to get event id from PDU event"
@@ -2160,22 +2192,32 @@ class FederationBot(Plugin):
             )
             return
 
-        await command_event.respond(
+        list_of_message_ids = []
+        current_message = await command_event.respond(
             f"Original:\n{wrap_in_code_block_markdown(event.to_json())}"
         )
+        list_of_message_ids.extend([current_message])
+
         redacted_data = redact_event(room_version, event.raw_data)
         redacted_data.pop("signatures", None)
         redacted_data.pop("unsigned", None)
-        await command_event.respond(
+        current_message = await command_event.respond(
             f"Redacted:\n{wrap_in_code_block_markdown(json.dumps(redacted_data, indent=4))}"
         )
+        list_of_message_ids.extend([current_message])
+
         encoded_redacted_event_bytes = encode_canonical_json(redacted_data)
         reference_content = hashlib.sha256(encoded_redacted_event_bytes)
         reference_hash = encode_base64(reference_content.digest(), True)
 
-        await command_event.respond(
+        current_message = await command_event.respond(
             f"Supplied: {event_id}\n\nResolved: {'$' + reference_hash}"
         )
+        list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
 
     @test_command.subcommand(
         name="head", help="experiment for retrieving information about a room"
@@ -2201,12 +2243,15 @@ class FederationBot(Plugin):
             room_id=room_id,
             user_id=str(self.client.mxid),
         )
-        await command_event.respond(
+        current_message = await command_event.respond(
             make_into_text_event(
                 wrap_in_code_block_markdown(
                     f"{json.dumps(response.response_dict, indent=4)}\n\ncode: {response.status_code}\n{response.reason}\n"
                 )
             )
+        )
+        await self.reaction_task_controller.add_cleanup_control(
+            current_message, command_event.room_id
         )
 
     # I think the command map should look a little like this:
@@ -2233,7 +2278,7 @@ class FederationBot(Plugin):
     async def summary(self, command_event: MessageEvent) -> None:
         await command_event.mark_read()
 
-        await command_event.respond(
+        current_message = await command_event.respond(
             "Summary of how Delegation is processed for a Matrix homeserver.\n"
             "The process to determine the ultimate final host:port is defined in "
             "the [spec](https://spec.matrix.org/v1.9/server-server-api/#resolving-"
@@ -2264,6 +2309,9 @@ class FederationBot(Plugin):
                 "5. (deprecated) Check other SRV record(same as 3d above)\n"
                 "6. Use the supplied server_name and try port 8448\n"
             )
+        )
+        await self.reaction_task_controller.add_cleanup_control(
+            current_message, command_event.room_id
         )
 
     @command.new(
@@ -2349,12 +2397,14 @@ class FederationBot(Plugin):
             )
             return
 
+        list_of_message_ids = []
         # Some quality of life niceties
-        await command_event.respond(
+        prerender_message = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} "
             f"server{'s.' if number_of_servers > 1 else '.'}\n"
             "This may take up to 30 seconds to complete."
         )
+        list_of_message_ids.extend([prerender_message])
 
         # map of server name -> (server brand, server version)
         server_to_server_data: Dict[str, FederationBaseResponse] = {}
@@ -2544,10 +2594,16 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for current_message in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                current_message, command_event.room_id
             )
 
     @fed_command.subcommand(name="event_raw")
@@ -2584,10 +2640,12 @@ class FederationBot(Plugin):
             event_id = command_event.event_id
             extra_info = " last event in this room"
 
-        await command_event.respond(
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving{extra_info}: {event_id} from "
             f"{destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         # Collect all the Federation Responses as well as the EventBases.
         # Errors can be found in the Responses.
@@ -2613,9 +2671,18 @@ class FederationBot(Plugin):
         # It is extremely unlikely that an Event will be larger than can be displayed.
         # Don't bother chunking the response.
         try:
-            await command_event.respond(wrap_in_code_block_markdown(buffered_message))
+            current_message = await command_event.respond(
+                wrap_in_code_block_markdown(buffered_message)
+            )
         except MTooLarge:
-            await command_event.respond("Somehow, Event is to large to display")
+            current_message = await command_event.respond(
+                "Somehow, Event is to large to display"
+            )
+        list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
 
     @fed_command.subcommand(name="event")
     @command.argument(name="event_id", parser=is_event_id, required=False)
@@ -2651,10 +2718,12 @@ class FederationBot(Plugin):
             event_id = command_event.event_id
             extra_info = " last event in this room"
 
-        await command_event.respond(
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving{extra_info}: {event_id} from "
             f"{destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         returned_event_dict = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
@@ -2720,7 +2789,14 @@ class FederationBot(Plugin):
                 event_data_map=a_event_data_map
             )
 
-        await command_event.respond(wrap_in_code_block_markdown(buffered_message))
+        current_message = await command_event.respond(
+            wrap_in_code_block_markdown(buffered_message)
+        )
+        list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
 
     @fed_command.subcommand(
         name="state", help="Request state over federation for a room."
@@ -2773,12 +2849,15 @@ class FederationBot(Plugin):
             )
         else:
             special_time_formatting = ""
-        await command_event.respond(
+
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving State for:\n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
             f"* From {destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         # This will be assigned by now
         assert event_id is not None
@@ -2791,9 +2870,10 @@ class FederationBot(Plugin):
             event_id=event_id,
         )
 
-        await command_event.respond(
+        prerender_message_2 = await command_event.respond(
             f"Retrieving {len(pdu_list)} events from {destination_server}"
         )
+        list_of_message_ids.extend([prerender_message_2])
 
         # Keep both the response and the actual event, if there was an error it will be
         # in the response and the event won't exist here
@@ -2862,10 +2942,16 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for current_message in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                current_message, command_event.room_id
             )
 
     @fed_command.subcommand(
@@ -2888,6 +2974,7 @@ class FederationBot(Plugin):
         await command_event.mark_read()
 
         list_of_servers_to_check = set()
+        list_of_message_ids = []
 
         # It may be that they are using their mxid as the server to check, parse that
         maybe_user_mxid = is_mxid(server_to_check)
@@ -2940,10 +3027,11 @@ class FederationBot(Plugin):
             )
             return
 
-        await command_event.respond(
+        current_message_id = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}"
         )
+        list_of_message_ids.extend([current_message_id])
 
         started_at = time.monotonic()
         server_to_version_data = await self._get_versions_from_servers(
@@ -3034,10 +3122,15 @@ class FederationBot(Plugin):
 
         # Wrap in code block markdown before sending
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message_id = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message_id])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     async def _get_versions_from_servers(
@@ -3201,10 +3294,13 @@ class FederationBot(Plugin):
         server_to_server_data: Dict[
             str, Union[FederationErrorResponse, FederationServerKeyResponse]
         ] = dict()
-        await command_event.respond(
+
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         async def _server_keys_worker(queue: Queue[str]) -> None:
             while True:
@@ -3348,10 +3444,15 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     @fed_command.subcommand(name="notary_server_keys")
@@ -3470,11 +3571,14 @@ class FederationBot(Plugin):
 
         if not notary_server_to_use:
             notary_server_to_use = get_domain_from_id(command_event.sender)
-        await command_event.respond(
+
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}\n"
             f"Using {notary_server_to_use}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         server_to_server_data: Dict[str, Union[ServerVerifyKeys, str]] = {}
 
@@ -3609,10 +3713,16 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     @fed_command.subcommand(
@@ -3671,12 +3781,15 @@ class FederationBot(Plugin):
             )
         else:
             special_time_formatting = ""
-        await command_event.respond(
+
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving last {limit} Events for \n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
             f"* From {destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         # This will be assigned by now
         assert event_id is not None
@@ -3751,10 +3864,15 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     @fed_command.subcommand(
@@ -3811,12 +3929,14 @@ class FederationBot(Plugin):
         else:
             special_time_formatting = ""
 
-        await command_event.respond(
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             "Retrieving the chain of Auth Events for:\n"
             f"* Event ID: {event_id}{special_time_formatting}\n"
             f"* in Room: {room_id_or_alias or room_id}\n"
             f"* From {destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         # This will be assigned by now
         assert event_id is not None
@@ -3896,10 +4016,16 @@ class FederationBot(Plugin):
         )
 
         for chunk in final_list_of_data:
-            await command_event.respond(
+            current_message = await command_event.respond(
                 make_into_text_event(
                     wrap_in_code_block_markdown(chunk), ignore_body=True
                 ),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
             )
 
     @fed_command.subcommand(
@@ -3927,10 +4053,12 @@ class FederationBot(Plugin):
 
         _, destination_server = user_mxid.split(":", maxsplit=1)
 
-        await command_event.respond(
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
             f"Retrieving user devices for {user_mxid}\n"
             f"* From {destination_server} using {origin_server}"
         )
+        list_of_message_ids.extend([prerender_message])
 
         response = await self.federation_handler.get_user_devices_from_server(
             origin_server=origin_server,
@@ -3945,9 +4073,16 @@ class FederationBot(Plugin):
             )
             return
 
-        await command_event.respond(
+        message_id = await command_event.respond(
             f"```json\n{json.dumps(response.response_dict, indent=4)}\n```\n"
         )
+        list_of_message_ids.extend([message_id])
+
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
+
         # # Chunk the data as there may be a few 'pages' of it
         # final_list_of_data = combine_lines_to_fit_event(
         #     list_of_buffer_lines, header_message
