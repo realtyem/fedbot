@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Hashable, List, Optional, Set
+from typing import Any, Callable, Dict, Hashable, List, Optional, Set, Tuple, TypeVar
 from asyncio import Task
 from enum import Enum
 import asyncio
@@ -13,6 +13,8 @@ from federationbot.errors import (
     ReferenceKeyAlreadyExists,
     ReferenceKeyNotFound,
 )
+
+T = TypeVar("T")
 
 
 class ReactionCommandStatus(Enum):
@@ -78,7 +80,11 @@ class ReactionControlEntry:
             pinned_message,
             ReactionCommandStatus.START.value,
         )
-        self.reaction_collection_of_event_ids = {stop_reaction_event, pause_reaction_event, start_reaction_event}
+        self.reaction_collection_of_event_ids = {
+            stop_reaction_event,
+            pause_reaction_event,
+            start_reaction_event,
+        }
 
     async def cancel(self) -> None:
         """
@@ -135,7 +141,7 @@ class TaskSetEntry:
     def __init__(self) -> None:
         self.tasks = []
 
-    def add_tasks(self, new_task: Callable, *args, limit: int = 1) -> None:
+    def add_tasks(self, new_task: Callable[[Any], T], *args, limit: int = 1) -> None:
         """
         Add this Callable and its args 'limit' number of times to the grouping of Tasks.
 
@@ -147,9 +153,9 @@ class TaskSetEntry:
 
         """
         for _ in range(0, limit):
-            self.tasks.append(asyncio.create_task(new_task(*args)))
+            self.tasks.append(asyncio.create_task(new_task(*args)))  # type: ignore[arg-type]
 
-    async def gather_results(self, return_exceptions: bool = False):
+    async def gather_results(self, return_exceptions: bool = False) -> Tuple[T]:
         """
         If you have elected for your Task to return a result, this will get them as a Tuple
         Args:
