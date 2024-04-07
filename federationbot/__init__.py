@@ -3382,7 +3382,7 @@ class FederationBot(Plugin):
 
         # Build the header line
         header_message = (
-            f"{server_name_col.front_pad()} | "
+            f"{server_name_col.pad()} | "
             f"{server_key_col.pad()} | "
             f"{valid_until_ts_col.header_name}\n"
         )
@@ -3400,7 +3400,7 @@ class FederationBot(Plugin):
         for server_name, server_results in sorted(server_to_server_data.items()):
             buffered_message = ""
             buffered_message += f"{server_name_col.pad(server_name)} | "
-
+            first_line = True
             if isinstance(server_results, FederationErrorResponse):
                 buffered_message += f"{server_results.reason}\n"
 
@@ -3416,10 +3416,14 @@ class FederationBot(Plugin):
                     if valid_until_ts > 0:
                         valid_until_pretty = pretty_print_timestamp(valid_until_ts)
 
+                    if not first_line:
+                        buffered_message += f"{server_name_col.pad('')} | "
+
                     # This will mark the display with a * to visually express expired
                     pretty_expired_marker = "*" if valid_until_ts < time_now else ""
                     buffered_message += f"{server_key_col.pad(key_id)} | "
                     buffered_message += f"{pretty_expired_marker}{valid_until_pretty}\n"
+                    first_line = False
 
             list_of_result_data.extend([buffered_message])
 
