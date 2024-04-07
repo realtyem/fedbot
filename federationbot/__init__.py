@@ -3577,8 +3577,12 @@ class FederationBot(Plugin):
             notary_server_to_use = get_domain_from_id(command_event.sender)
 
         list_of_message_ids = []
+        about_statement = ""
+        if number_of_servers == 1:
+            about_statement = f"about {list_of_servers_to_check} "
         prerender_message = await command_event.respond(
-            f"Retrieving data from federation for {number_of_servers} server"
+            f"Retrieving data {about_statement}from federation for "
+            f"{number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}\n"
             f"Using {notary_server_to_use}"
         )
