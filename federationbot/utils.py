@@ -8,6 +8,10 @@ from mautrix.types import EventID
 
 json_decoder = json.JSONDecoder()
 
+# An event is considered having a maximum size of 64K. Unfortunately, encryption uses
+# more space than cleartext, so give some slack room
+MAX_EVENT_SIZE_FOR_SENDING = 40000
+
 
 class Justify(Enum):
     RIGHT = "right"  # or front padded
@@ -567,3 +571,41 @@ def full_dict_copy(data_to_copy: Dict[str, Any]) -> Dict[str, Any]:
 
     """
     return json_decoder.decode(json.dumps(data_to_copy))
+
+
+def combine_lines_to_fit_event(
+    list_of_all_lines: List[str],
+    header_line: Optional[str],
+    insert_new_lines: bool = False,
+) -> List[str]:
+    """
+    The rendering system uses lists of strings to build a message response. This will append those strings(optionally
+    with new line characters) to the correct size to send as a MessageEvent.
+
+    Args:
+        list_of_all_lines: strings to render(don't forget newlines)
+        header_line: if you want a line at the top(description or whatever)
+        insert_new_lines: bool if new line markdown should be inserted between each line
+
+    Returns: List strings designed to fit into an Event's size restrictions
+
+    """
+    list_of_combined_lines = []
+    buffered_line = ""
+    if header_line:
+        buffered_line += header_line
+        buffered_line += "\n" if insert_new_lines else ""
+    for line in list_of_all_lines:
+        if len(buffered_line) + len(line) > MAX_EVENT_SIZE_FOR_SENDING:
+            # This buffer is full, add it to the final list
+            list_of_combined_lines.extend([buffered_line])
+            # Don't forget to start the new buffer
+            buffered_line = str(header_line)
+            buffered_line += "\n" if insert_new_lines else ""
+
+        buffered_line += line
+        buffered_line += "\n" if insert_new_lines else ""
+
+    # Grab the last buffer too
+    list_of_combined_lines.extend([buffered_line])
+    return list_of_combined_lines

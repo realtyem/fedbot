@@ -59,15 +59,13 @@ from federationbot.utils import (
     BitmapProgressBarStyle,
     DisplayLineColumnConfig,
     Justify,
+    combine_lines_to_fit_event,
     get_domain_from_id,
     pad,
     pretty_print_timestamp,
     round_half_up,
 )
 
-# An event is considered having a maximum size of 64K. Unfortunately, encryption uses
-# more space than cleartext, so give some slack room
-MAX_EVENT_SIZE_FOR_SENDING = 40000
 # For 'whole room' commands, limit the maximum number of servers to even try
 MAX_NUMBER_OF_SERVERS_TO_ATTEMPT = 400
 
@@ -4340,33 +4338,3 @@ def wrap_in_pre_tags(incoming: str) -> str:
     if incoming != "":
         buffer = f"<pre>\n{incoming}\n</pre>\n"
     return buffer
-
-
-def combine_lines_to_fit_event(
-    list_of_all_lines: List[str], header_line: str
-) -> List[str]:
-    """
-    bring your own newlines
-
-    Args:
-        list_of_all_lines: strings to render(don't forget newlines)
-        header_line: if you want a line at the top(description or whatever)
-
-    Returns: List strings designed to fit into an Event's size restrictions
-
-    """
-    list_of_combined_lines = []
-    # Make sure it's a copy and not a reference
-    buffered_line = str(header_line)
-    for line in list_of_all_lines:
-        if len(buffered_line) + len(line) > MAX_EVENT_SIZE_FOR_SENDING:
-            # This buffer is full, add it to the final list
-            list_of_combined_lines.extend([buffered_line])
-            # Don't forget to start the new buffer
-            buffered_line = str(header_line)
-
-        buffered_line += line
-
-    # Grab the last buffer too
-    list_of_combined_lines.extend([buffered_line])
-    return list_of_combined_lines
