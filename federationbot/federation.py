@@ -956,7 +956,11 @@ class FederationHandler:
         return response
 
     async def discover_room_version(
-        self, origin_server: str, destination_server: str, room_id: str
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        timeout: float = 10.0,
     ) -> str:
         room_version = self.room_version_cache.get(room_id)
         if room_version:
@@ -967,6 +971,7 @@ class FederationHandler:
             destination_server=destination_server,
             room_id=room_id,
             user_id=self.bot_mxid,
+            timeout=timeout,
         )
         if isinstance(response, FederationErrorResponse):
             raise Exception(
@@ -1025,6 +1030,7 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         user_id: str,
+        timeout: float = 10.0,
     ) -> FederationBaseResponse:
         response = await self.federation_request(
             destination_server_name=destination_server,
@@ -1032,6 +1038,7 @@ class FederationHandler:
             query_args={
                 "ver": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
             },
+            timeout_seconds=timeout,
             origin_server=origin_server,
         )
         return response
@@ -1042,12 +1049,14 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         user_id: str,
+        timeout: float = 10.0,
     ):
         response = await self._make_join_to_server(
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
             user_id=user_id,
+            timeout=timeout,
         )
         if isinstance(response, FederationErrorResponse):
             return response
