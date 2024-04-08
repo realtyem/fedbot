@@ -4323,13 +4323,13 @@ def wrap_in_code_block_markdown(existing_buffer: str) -> str:
 
 
 def make_into_text_event(
-    message: str, ignore_body: bool = False
+    message: str, allow_html: bool = False, ignore_body: bool = False
 ) -> TextMessageEventContent:
     content = TextMessageEventContent(
         msgtype=MessageType.NOTICE,
         body=message if not ignore_body else "no alt text available",
         format=Format.HTML,
-        formatted_body=markdown.render(message),
+        formatted_body=markdown.render(message, allow_html=allow_html),
     )
 
     return content
