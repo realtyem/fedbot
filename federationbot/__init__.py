@@ -2138,8 +2138,12 @@ class FederationBot(Plugin):
         name="discover_event_id", help="experiment to get event id from PDU event"
     )
     @command.argument(name="event_id", parser=is_event_id, required=True)
+    @command.argument(name="from_server", required=False)
     async def discover_event_id_command(
-        self, command_event: MessageEvent, event_id: Optional[str]
+        self,
+        command_event: MessageEvent,
+        event_id: Optional[str],
+        from_server: Optional[str],
     ) -> None:
         await command_event.mark_read()
 
@@ -2159,9 +2163,12 @@ class FederationBot(Plugin):
                 "I need you to supply an actual existing event_id to use as a reference for this experiment."
             )
             return
+        if not from_server:
+            from_server = origin_server
+
         event_map = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
-            destination_server=origin_server,
+            destination_server=from_server,
             event_id=event_id,
         )
         event = event_map[event_id]
