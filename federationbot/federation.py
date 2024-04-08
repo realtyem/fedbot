@@ -524,7 +524,10 @@ class FederationHandler:
                 f"Keys not available directly from {for_server_name}, trying notary: {e}"
             )
 
-        if server_verify_keys is None:
+        if (
+            server_verify_keys is None
+            or key_id_formatted not in server_verify_keys.verify_keys
+        ):
             try:
                 server_verify_keys = await self.get_server_keys_from_notary(
                     for_server_name, self.hosting_server, timeout
