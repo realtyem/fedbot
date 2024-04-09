@@ -1060,6 +1060,8 @@ class FederationBot(Plugin):
 
             """
             while True:
+                bot_working[worker_name] = False
+
                 if self.reaction_task_controller.is_stopped(pinned_message):
                     break
 
@@ -1078,6 +1080,7 @@ class FederationBot(Plugin):
                 start_time = time.time()
 
                 list_of_server_and_event_id_to_send = []
+                already_searching_for_event_id = set()
 
                 # These will be local queues to organize what this worker is currently working on.
                 event_ids_to_try_next: Queue[str] = Queue()
@@ -1110,9 +1113,9 @@ class FederationBot(Plugin):
                                         origin_server, server_name, event_base.room_id
                                     )
                                 )
-                            # await self.federation_handler.verify_signatures_and_annotate_event(
-                            #     event_base, room_version
-                            # )
+                            await self.federation_handler.verify_signatures_and_annotate_event(
+                                event_base, room_version
+                            )
 
                     count_of_how_many_servers_tried = 0
                     for host_in_order in good_host_list:
@@ -1120,8 +1123,8 @@ class FederationBot(Plugin):
                         event_base = server_to_event_result_map.get(host_in_order)
                         count_of_how_many_servers_tried += 1
                         if isinstance(event_base, Event):
-                            # TODO: for the moment, skip verification until notary services are fixed on the bot
-                            if event_base.signatures_verified or True:
+                            # Only use it if it's verified, otherwise it will fail on send
+                            if event_base.signatures_verified:
                                 # 5. Add to a List, so we can clearly walk backwards
                                 # (filling them in order)
                                 list_of_server_and_event_id_to_send.append(
@@ -1147,17 +1150,35 @@ class FederationBot(Plugin):
                                     worker_name, event_base.auth_events
                                 )
                                 for _ancestor_event_id in prev_bad_events:
+                                    if (
+                                        _ancestor_event_id
+                                        in already_searching_for_event_id
+                                    ):
+                                        # Already tried searching for this
+                                        continue
                                     self.log.warning(
                                         f"{worker_name}: for: "
                                         f"{event_base.event_id}, need prev_event: {_ancestor_event_id}"
+                                    )
+                                    already_searching_for_event_id.add(
+                                        _ancestor_event_id
                                     )
 
                                     event_ids_to_try_next.put_nowait(_ancestor_event_id)
 
                                 for _ancestor_event_id in auth_bad_events:
+                                    if (
+                                        _ancestor_event_id
+                                        in already_searching_for_event_id
+                                    ):
+                                        # Already tried searching for this
+                                        continue
                                     self.log.warning(
                                         f"{worker_name}: for: "
                                         f"{event_base.event_id}, need auth_event: {_ancestor_event_id}"
+                                    )
+                                    already_searching_for_event_id.add(
+                                        _ancestor_event_id
                                     )
 
                                     event_ids_to_try_next.put_nowait(_ancestor_event_id)
@@ -1168,6 +1189,10 @@ class FederationBot(Plugin):
                                     )
                                 # The event was found, we can skip the rest of the host list on this iteration
                                 break
+                            else:
+                                self.log.warning(
+                                    f"{worker_name}: Event did not pass signature check, {event_base.event_id}"
+                                )
                         # else:
                         #     self.log.warning(
                         #         f"{worker_name}: Event in server_to_event_result_map was unexpectedly an EventError "
@@ -1183,10 +1208,13 @@ class FederationBot(Plugin):
                 event_sent = False
                 # Need to do these in reverse, or the destination server will barf
                 list_of_server_and_event_id_to_send.reverse()
+                self.log.info(
+                    f"{worker_name}: Size of PDU list about to send: {len(list_of_server_and_event_id_to_send)} for {next_event_id}"
+                )
                 list_of_pdus_to_send = []
                 for (event_base,) in list_of_server_and_event_id_to_send:
-                    if isinstance(event_base, Event):
-                        list_of_pdus_to_send.extend([event_base.raw_data])
+                    assert isinstance(event_base, Event)
+                    list_of_pdus_to_send.extend([event_base.raw_data])
 
                 if list_of_pdus_to_send:
                     response = await self.federation_handler.send_events_to_server(
@@ -1211,12 +1239,12 @@ class FederationBot(Plugin):
 
                 else:
                     self.log.info(
-                        f"{worker_name}: Unexpectedly not sent {list_of_pdus_to_send}"
+                        f"{worker_name}: Unexpectedly not sent {list_of_pdus_to_send} for {next_event_id}"
                     )
 
                 # Update for the render
                 end_time = time.time() - start_time
-                render_list.extend([(end_time, False)])
+                render_list.extend([(0.0, False)])
                 _event_error_queue.task_done()
 
                 # Set up the retry task, but only if an event was actually sent
@@ -1234,7 +1262,6 @@ class FederationBot(Plugin):
                         len(list_of_server_and_event_id_to_send),
                     )
 
-                    bot_working[worker_name] = False
                 else:
                     self.log.warning(
                         f"{worker_name}: Nothing to do, as no events were sent out"
