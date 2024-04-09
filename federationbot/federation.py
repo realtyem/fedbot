@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union
 from asyncio import Queue
 import asyncio
 import json
@@ -761,6 +761,48 @@ class FederationHandler:
         await asyncio.gather(*tasks, return_exceptions=True)
 
         return event_to_event_base
+
+    async def find_event_on_servers(
+        self, origin_server: str, event_id: str, servers_to_check: Collection[str]
+    ) -> Dict[str, EventBase]:
+        host_to_event_status_map: Dict[str, EventBase] = {}
+
+        host_queue: Queue[str] = Queue()
+        for host in servers_to_check:
+            host_queue.put_nowait(host)
+
+        async def _event_finding_worker(queue: Queue[str]) -> Tuple[str, EventBase]:
+            worker_host = await queue.get()
+            returned_events = await self.get_event_from_server(
+                origin_server=origin_server,
+                destination_server=worker_host,
+                event_id=event_id,
+            )
+            inner_returned_event = returned_events.get(event_id)
+            assert inner_returned_event is not None
+            queue.task_done()
+            return worker_host, inner_returned_event
+
+        # Create a collection of Task's, to run the coroutine in
+        reference_task_key = self.task_controller.setup_task_set()
+
+        # These are one-off tasks, not workers. Create as many as we have servers to check
+        self.task_controller.add_tasks(
+            reference_task_key,
+            _event_finding_worker,
+            host_queue,
+            limit=len(servers_to_check),
+        )
+
+        results = await self.task_controller.get_task_results(reference_task_key)
+
+        for host, response in results:
+            host_to_event_status_map[host] = response
+
+        # Make sure to cancel all tasks
+        await self.task_controller.cancel(reference_task_key)
+
+        return host_to_event_status_map
 
     async def get_state_ids_from_server(
         self,

@@ -1101,7 +1101,7 @@ class FederationBot(Plugin):
                     # self.log.info(f"{worker_name}: looking at {popped_event_id}")
                     # 4. Check the found Event for ancestor Events that are not on the
                     #    target server
-                    server_to_event_result_map = await self._find_event_on_servers(
+                    server_to_event_result_map = await self.federation_handler.find_event_on_servers(
                         origin_server, popped_event_id, good_host_list
                     )
 
@@ -1620,8 +1620,10 @@ class FederationBot(Plugin):
         while not_done:
             popped_event_id = await event_ids_to_try_next.get()
             # 4. Check the found Event for ancestor Events that are not on the target server
-            server_to_event_result_map = await self._find_event_on_servers(
-                origin_server, popped_event_id, good_host_list
+            server_to_event_result_map = (
+                await self.federation_handler.find_event_on_servers(
+                    origin_server, popped_event_id, good_host_list
+                )
             )
 
             await command_event.respond(
@@ -1943,217 +1945,6 @@ class FederationBot(Plugin):
             await self.reaction_task_controller.add_cleanup_control(
                 message_id, command_event.room_id
             )
-
-    @test_command.subcommand(
-        name="find_event", help="Search all hosts in a given room for a given Event"
-    )
-    @command.argument(name="event_id", parser=is_event_id, required=True)
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
-    )
-    async def find_event_command(
-        self,
-        command_event: MessageEvent,
-        event_id: Optional[str],
-        room_id_or_alias: Optional[str],
-    ) -> None:
-        # Let the user know the bot is paying attention
-        await command_event.mark_read()
-
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
-            )
-            return
-
-        room_id = await self._resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
-        )
-        if not room_id:
-            # Don't need to actually display an error, that's handled in the above
-            # function
-            return
-
-        list_of_message_ids = []
-        prerender_message = await command_event.respond(
-            f"Checking all hosts:\n"
-            f"* from Room: {room_id_or_alias or room_id}\n\n"
-            f"for:\n"
-            f"* Event ID: {event_id}\n"
-            f"* Using {origin_server}\n\n"
-            "Note: if there are more than 1,000 servers in this room, this may fail or take a long time."
-        )
-        list_of_message_ids.extend([prerender_message])
-
-        # This will be assigned by now
-        assert event_id is not None
-
-        # Can not assume that the event_id supplied is in the room requested to search
-        # hosts of. Get the current hosts in the room
-        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
-            origin_server, origin_server, room_id, int(time.time() * 1000)
-        )
-        if isinstance(ts_response, FederationErrorResponse):
-            host_list = []
-        else:
-            event_id_from_room_right_now: Optional[str] = ts_response.response_dict.get(
-                "event_id", None
-            )
-            assert event_id_from_room_right_now is not None
-            self.log.debug(
-                f"Timestamp to event responded with event_id: {event_id_from_room_right_now}"
-            )
-            # Get all the hosts in the supplied room
-            host_list = await self.get_hosts_in_room_ordered(
-                origin_server, origin_server, room_id, event_id_from_room_right_now
-            )
-
-        use_ordered_list = True
-        if not host_list:
-            use_ordered_list = False
-            # Either the origin server doesn't have the state, or some other problem
-            # occurred. Fall back to the client api with current state. Obviously there
-            # are problems with this, but it will allow forward progress.
-            current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, "
-                "falling back to client API"
-            )
-            list_of_message_ids.extend([current_message])
-            try:
-                joined_members = await self.client.get_joined_members(RoomID(room_id))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-            else:
-                for member in joined_members:
-                    host = get_domain_from_id(member)
-                    if host not in host_list:
-                        host_list.extend([host])
-
-        started_at = time.time()
-        host_to_event_status_map = await self._find_event_on_servers(
-            origin_server, event_id, host_list
-        )
-        total_time = time.time() - started_at
-
-        # Begin the render
-        dc_host_config = DisplayLineColumnConfig("Hosts", justify=Justify.RIGHT)
-        dc_result_config = DisplayLineColumnConfig("Results")
-
-        for host in host_to_event_status_map:
-            dc_host_config.maybe_update_column_width(len(host))
-
-        header_message = (
-            f"Hosts{'(in oldest order)' if use_ordered_list else ''} that found "
-            f"event '{event_id}'\n"
-        )
-        list_of_result_data = []
-        for host in host_list:
-            result = host_to_event_status_map.get(host)
-            buffered_message = ""
-            if result:
-                if isinstance(result, EventError):
-                    buffered_message += (
-                        f"{dc_host_config.pad(host)}"
-                        f"{dc_host_config.horizontal_separator}"
-                        f"{dc_result_config.pad('Fail')}"
-                        # f"{dc_result_config.pad(add_color(bold('Fail'), foreground=Colors.WHITE, background=Colors.RED))}"
-                        f"{dc_host_config.horizontal_separator}{result.error}"
-                    )
-                else:
-                    buffered_message += (
-                        f"{dc_host_config.pad(host)}"
-                        f"{dc_host_config.horizontal_separator}"
-                        f"{dc_result_config.pad('OK')}"
-                        # f"{dc_result_config.pad(add_color(bold('OK'), foreground=Colors.WHITE, background=Colors.GREEN))}"
-                    )
-            else:
-                # The "unlikely to ever be hit" error
-                buffered_message += (
-                    f"{dc_host_config.pad(host)}"
-                    f"{dc_host_config.horizontal_separator}"
-                    f"{dc_result_config.pad('Fail')}"
-                    f"{dc_host_config.horizontal_separator}"
-                    "Plugin error(Host not contacted)"
-                )
-
-            # remove the new line for <code> tags
-            list_of_result_data.extend([f"{buffered_message}\n"])
-
-        # remove the new line for <code> tags
-        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
-        list_of_result_data.extend([footer_message])
-
-        # For a single server test, the response will fit into a single message block.
-        # However, for a roomful it could be several pages long. Chunk those responses
-        # to fit into the size limit of an Event.
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_result_data, header_message
-        )
-
-        list_of_message_ids = []
-        for chunk in final_list_of_data:
-            message_id = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
-            )
-            list_of_message_ids.extend([message_id])
-
-        for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
-
-    async def _find_event_on_servers(
-        self, origin_server: str, event_id: str, servers_to_check: Collection[str]
-    ) -> Dict[str, EventBase]:
-        host_to_event_status_map: Dict[str, EventBase] = {}
-
-        host_queue: Queue[str] = Queue()
-        for host in servers_to_check:
-            host_queue.put_nowait(host)
-
-        async def _event_finding_worker(queue: Queue[str]) -> Tuple[str, EventBase]:
-            worker_host = await queue.get()
-            returned_events = await self.federation_handler.get_event_from_server(
-                origin_server=origin_server,
-                destination_server=worker_host,
-                event_id=event_id,
-            )
-            inner_returned_event = returned_events.get(event_id)
-            assert inner_returned_event is not None
-            queue.task_done()
-            return worker_host, inner_returned_event
-
-        # Create a collection of Task's, to run the coroutine in
-        reference_task_key = self.reaction_task_controller.setup_task_set()
-
-        # These are one-off tasks, not workers. Create as many as we have servers to check
-        self.reaction_task_controller.add_tasks(
-            reference_task_key,
-            _event_finding_worker,
-            host_queue,
-            limit=len(servers_to_check),
-        )
-
-        results = await self.reaction_task_controller.get_task_results(
-            reference_task_key
-        )
-
-        for host, response in results:
-            host_to_event_status_map[host] = response
-
-        # Make sure to cancel all tasks
-        await self.reaction_task_controller.cancel(reference_task_key)
-
-        return host_to_event_status_map
 
     @test_command.subcommand(
         name="room_version", help="experiment to get room version from room id"
@@ -4177,6 +3968,181 @@ class FederationBot(Plugin):
         #             wrap_in_code_block_markdown(chunk), ignore_body=True
         #         ),
         #     )
+
+    @fed_command.subcommand(
+        name="find_event", help="Search all hosts in a given room for a given Event"
+    )
+    @command.argument(name="event_id", parser=is_event_id, required=True)
+    @command.argument(
+        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
+    )
+    async def find_event_command(
+        self,
+        command_event: MessageEvent,
+        event_id: Optional[str],
+        room_id_or_alias: Optional[str],
+    ) -> None:
+        # Let the user know the bot is paying attention
+        await command_event.mark_read()
+
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        origin_server = get_domain_from_id(self.client.mxid)
+        if origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first."
+            )
+            return
+
+        room_id = await self._resolve_room_id_or_alias(
+            room_id_or_alias, command_event, origin_server
+        )
+        if not room_id:
+            # Don't need to actually display an error, that's handled in the above
+            # function
+            return
+
+        list_of_message_ids = []
+        prerender_message = await command_event.respond(
+            f"Checking all hosts:\n"
+            f"* from Room: {room_id_or_alias or room_id}\n\n"
+            f"for:\n"
+            f"* Event ID: {event_id}\n"
+            f"* Using {origin_server}\n\n"
+            "Note: if there are more than 1,000 servers in this room, this may fail or take a long time."
+        )
+        list_of_message_ids.extend([prerender_message])
+
+        # This will be assigned by now
+        assert event_id is not None
+
+        # Can not assume that the event_id supplied is in the room requested to search
+        # hosts of. Get the current hosts in the room
+        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
+            origin_server, origin_server, room_id, int(time.time() * 1000)
+        )
+        if isinstance(ts_response, FederationErrorResponse):
+            host_list = []
+        else:
+            event_id_from_room_right_now: Optional[str] = ts_response.response_dict.get(
+                "event_id", None
+            )
+            assert event_id_from_room_right_now is not None
+            self.log.debug(
+                f"Timestamp to event responded with event_id: {event_id_from_room_right_now}"
+            )
+            # Get all the hosts in the supplied room
+            host_list = await self.get_hosts_in_room_ordered(
+                origin_server, origin_server, room_id, event_id_from_room_right_now
+            )
+
+        use_ordered_list = True
+        if not host_list:
+            use_ordered_list = False
+            # Either the origin server doesn't have the state, or some other problem
+            # occurred. Fall back to the client api with current state. Obviously there
+            # are problems with this, but it will allow forward progress.
+            current_message = await command_event.respond(
+                "Failed getting hosts from State over federation, "
+                "falling back to client API"
+            )
+            list_of_message_ids.extend([current_message])
+            try:
+                joined_members = await self.client.get_joined_members(RoomID(room_id))
+
+            except MForbidden:
+                await command_event.respond(NOT_IN_ROOM_ERROR)
+                return
+            else:
+                for member in joined_members:
+                    host = get_domain_from_id(member)
+                    if host not in host_list:
+                        host_list.extend([host])
+
+        started_at = time.time()
+        host_to_event_status_map = await self.federation_handler.find_event_on_servers(
+            origin_server, event_id, host_list
+        )
+        total_time = time.time() - started_at
+
+        # Begin the render
+        dc_host_config = DisplayLineColumnConfig("Hosts", justify=Justify.RIGHT)
+        dc_result_config = DisplayLineColumnConfig("Results")
+
+        for host in host_to_event_status_map:
+            dc_host_config.maybe_update_column_width(len(host))
+
+        header_message = (
+            f"Hosts{'(in oldest order)' if use_ordered_list else ''} that found "
+            f"event '{event_id}'\n"
+        )
+        list_of_result_data = []
+        servers_had = 0
+        servers_not_had = 0
+        for host in host_list:
+            result = host_to_event_status_map.get(host)
+            buffered_message = ""
+            if result:
+                if isinstance(result, EventError):
+                    buffered_message += (
+                        f"{dc_host_config.pad(host)}"
+                        f"{dc_host_config.horizontal_separator}"
+                        f"{dc_result_config.pad('Fail')}"
+                        # f"{dc_result_config.pad(add_color(bold('Fail'), foreground=Colors.WHITE, background=Colors.RED))}"
+                        f"{dc_host_config.horizontal_separator}{result.error}"
+                    )
+                    servers_not_had += 1
+                else:
+                    buffered_message += (
+                        f"{dc_host_config.pad(host)}"
+                        f"{dc_host_config.horizontal_separator}"
+                        f"{dc_result_config.pad('OK')}"
+                        # f"{dc_result_config.pad(add_color(bold('OK'), foreground=Colors.WHITE, background=Colors.GREEN))}"
+                    )
+                    servers_had += 1
+            else:
+                # The "unlikely to ever be hit" error
+                buffered_message += (
+                    f"{dc_host_config.pad(host)}"
+                    f"{dc_host_config.horizontal_separator}"
+                    f"{dc_result_config.pad('Fail')}"
+                    f"{dc_host_config.horizontal_separator}"
+                    "Plugin error(Host not contacted)"
+                )
+
+            # remove the new line for <code> tags
+            list_of_result_data.extend([f"{buffered_message}\n"])
+
+        # remove the new line for <code> tags
+        footer_message = (
+            f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
+            f"Servers Good: {servers_had}\n"
+            f"Servers Fail: {servers_not_had}\n"
+        )
+        list_of_result_data.extend([footer_message])
+
+        # For a single server test, the response will fit into a single message block.
+        # However, for a roomful it could be several pages long. Chunk those responses
+        # to fit into the size limit of an Event.
+        final_list_of_data = combine_lines_to_fit_event(
+            list_of_result_data, header_message
+        )
+
+        list_of_message_ids = []
+        for chunk in final_list_of_data:
+            message_id = await command_event.respond(
+                make_into_text_event(
+                    wrap_in_code_block_markdown(chunk), ignore_body=True
+                ),
+            )
+            list_of_message_ids.extend([message_id])
+
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
 
     async def _resolve_room_id_or_alias(
         self,
