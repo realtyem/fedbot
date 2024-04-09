@@ -637,6 +637,7 @@ class FederationHandler:
         destination_server: str,
         event_id: str,
         timeout: float = 10.0,
+        inject_new_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, EventBase]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
@@ -646,6 +647,7 @@ class FederationHandler:
             destination_server: The server receiving the request
             event_id: The opaque string of the id given to the Event
             timeout:
+            inject_new_data: Allow for injecting data into the structure for testing verification later
 
         Returns: A tuple containing the FederationResponse received and the Event
             contained in a List
@@ -653,7 +655,7 @@ class FederationHandler:
         """
 
         new_event_base = self._events_cache.get((destination_server, event_id))
-        if new_event_base:
+        if new_event_base and not inject_new_data:
             # Only successful events are cached
             return {event_id: new_event_base}
 
@@ -675,11 +677,18 @@ class FederationHandler:
 
             return {event_id: new_event_base}
 
-        pdu_list = response.response_dict.get("pdus", [])
+        pdu_list: List[Dict[str, Any]] = response.response_dict.get("pdus", [])
         for data in pdu_list:
+            if inject_new_data:
+                data.update(inject_new_data)
             # This path is only taken on success, errors are sorted above
             new_event_base = determine_what_kind_of_event(EventID(event_id), data)
-            self._events_cache.set((destination_server, event_id), new_event_base)
+            if inject_new_data:
+                self.logger.info(
+                    f"Dump of new data:\n{json.dumps(new_event_base.raw_data, indent=4)}"
+                )
+            else:
+                self._events_cache.set((destination_server, event_id), new_event_base)
 
         assert new_event_base is not None
         return {event_id: new_event_base}
