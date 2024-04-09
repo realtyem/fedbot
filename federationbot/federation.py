@@ -218,7 +218,7 @@ class FederationHandler:
         # get a usable host:port
         if not skip_discovery:
             server_result = self._server_discovery_cache.get(destination_server_name)
-            if not server_result or force_rediscover:
+            if not server_result or server_result.unhealthy or force_rediscover:
                 # self.logger.warning(
                 #     f"cache entry not found for {destination_server_name}"
                 # )
