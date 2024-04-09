@@ -1061,8 +1061,6 @@ class FederationBot(Plugin):
 
             """
             while True:
-                bot_working[worker_name] = False
-
                 if self.reaction_task_controller.is_stopped(pinned_message):
                     break
 
@@ -1078,7 +1076,7 @@ class FederationBot(Plugin):
                         f"{worker_name}: Unexpectedly found room walk fetch event in RESOLVED list {next_event_id}"
                     )
 
-                start_time = time.time()
+                # start_time = time.time()
 
                 list_of_server_and_event_id_to_send = []
                 already_searching_for_event_id = set()
@@ -1094,6 +1092,9 @@ class FederationBot(Plugin):
                         # Nothing new, must be done
                         break
 
+                    if self.reaction_task_controller.is_stopped(pinned_message):
+                        break
+
                     # Let's not repeat something locally
                     if popped_event_id in local_set_of_events_already_tried:
                         continue
@@ -1101,8 +1102,10 @@ class FederationBot(Plugin):
                     # self.log.info(f"{worker_name}: looking at {popped_event_id}")
                     # 4. Check the found Event for ancestor Events that are not on the
                     #    target server
-                    server_to_event_result_map = await self.federation_handler.find_event_on_servers(
-                        origin_server, popped_event_id, good_host_list
+                    server_to_event_result_map = (
+                        await self.federation_handler.find_event_on_servers(
+                            origin_server, popped_event_id, good_host_list
+                        )
                     )
 
                     for server_name, event_base in server_to_event_result_map.items():
@@ -1217,11 +1220,16 @@ class FederationBot(Plugin):
                     assert isinstance(event_base, Event)
                     list_of_pdus_to_send.extend([event_base.raw_data])
 
-                if list_of_pdus_to_send:
+                while list_of_pdus_to_send:
+                    limited_list_of_pdus = list_of_pdus_to_send[:50]
+                    list_of_pdus_to_send = list_of_pdus_to_send[50:]
+                    self.log.info(
+                        f"Size of PDU list about to send: {len(limited_list_of_pdus)}"
+                    )
                     response = await self.federation_handler.send_events_to_server(
                         origin_server,
                         destination_server,
-                        list_of_pdus_to_send,
+                        limited_list_of_pdus,
                     )
                     event_sent = True
 
@@ -1238,13 +1246,8 @@ class FederationBot(Plugin):
                                 f"{worker_name}: Received error from {pdu_event_id} got response of {pdu_received_result}"
                             )
 
-                else:
-                    self.log.info(
-                        f"{worker_name}: Unexpectedly not sent {list_of_pdus_to_send} for {next_event_id}"
-                    )
-
                 # Update for the render
-                end_time = time.time() - start_time
+                # end_time = time.time() - start_time
                 render_list.extend([(0.0, False)])
                 _event_error_queue.task_done()
 
@@ -1265,8 +1268,10 @@ class FederationBot(Plugin):
 
                 else:
                     self.log.warning(
-                        f"{worker_name}: Nothing to do, as no events were sent out"
+                        f"{worker_name}: Nothing to do, as no events were sent out for {next_event_id}"
                     )
+
+                bot_working[worker_name] = False
 
         async def _waiting_retry_worker(
             worker_name: str,
