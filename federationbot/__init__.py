@@ -193,6 +193,7 @@ class FederationBot(Plugin):
             self.log,
             self.client.mxid,
             self.server_signing_keys,
+            self.reaction_task_controller,
         )
 
     async def pre_stop(self) -> None:

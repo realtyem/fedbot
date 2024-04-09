@@ -12,6 +12,7 @@ from signedjson.key import decode_signing_key_base64, decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, sign_json, verify_signed_json
 from yarl import URL
 
+from federationbot import ReactionTaskController
 from federationbot.cache import LRUCache
 from federationbot.delegation import (
     DelegationHandler,
@@ -50,6 +51,7 @@ class FederationHandler:
         logger: TraceLogger,
         bot_mxid: str,
         server_signing_keys: Dict[str, str],
+        task_controller: ReactionTaskController,
     ):
         self.http_client = http_client
         self.logger = logger
@@ -58,6 +60,7 @@ class FederationHandler:
         self.server_signing_keys = server_signing_keys
         self.json_decoder = json.JSONDecoder()
         self.delegation_handler = DelegationHandler(self.logger)
+        self.task_controller = task_controller
         # Map the key to (server_name, event_id) -> Event
         self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
         # Map this cache to server_name -> ServerResult
