@@ -1984,7 +1984,8 @@ class FederationBot(Plugin):
             f"* from Room: {room_id_or_alias or room_id}\n\n"
             f"for:\n"
             f"* Event ID: {event_id}\n"
-            f"* Using {origin_server}"
+            f"* Using {origin_server}\n\n"
+            "Note: if there are more than 1,000 servers in this room, this may fail or take a long time."
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2061,6 +2062,7 @@ class FederationBot(Plugin):
                         f"{dc_host_config.pad(host)}"
                         f"{dc_host_config.horizontal_separator}"
                         f"{dc_result_config.pad('Fail')}"
+                        # f"{dc_result_config.pad(add_color(bold('Fail'), foreground=Colors.WHITE, background=Colors.RED))}"
                         f"{dc_host_config.horizontal_separator}{result.error}"
                     )
                 else:
@@ -2068,6 +2070,7 @@ class FederationBot(Plugin):
                         f"{dc_host_config.pad(host)}"
                         f"{dc_host_config.horizontal_separator}"
                         f"{dc_result_config.pad('OK')}"
+                        # f"{dc_result_config.pad(add_color(bold('OK'), foreground=Colors.WHITE, background=Colors.GREEN))}"
                     )
             else:
                 # The "unlikely to ever be hit" error
@@ -2079,8 +2082,10 @@ class FederationBot(Plugin):
                     "Plugin error(Host not contacted)"
                 )
 
+            # remove the new line for <code> tags
             list_of_result_data.extend([f"{buffered_message}\n"])
 
+        # remove the new line for <code> tags
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])
 
@@ -2120,7 +2125,6 @@ class FederationBot(Plugin):
                 origin_server=origin_server,
                 destination_server=worker_host,
                 event_id=event_id,
-                timeout=2.0,
             )
             inner_returned_event = returned_events.get(event_id)
             assert inner_returned_event is not None
