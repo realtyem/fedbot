@@ -57,9 +57,13 @@ from federationbot.server_result import DiagnosticInfo, ServerResultError
 from federationbot.utils import (
     BitmapProgressBar,
     BitmapProgressBarStyle,
+    Colors,
     DisplayLineColumnConfig,
     Justify,
+    add_color,
+    bold,
     combine_lines_to_fit_event,
+    combine_lines_to_fit_event_html,
     get_domain_from_id,
     pad,
     pretty_print_timestamp,
@@ -263,6 +267,40 @@ class FederationBot(Plugin):
         command_event: MessageEvent,
     ) -> None:
         await command_event.respond(f"Received Test Command on: {self.client.mxid}")
+
+    @test_command.subcommand(name="color", help="Test color palette and layout")
+    async def color_subcommand(self, command_event: MessageEvent) -> None:
+        await command_event.mark_read()
+        test_message_list = []
+        test_message_list.extend(["OKAY"])
+        test_message_list.extend(["WARN"])
+        test_message_list.extend(["ERROR"])
+
+        await command_event.respond(
+            make_into_text_event(
+                combine_lines_to_fit_event_html(test_message_list, "")[0],
+                allow_html=True,
+            ),
+            allow_html=True,
+        )
+        test_message_list = []
+        test_message_list.extend(
+            [add_color(bold("OKAY"), foreground=Colors.WHITE, background=Colors.GREEN)]
+        )
+        test_message_list.extend(
+            [add_color(bold("WARN"), foreground=Colors.BLACK, background=Colors.YELLOW)]
+        )
+        test_message_list.extend(
+            [add_color(bold("ERROR"), foreground=Colors.WHITE, background=Colors.RED)]
+        )
+
+        await command_event.respond(
+            make_into_text_event(
+                combine_lines_to_fit_event_html(test_message_list, "")[0],
+                allow_html=True,
+            ),
+            allow_html=True,
+        )
 
     @test_command.subcommand(
         name="context",
