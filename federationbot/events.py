@@ -1817,14 +1817,22 @@ class SpaceChildStateEvent(GenericStateEvent):
 
 
 def determine_what_kind_of_event(
-    event_id: Optional[EventID], data_to_use: Dict[str, Any]
+    event_id: Optional[EventID],
+    room_version: Optional[int],
+    data_to_use: Dict[str, Any],
 ) -> EventBase:
     # Everything is a kind of Event
     # However, the actual EventID may be missing, as most server responses don't include
     # it. Create an empty one, as it's not a big deal. Since it's for display, if it's
     # not there it won't be displayed
     if not event_id:
-        event_id = EventID("")
+        if room_version and room_version > 3:
+            # For the moment, we can only discover Event ID's from room version's before 4
+            event_id = EventID(
+                construct_event_id_from_event_v3(room_version, data_to_use)
+            )
+        else:
+            event_id = EventID("")
 
     if "state_key" in data_to_use:
         event_type = data_to_use.get("type", None)
