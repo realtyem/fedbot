@@ -638,6 +638,7 @@ class FederationHandler:
         event_id: str,
         timeout: float = 10.0,
         inject_new_data: Optional[Dict[str, Any]] = None,
+        keys_to_pop: Optional[str] = None,
     ) -> Dict[str, EventBase]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
@@ -655,7 +656,7 @@ class FederationHandler:
         """
 
         new_event_base = self._events_cache.get((destination_server, event_id))
-        if new_event_base and not inject_new_data:
+        if new_event_base and not inject_new_data and not keys_to_pop:
             # Only successful events are cached
             return {event_id: new_event_base}
 
@@ -678,12 +679,24 @@ class FederationHandler:
             return {event_id: new_event_base}
 
         pdu_list: List[Dict[str, Any]] = response.response_dict.get("pdus", [])
+        split_keys: List[str] = []
+        if keys_to_pop:
+            if "," in keys_to_pop:
+                split_keys = keys_to_pop.split(",")
+            else:
+                split_keys = [keys_to_pop]
+        # self.logger.info(f"split_keys: {split_keys}")
         for data in pdu_list:
             if inject_new_data:
                 data.update(inject_new_data)
+            for key_to_lose in split_keys:
+                key_to_lose = key_to_lose.strip()
+                self.logger.info(f"keys being popped: {key_to_lose}")
+
+                data.pop(key_to_lose, None)
             # This path is only taken on success, errors are sorted above
-            new_event_base = determine_what_kind_of_event(EventID(event_id), data)
-            if inject_new_data:
+            new_event_base = determine_what_kind_of_event(EventID(event_id), None, data)
+            if inject_new_data or keys_to_pop:
                 self.logger.info(
                     f"Dump of new data:\n{json.dumps(new_event_base.raw_data, indent=4)}"
                 )

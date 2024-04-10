@@ -2558,13 +2558,15 @@ class FederationBot(Plugin):
     @fed_command.subcommand(name="event")
     @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="server_to_request_from", required=False)
-    @command.argument(name="test_json_to_inject", required=False, pass_raw=True)
+    @command.argument(
+        name="test_json_to_inject_or_keys_to_pop", required=False, pass_raw=True
+    )
     async def event_command_pretty(
         self,
         command_event: MessageEvent,
         event_id: Optional[str],
         server_to_request_from: Optional[str],
-        test_json_to_inject: Optional[str],
+        test_json_to_inject_or_keys_to_pop: Optional[str],
     ) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
@@ -2581,7 +2583,12 @@ class FederationBot(Plugin):
             return
 
         if server_to_request_from:
-            destination_server = server_to_request_from
+            # deal with the case where pulling from origin as destination but also testing json/keys
+            if "{" in server_to_request_from or "," in server_to_request_from:
+                test_json_to_inject_or_keys_to_pop = server_to_request_from
+                destination_server = origin_server
+            else:
+                destination_server = server_to_request_from
         else:
             destination_server = origin_server
 
@@ -2601,11 +2608,25 @@ class FederationBot(Plugin):
         # TODO: test by modifying the object. Have to reach into the data as it comes in and
         #  modify that, as the attrib versions will have already been parsed and
         #  won't be read by the verifier. Spoiler alert: works as intended.
-        test_json_dumped = None
-        if test_json_to_inject:
-            self.log.info(f"incoming inject: {test_json_to_inject}")
-            test_json_dumped = json.loads(test_json_to_inject)
+        right_most_bracket = None
+        json_dumped = None
+        remove_bit = None
+        if (
+            test_json_to_inject_or_keys_to_pop
+            and "{" in test_json_to_inject_or_keys_to_pop
+            and "}" in test_json_to_inject_or_keys_to_pop
+        ):
+            self.log.info(
+                f"test_json_to_inject_or_keys_to_pop: {test_json_to_inject_or_keys_to_pop}"
+            )
+            right_most_bracket = test_json_to_inject_or_keys_to_pop.rindex("}")
+            json_bit = test_json_to_inject_or_keys_to_pop[: right_most_bracket + 1]
+            self.log.info(f"incoming inject: {json_bit}")
+            test_json_dumped = json.loads(json_bit)
             self.log.info(f"after json.loads: {test_json_dumped}")
+
+            remove_bit = test_json_to_inject_or_keys_to_pop[right_most_bracket + 1 :]
+            self.log.info(f"remove_bit: {remove_bit}")
             # returned_event.raw_data.update(test_json_dumped)
             # self.log.info(f"dumped raw_data:\n{json.dumps(returned_event.raw_data, indent=4)}")
 
@@ -2613,7 +2634,8 @@ class FederationBot(Plugin):
             origin_server=origin_server,
             destination_server=destination_server,
             event_id=event_id,
-            inject_new_data=test_json_dumped,
+            inject_new_data=json_dumped,
+            keys_to_pop=remove_bit,
         )
 
         buffered_message = ""
