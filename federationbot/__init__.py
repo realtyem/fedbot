@@ -3658,6 +3658,13 @@ class FederationBot(Plugin):
 
         if not limit:
             limit = "10"
+        try:
+            limit_int = int(limit)
+        except ValueError:
+            await command_event.reply(
+                f"I got a limit number that could not be converted into an integer: {limit}"
+            )
+            return
 
         # The only way to request from a different server than what the bot is on is to
         # have the other server's signing keys. So just use the bot's server.
@@ -3710,7 +3717,7 @@ class FederationBot(Plugin):
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id,
-            limit=limit,
+            limit=limit_int,
         )
 
         if isinstance(response, FederationErrorResponse):
