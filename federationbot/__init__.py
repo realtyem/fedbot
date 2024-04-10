@@ -4393,15 +4393,8 @@ class FederationBot(Plugin):
             ]
 
         pdus_list = response.response_dict.get("pdus", [])
-        list_to_return = []
-        # Even though this is a list, there should be only one
-        for pdu in pdus_list:
-            list_to_return.append(
-                determine_what_kind_of_event(
-                    event_id=None, room_version=room_version, data_to_use=pdu
-                )
-            )
-        return list_to_return
+
+        return parse_list_response_into_list_of_event_bases(pdus_list, room_version)
 
 
 def wrap_in_code_block_markdown(existing_buffer: str) -> str:
