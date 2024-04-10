@@ -4261,8 +4261,11 @@ class FederationBot(Plugin):
         )
         converted_state_events = []
         for state_event in state_events:
+            # Won't be able to retrieve the room_version for this, and the event ids are not available or necessary
             converted_state_events.append(
-                determine_what_kind_of_event(None, data_to_use=state_event)
+                determine_what_kind_of_event(
+                    None, room_version=None, data_to_use=state_event
+                )
             )
 
         filtered_room_member_events = cast(
