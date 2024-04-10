@@ -1024,14 +1024,19 @@ class FederationHandler:
 
     async def discover_room_version(
         self,
-        origin_server: str,
-        destination_server: str,
+        origin_server: Optional[str],
+        destination_server: Optional[str],
         room_id: str,
         timeout: float = 10.0,
     ) -> str:
         room_version = self.room_version_cache.get(room_id)
         if room_version:
             return str(room_version)
+
+        if not origin_server:
+            origin_server = self.hosting_server
+        if not destination_server:
+            destination_server = origin_server
 
         response = await self.make_join_to_server(
             origin_server=origin_server,
