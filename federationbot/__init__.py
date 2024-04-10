@@ -3712,22 +3712,13 @@ class FederationBot(Plugin):
         # This will be assigned by now
         assert event_id is not None
 
-        response = await self.federation_handler.get_backfill_from_server(
+        pdu_list_from_response = await self._get_events_from_backfill(
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
-            event_id=event_id,
+            start_event_id=event_id,
             limit=limit_int,
         )
-
-        if isinstance(response, FederationErrorResponse):
-            await command_event.respond(
-                f"Some kind of error\n{response.status_code}:{response.reason}"
-            )
-            return
-
-        # The response should contain all the pdu data inside 'pdus'
-        pdu_list_from_response = response.response_dict.get("pdus", [])
 
         # Time to start rendering. Build the header lines first
         header_message = ""
@@ -3736,9 +3727,9 @@ class FederationBot(Plugin):
         dc_sender = DisplayLineColumnConfig("Sender")
         dc_extras = DisplayLineColumnConfig("Extras")
 
+        # Reconstruct the list so it can be sorted by depth
         pdu_list: List[Tuple[int, EventBase]] = []
-        for event in pdu_list_from_response:
-            event_base = determine_what_kind_of_event(event_id=None, data_to_use=event)
+        for event_base in pdu_list_from_response:
             # Don't worry about resizing the 'Extras' Column,
             # it's on the end and variable length
             dc_depth.maybe_update_column_width(len(str(event_base.depth)))
@@ -4351,50 +4342,63 @@ class FederationBot(Plugin):
         assert isinstance(origin_server_ts, int)
         return room_id, event_id, origin_server_ts
 
-    async def _get_event_from_backfill(
-        self, origin_server: str, destination_server: str, room_id: str, event_id: str
-    ) -> Optional[EventBase]:
+    async def _get_events_from_backfill(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        start_event_id: str,
+        limit: int = 1,
+    ) -> List[EventBase]:
         """
-        Retrieve a single event from the backfill mechanism. This will have 3 types of
+        Retrieve a series of events from the backfill mechanism. This will have 3 types of
         return values(listed below)
 
         Args:
             origin_server: The server to make the request from(applies auth to request)
             destination_server: The server being asked
             room_id: The room the Event ID should be part of
-            event_id: The actual Event ID to look up
+            start_event_id: The actual Event ID to look up
 
         Returns:
             * EventBase in question
-            * None(for when the event isn't on this server)
             * Error from federation response in the EventError custom class
 
         """
+        room_version = int(
+            await self.federation_handler.discover_room_version(
+                origin_server, destination_server, room_id
+            )
+        )
         response = await self.federation_handler.get_backfill_from_server(
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
-            event_id=event_id,
-            limit="1",
+            event_id=start_event_id,
+            limit=str(limit),
         )
         if isinstance(response, FederationErrorResponse):
-            return EventError(
-                event_id=EventID(event_id),
-                data={
-                    "error": f"{response.reason}",
-                    "errcode": f"{response.status_code}",
-                },
-            )
+            # If there was an error, put it into a format that is expected.
+            return [
+                EventError(
+                    event_id=EventID(""),
+                    data={
+                        "error": f"{response.reason}",
+                        "errcode": f"{response.status_code}",
+                    },
+                )
+            ]
 
         pdus_list = response.response_dict.get("pdus", [])
-
-        event = None
+        list_to_return = []
         # Even though this is a list, there should be only one
         for pdu in pdus_list:
-            event = determine_what_kind_of_event(
-                event_id=EventID(event_id), data_to_use=pdu
+            list_to_return.append(
+                determine_what_kind_of_event(
+                    event_id=None, room_version=room_version, data_to_use=pdu
+                )
             )
-        return event
+        return list_to_return
 
 
 def wrap_in_code_block_markdown(existing_buffer: str) -> str:
