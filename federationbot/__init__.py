@@ -2005,11 +2005,13 @@ class FederationBot(Plugin):
     )
     @command.argument(name="event_id", parser=is_event_id, required=True)
     @command.argument(name="from_server", required=False)
+    @command.argument(name="room_version", required=False)
     async def discover_event_id_command(
         self,
         command_event: MessageEvent,
         event_id: Optional[str],
         from_server: Optional[str],
+        room_version: Optional[str],
     ) -> None:
         await command_event.mark_read()
 
@@ -2029,8 +2031,16 @@ class FederationBot(Plugin):
                 "I need you to supply an actual existing event_id to use as a reference for this experiment."
             )
             return
+
+        room_version_int = None
         if not from_server:
             from_server = origin_server
+        else:
+            # in case they skipped a from_server and just used a room_version
+            try:
+                room_version_int = int(from_server)
+            except ValueError:
+                pass
 
         event_map = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
@@ -2049,19 +2059,31 @@ class FederationBot(Plugin):
 
         room_id = event.room_id
 
-        try:
-            room_version = int(
-                await self.federation_handler.discover_room_version(
-                    origin_server=origin_server,
-                    destination_server=origin_server,
-                    room_id=room_id,
+        if room_version:
+            try:
+                room_version_int = int(room_version)
+            except ValueError:
+                await command_event.reply(
+                    f"You passed me a room version to use that couldn't be converted to an integer: {room_version}"
                 )
-            )
-        except Exception as e:
-            await command_event.reply(
-                f"Error getting room version from room {room_id}: {str(e)}"
-            )
-            return
+                return
+
+        if not room_version_int:
+            try:
+                room_version_int = int(
+                    await self.federation_handler.discover_room_version(
+                        origin_server=origin_server,
+                        destination_server=origin_server,
+                        room_id=room_id,
+                    )
+                )
+            except Exception as e:
+                await command_event.reply(
+                    f"Error getting room version from room {room_id}: {str(e)}"
+                )
+                return
+
+        assert room_version_int is not None
 
         list_of_message_ids = []
         current_message = await command_event.respond(
@@ -2069,7 +2091,7 @@ class FederationBot(Plugin):
         )
         list_of_message_ids.extend([current_message])
 
-        redacted_data = redact_event(room_version, event.raw_data)
+        redacted_data = redact_event(room_version_int, event.raw_data)
         redacted_data.pop("signatures", None)
         redacted_data.pop("unsigned", None)
         current_message = await command_event.respond(
