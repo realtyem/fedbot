@@ -1214,7 +1214,7 @@ def filter_state_events_based_on_membership(
 
 
 def parse_list_response_into_list_of_event_bases(
-    list_from_response: List[Dict[str, Any]]
+    list_from_response: List[Dict[str, Any]], room_version: Optional[int] = None
 ) -> List[EventBase]:
     """
     Parse a list returned from a federation request into a list of EventBase type
@@ -1226,7 +1226,9 @@ def parse_list_response_into_list_of_event_bases(
     list_of_event_bases = []
     for event_dict in list_from_response:
         list_of_event_bases.append(
-            determine_what_kind_of_event(event_id=None, data_to_use=event_dict)
+            determine_what_kind_of_event(
+                event_id=None, room_version=room_version, data_to_use=event_dict
+            )
         )
 
     return list_of_event_bases
