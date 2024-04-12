@@ -1,13 +1,14 @@
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from asyncio import sleep
 import ipaddress
+import json
 
+from aiohttp import ClientSession, client_exceptions
 from dns.asyncresolver import Resolver
 from mautrix.util.logging import TraceLogger
 import dns.resolver
 
-from federationbot.errors import WellKnownHasSchemeError
-from federationbot.responses import FederationBaseResponse
+from federationbot.errors import FedBotException, WellKnownHasSchemeError
 from federationbot.server_result import (
     DiagnosticInfo,
     ResponseStatusType,
@@ -62,62 +63,54 @@ def is_this_an_ip_address(host: str) -> bool:
 
 
 def _parse_and_check_well_known_response(
-    response: FederationBaseResponse, diag_info: DiagnosticInfo
-) -> Tuple[Optional[str], Optional[str], DiagnosticInfo]:
+    response: Dict[str, Any], diag_info: DiagnosticInfo
+) -> Tuple[Optional[str], Optional[str]]:
     """
-    Parse the response returned by the well-known request. Collect DiagnosticInfo
+    Parse the dictionary returned by the well-known request. Collect DiagnosticInfo
         throughout the process. Follow the spec from Step 3
 
+    Should get at least a 'host' and hopefully a 'port'
+
     Args:
-        response: The FederationBaseResponse with the response from well-known
+        response: The Dict with the response from well-known
         diag_info: The DiagnosticInfo to add to
 
     Returns:
-         Tuple of host(or None), port(or None), DiagnosticInfo
+         Tuple of host(or None), port(or None)
     """
     host = None
     port = None
-    if response.status_code == 404:
-        diag_info.mark_no_well_known()
-    elif response.status_code != 200:
-        # For whatever reason(which should be in the errors/diag returned),
-        # there was no usable well-known
+
+    # In theory, got a good response. Should be JSON of
+    # {"m.server": "example.com:433"} if there was a port
+    well_known_result: Optional[str] = response.get("m.server", None)
+    if well_known_result is None:
+        diag_info.error("Well-Known missing 'm.server' JSON key")
         diag_info.mark_error_on_well_known()
 
     else:
-        # In theory, got a good response. Should be JSON of
-        # {"m.server": "example.com:433"} if there was a port
+        # I tried to find a library or module that would comprehensively handle
+        # parsing a URL without a scheme, yarl came close. I guess we'll just
+        # have to cover the basics by hand.
         try:
-            well_known_result = response.response_dict["m.server"]
-        except KeyError:
-            diag_info.error("Well-Known missing 'm.server' JSON key")
+            host, port = check_and_maybe_split_server_name(well_known_result)
+        except WellKnownHasSchemeError:
+            diag_info.error("Well-Known 'm.server' has a scheme when it should not:")
+            diag_info.error(f"{well_known_result}", front_pad="      ")
+            diag_info.mark_error_on_well_known()
+        except AttributeError:
+            # Apparently this happens if a server has their well-known set like a
+            # client well-known. Don't print custom error message showing the result
+            # as it could be spammy(and not fit)
+            diag_info.error(
+                "Well-Known 'm.server' has wrong attributes, should be a host/port"
+            )
             diag_info.mark_error_on_well_known()
 
         else:
-            # I tried to find a library or module that would comprehensively handle
-            # parsing a URL without a scheme, yarl came close. I guess we'll just
-            # have to cover the basics by hand.
-            try:
-                host, port = check_and_maybe_split_server_name(well_known_result)
-            except WellKnownHasSchemeError:
-                diag_info.error(
-                    "Well-Known 'm.server' has a scheme when it should not:"
-                )
-                diag_info.error(f"{well_known_result}", front_pad="      ")
-                diag_info.mark_error_on_well_known()
-            except AttributeError:
-                # Apparently this happens if a server has their well-known set like a
-                # client well-known. Don't print custom error message showing the result
-                # as it could be spammy(and not fit)
-                diag_info.error(
-                    "Well-Known 'm.server' has wrong attributes, should be a host/port"
-                )
-                diag_info.mark_error_on_well_known()
+            diag_info.mark_well_known_maybe_found()
 
-            else:
-                diag_info.mark_well_known_maybe_found()
-
-    return host, port, diag_info
+    return host, port
 
 
 class DelegationHandler:
@@ -127,6 +120,7 @@ class DelegationHandler:
         self.dns_resolver.lifetime = 10.0
         # DNS timeout for a request default is 2 seconds
         self.logger = logger
+        self.json_decoder = json.JSONDecoder()
 
     async def check_dns_for_reg_records(
         self,
@@ -343,6 +337,188 @@ class DelegationHandler:
 
         return host or dep_host, port or dep_port, diag_info
 
+    async def make_well_known_request(
+        self, request_cb: Callable, host: str, diag_info: DiagnosticInfo
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Make the GET request to the well-known endpoint. Borrow the error handling code from FederationHandler
+        Args:
+            request_cb: The Callable on FederationHandler. Use _federation_request()
+            host: The basic host to check
+            diag_info: DiagnosticInfo object to append info/errors too
+
+        Returns: A Tuple of (A Json Dict or None, DiagnosticInfo)
+
+        """
+        content: Optional[Dict[str, Any]] = None
+
+        try:
+            # This will return a context manager called ClientResponse that will need to be parsed below
+            response = await request_cb(
+                destination_server_name=host, path="/.well-known/matrix/server"
+            )
+
+        # The callback used above handles a boatload of individual exceptions and consolidates them into one
+        # that is easier to extract displayable data from.
+        except FedBotException as e:
+            self.logger.warning(f"{e.__class__.__name__}: {host}: {e}")
+            diag_info.error(f"{e.summary_exception}")
+            if e.__class__.__name__ != "PluginTimeout":
+                diag_info.add(f"{e.long_exception}")
+            return None
+
+        async with response:
+            status = response.status
+            reason = response.reason
+            headers = response.headers
+
+            if 199 < status < 499:
+                # Potentially anything from 200 up to 500 can have something to say
+                try:
+                    content = await response.json()
+                except client_exceptions.ContentTypeError:
+                    diag_info.error(
+                        "Response had Content-Type: "
+                        f"{headers.get('Content-Type', 'None Found')}"
+                    )
+                    diag_info.add(
+                        "Expected Content-Type of 'application/json', will try "
+                        "work-around"
+                    )
+                    try:
+                        text_result = await response.text()
+                        content = self.json_decoder.decode(text_result)
+                    except json.decoder.JSONDecodeError:
+                        # self.logger.info(f"text_result: {text_result}")
+                        diag_info.error("JSONDecodeError, work-around failed")
+
+                else:
+                    diag_info.add(f"seems ok {content}")
+                    # self.logger.info(f"content: {content}")
+
+        diag_info.add(f"Request status: code:{status}, reason: {reason}")
+
+        # Mark the DiagnosticInfo, as that's how any error codes get passed out
+        if status == 404:
+            diag_info.mark_no_well_known()
+        elif status != 200:
+            # For whatever reason(which should be in the errors/diag returned),
+            # there was no usable well-known
+            diag_info.mark_error_on_well_known()
+
+        return content
+
+    async def handle_well_known_delegation(
+        self,
+        original_host: str,
+        well_known_host: str,
+        well_known_port: Optional[str],
+        diag_info: DiagnosticInfo,
+    ) -> ServerResult:
+        # Step 3.1 Literal IP
+        # Same as Step 1 except use well-known discovered values
+        # (imply port 8448, if port was not included)
+        # HOST header should be the result of the well_known
+        # request(including port)
+        diag_info.mark_step_num("Step 3.1", "Checking Well-Known for Literal IP")
+        if is_this_an_ip_address(well_known_host):
+            host_header = f"{well_known_host}:{well_known_port or '8448'}"
+
+            diag_info.add(f"Host defined in Well-Known was Literal IP {host_header}")
+            diag_info.mark_well_known_maybe_found()
+            server_result = ServerResult(
+                host=original_host,
+                well_known_host=well_known_host,
+                port=well_known_port if well_known_port else "8448",
+                host_header=host_header,
+                sni_server_name=well_known_host,
+                diag_info=diag_info,
+            )
+            return server_result
+
+        if well_known_port:
+            # A port was found, and since we are here that means that host was not
+            # None. Go with it
+
+            # Step 3b, same as Step 2 above
+            # HOST header should be the result of the well_known
+            # request(including port)
+            diag_info.mark_step_num(
+                "Step 3.2", "Checking Well-Known Host for explicit Port"
+            )
+
+            # Because of our explicit conditional above
+            diag_info.add(f"Explicit port found: {well_known_port}")
+
+            (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
+                well_known_host, diag_info=diag_info
+            )
+            host_header = f"{well_known_host}:{well_known_port}"
+
+            server_result = ServerResult(
+                host=original_host,
+                well_known_host=well_known_host,
+                port=well_known_port,
+                host_header=host_header,
+                sni_server_name=well_known_host,
+                diag_info=diag_info,
+            )
+            return server_result
+
+        # Step 3c(and 3d), check SRV records then resolve regular DNS
+        # records, except for CNAME. Still no explicit port.
+        # HOST header should be the well_known host only, no port
+        diag_info.mark_step_num(
+            "Step 3.3(and 3.4)",
+            "Checking for SRV records of host from Well-Known",
+        )
+        srv_host, srv_port, diag_info = await self.check_dns_for_srv_records(
+            well_known_host, diag_info=diag_info
+        )
+
+        if srv_host and srv_port:
+            # SRV records should always have a port, that is literally
+            # their purpose
+            (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
+                srv_host, check_cname=False, diag_info=diag_info
+            )
+
+            server_result = ServerResult(
+                host=original_host,
+                well_known_host=well_known_host,
+                srv_host=srv_host,
+                port=srv_port,
+                host_header=well_known_host,
+                sni_server_name=well_known_host,
+                diag_info=diag_info,
+            )
+            return server_result
+
+        # Step 3e, no SRV records and no explicit port, use well-known with
+        # implied port 8448
+        # HOST header should be the well_known host, no port
+        diag_info.mark_step_num(
+            "Step 3.5",
+            "Checking for implied port 8448 of host from Well-Known",
+        )
+
+        (
+            _,
+            _,
+            _,
+            diag_info,
+        ) = await self.check_dns_for_reg_records(well_known_host, diag_info=diag_info)
+
+        server_result = ServerResult(
+            host=original_host,
+            well_known_host=well_known_host,
+            port="8448",
+            host_header=well_known_host,
+            sni_server_name=well_known_host,
+            diag_info=diag_info,
+        )
+        return server_result
+
     async def handle_delegation(
         self,
         server_name: str,
@@ -435,142 +611,48 @@ class DelegationHandler:
         # Spec step 3: Well-Known pre-parsing
         diag_info.mark_step_num("Step 3", "Well-Known")
 
-        response: FederationBaseResponse = await fed_req_callback(
-            destination_server_name=host,
-            path="/.well-known/matrix/server",
-            skip_discovery=True,
-            diagnostics=True,
-            timeout_seconds=3.0,
+        # Borrow our FederationHandler error handling to make this request
+        content = await self.make_well_known_request(
+            request_cb=fed_req_callback,
+            host=host,
+            diag_info=diag_info,
         )
 
-        diag_info.append_from(response.errors)
+        if not content:
+            diag_info.add("No usable data in response")
 
-        # If host is None, this well-known was no good, pull from diag_info to find out
-        # if it was not there, or had an error.
-        # If port is None, then check SRV record
-        # _parse_and_check_well_known_response() will mark the diag_info for us.
-        (
-            well_known_host,
-            well_known_port,
-            diag_info,
-        ) = _parse_and_check_well_known_response(response=response, diag_info=diag_info)
-
-        if not well_known_host:
-            if diag_info.well_known_test_status == ResponseStatusType.NONE:
-                # There is actually nothing to do here, so ride the conditional to the
-                # next section
-                pass
-            elif diag_info.well_known_test_status == ResponseStatusType.ERROR:
-                # There is nothing to do here either, but leave this condition in place
-                # so as to highlight the explicitness(and allow for additional
-                # processing later, maybe)
-                pass
-            # The else that would other wise be here is for ResponseStatusType.OK, but
-            # since well_known_host returned None it doesn't exist. Effectively skipping
-            # the next section to move down to Step 4 and beyond.
+        # If there is content, then something came back. Find out if it's useful or not
         else:
-            # Step 3.1 Literal IP
-            # Same as Step 1 except use well-known discovered values
-            # (imply port 8448, if port was not included)
-            # HOST header should be the result of the well_known
-            # request(including port)
-            diag_info.mark_step_num("Step 3.1", "Checking Well-Known for Literal IP")
-            if is_this_an_ip_address(well_known_host):
-                host_header = f"{well_known_host}:{well_known_port or '8448'}"
+            # If host is None, this well-known was no good, pull from diag_info to find out
+            # if it was not there, or had an error.
+            # If port is None, then check SRV record
+            # _parse_and_check_well_known_response() will mark the diag_info for us.
+            (well_known_host, well_known_port,) = _parse_and_check_well_known_response(
+                response=content, diag_info=diag_info
+            )
 
-                diag_info.add(
-                    f"Host defined in Well-Known was Literal IP {host_header}"
-                )
-                diag_info.mark_well_known_maybe_found()
-                server_result = ServerResult(
-                    host=host,
+            if not well_known_host:
+                if diag_info.well_known_test_status == ResponseStatusType.NONE:
+                    # There is actually nothing to do here, so ride the conditional to the
+                    # next section
+                    pass
+                elif diag_info.well_known_test_status == ResponseStatusType.ERROR:
+                    # There is nothing to do here either, but leave this condition in place
+                    # so as to highlight the explicitness(and allow for additional
+                    # processing later, maybe)
+                    pass
+                # The else that would other wise be here is for ResponseStatusType.OK, but
+                # since well_known_host returned None it doesn't exist. Effectively skipping
+                # the next section to move down to Step 4 and beyond.
+            else:
+                server_result = await self.handle_well_known_delegation(
+                    original_host=host,
                     well_known_host=well_known_host,
-                    port=well_known_port if well_known_port else "8448",
-                    host_header=host_header,
-                    sni_server_name=well_known_host,
+                    well_known_port=well_known_port,
                     diag_info=diag_info,
                 )
                 return server_result
-
-            if well_known_port:
-                # A port was found, and since we are here that means that host was not
-                # None. Go with it
-
-                # Step 3b, same as Step 2 above
-                # HOST header should be the result of the well_known
-                # request(including port)
-                diag_info.mark_step_num(
-                    "Step 3.2", "Checking Well-Known Host for explicit Port"
-                )
-
-                # Because of our explicit conditional above
-                diag_info.add(f"Explicit port found: {well_known_port}")
-
-                (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                    well_known_host, diag_info=diag_info
-                )
-                host_header = f"{well_known_host}:{well_known_port}"
-
-                server_result = ServerResult(
-                    host=host,
-                    well_known_host=well_known_host,
-                    port=well_known_port,
-                    host_header=host_header,
-                    sni_server_name=well_known_host,
-                    diag_info=diag_info,
-                )
-                return server_result
-
-            # Step 3c(and 3d), check SRV records then resolve regular DNS
-            # records, except for CNAME. Still no explicit port.
-            # HOST header should be the well_known host only, no port
-            diag_info.mark_step_num(
-                "Step 3.3(and 3.4)",
-                "Checking for SRV records of host from Well-Known",
-            )
-            srv_host, srv_port, diag_info = await self.check_dns_for_srv_records(
-                well_known_host, diag_info=diag_info
-            )
-
-            if srv_host and srv_port:
-                # SRV records should always have a port, that is literally
-                # their purpose
-                (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                    srv_host, check_cname=False, diag_info=diag_info
-                )
-
-                server_result = ServerResult(
-                    host=host,
-                    well_known_host=well_known_host,
-                    srv_host=srv_host,
-                    port=srv_port,
-                    host_header=well_known_host,
-                    sni_server_name=well_known_host,
-                    diag_info=diag_info,
-                )
-                return server_result
-
-            # Step 3e, no SRV records and no explicit port, use well-known with
-            # implied port 8448
-            # HOST header should be the well_known host, no port
-            diag_info.mark_step_num(
-                "Step 3.5",
-                "Checking for implied port 8448 of host from Well-Known",
-            )
-
-            (_, _, _, diag_info,) = await self.check_dns_for_reg_records(
-                well_known_host, diag_info=diag_info
-            )
-
-            server_result = ServerResult(
-                host=host,
-                well_known_host=well_known_host,
-                port="8448",
-                host_header=well_known_host,
-                sni_server_name=well_known_host,
-                diag_info=diag_info,
-            )
-            return server_result
+        # diag_info.append_from(response.errors)
 
         # So well-known was a bust, move on to SRV records
         # Step 4 and 5(the deprecated SRV)

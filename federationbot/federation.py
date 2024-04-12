@@ -55,6 +55,8 @@ from federationbot.server_result import (
 from federationbot.types import KeyContainer, KeyID, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
+SOCKET_TIMEOUT_SECONDS = 1.0
+
 
 class FederationHandler:
     def __init__(
@@ -179,7 +181,7 @@ class FederationHandler:
             # connect should be None, as sock_connect is behavior intended
             connect=None,
             # This is the most useful for detecting bad servers
-            sock_connect=1.0,
+            sock_connect=SOCKET_TIMEOUT_SECONDS,
             # This is the one that may have the longest time, as we wait for a server to send a response
             sock_read=timeout_seconds,
             # defaults to 5, for roundups on timeouts
@@ -245,11 +247,18 @@ class FederationHandler:
         # Pretty sure will never hit this one either, as it's not enforced here
         # except client_exceptions.ContentTypeError:
 
-        except (client_exceptions.ServerTimeoutError, asyncio.TimeoutError) as e:
+        except client_exceptions.ServerTimeoutError as e:
             self.logger.warning(
                 f"raising {e.__class__.__name__}: {destination_server_name}: {e}"
             )
-            # TODO: investigate if aiohttp.client has options to tweak responses from timeouts
+            raise PluginTimeout(
+                e.__class__.__name__,
+                f"{e.__class__.__name__} after {SOCKET_TIMEOUT_SECONDS} seconds",
+            ) from e
+        except asyncio.TimeoutError as e:
+            self.logger.warning(
+                f"raising {e.__class__.__name__}: {destination_server_name}: {e}"
+            )
             raise PluginTimeout(
                 e.__class__.__name__,
                 f"{e.__class__.__name__} after {timeout_seconds} seconds",
@@ -311,8 +320,8 @@ class FederationHandler:
             FederationBaseResponse: Either a Base or Error variant
         """
         result_dict: Dict[str, Any] = {}
-        error_reason: Optional[str] = None
-        code = 0
+        # error_reason: Optional[str] = None
+        # code = 0
         headers = None
         diag_info = DiagnosticInfo(diagnostics)
         request_info = None
@@ -348,7 +357,7 @@ class FederationHandler:
                 )
                 server_result = await self.delegation_handler.handle_delegation(
                     destination_server_name,
-                    self.federation_request,
+                    self._federation_request,
                     diag_info=diag_info,
                 )
 
@@ -390,42 +399,44 @@ class FederationHandler:
 
                 diag_info.add(f"Request status: code:{code}, reason: {reason}")
 
-                try:
-                    result_dict = await response.json()
-
-                except client_exceptions.ContentTypeError:
-                    diag_info.error(
-                        "Response had Content-Type: "
-                        f"{response.headers.get('Content-Type', 'None Found')}"
-                    )
-                    diag_info.add(
-                        "Expected Content-Type of 'application/json', will try "
-                        "work-around"
-                    )
-
-                # Sometimes servers don't have their well-known(or other things)
-                # set to return a content-type of `application/json`, try and
-                # handle it.
-                if not result_dict:
+                if 199 < code < 499:
                     try:
-                        result = await response.text()
-                        result_dict = self.json_decoder.decode(result)
-                    except json.decoder.JSONDecodeError:
-                        # if debug:
-                        #     self.logger.info(f"original result: {result}")
-                        diag_info.error("JSONDecodeError, work-around failed")
-                        error_reason = "No/bad JSON returned"
+                        result_dict = await response.json()
 
-                if not result_dict:
-                    diag_info.add("No usable data in response")
+                    except client_exceptions.ContentTypeError:
+                        diag_info.error(
+                            f"Response had Content-Type: {response.headers.get('Content-Type', 'None Found')}"
+                        )
+                        diag_info.add(
+                            "Expected Content-Type of 'application/json', will try work-around"
+                        )
+
+                    # Sometimes servers don't have their well-known(or other things)
+                    # set to return a content-type of `application/json`, try and
+                    # handle it.
+                    if not result_dict:
+                        try:
+                            result = await response.text()
+                            result_dict = self.json_decoder.decode(result)
+
+                        except json.decoder.JSONDecodeError:
+                            diag_info.error("JSONDecodeError, work-around failed")
+                            error_reason = "No/bad JSON returned"
+
+                    if not result_dict:
+                        diag_info.add("No usable data in response")
 
         # The request is complete. If the server wasn't reachable, the code
         # will be 0. Save the ServerResult in the cache, so repeatedly trying to reach a server
         # that will not respond isn't a drain on resources. Unhealthy results will be filtered
         # out at the beginning of this function.
         if not server_result:
+            # TODO: can probably lose this conditional now
             # This will be hit when checking for well-known, it gives us an initial
             # ServerResult to base further queries on. Don't save it in the cache
+            self.logger.warning(
+                f"HIT condition watching for: {destination_server_name}"
+            )
             host, port = check_and_maybe_split_server_name(destination_server_name)
 
             server_result = ServerResult(
