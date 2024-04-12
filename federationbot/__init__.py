@@ -30,6 +30,7 @@ from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
 from federationbot.controllers import ReactionTaskController
+from federationbot.errors import MatrixError
 from federationbot.events import (
     CreateRoomStateEvent,
     Event,
@@ -51,6 +52,7 @@ from federationbot.responses import (
     FederationErrorResponse,
     FederationServerKeyResponse,
     FederationVersionResponse,
+    MakeJoinResponse,
     ServerVerifyKeys,
 )
 from federationbot.server_result import DiagnosticInfo, ServerResultError
@@ -189,11 +191,10 @@ class FederationBot(Plugin):
             for server, key_data in self.config["server_signing_keys"].items():
                 self.server_signing_keys[server] = key_data
         self.federation_handler = FederationHandler(
-            self.http,
-            self.log,
-            self.client.mxid,
-            self.server_signing_keys,
-            self.reaction_task_controller,
+            logger=self.log,
+            bot_mxid=self.client.mxid,
+            server_signing_keys=self.server_signing_keys,
+            task_controller=self.reaction_task_controller,
         )
 
     async def pre_stop(self) -> None:
@@ -1595,9 +1596,7 @@ class FederationBot(Plugin):
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
-            event_id_in_timeline=head_data.response_dict.get("event", {}).get(
-                "prev_events", []
-            )[0],
+            event_id_in_timeline=head_data.prev_events[0],
         )
 
         good_host_list: List[str] = []
@@ -1617,7 +1616,14 @@ class FederationBot(Plugin):
         #   you've passed the 5th one that didn't have it.
         await command_event.respond("Hunting for event on list of good hosts")
 
-        room_version_of_found_event = 0
+        room_version_of_found_event = head_data.room_version
+        if not room_version_of_found_event:
+            room_version_of_found_event = int(
+                await self.federation_handler.discover_room_version(
+                    origin_server, destination_server, room_id
+                )
+            )
+
         list_of_server_and_event_id_to_send = []
         event_ids_to_try_next: Queue[str] = Queue()
         event_ids_to_try_next.put_nowait(event_id)
@@ -1637,12 +1643,6 @@ class FederationBot(Plugin):
             for server_name, event_base in server_to_event_result_map.items():
                 # But first, verify the events are valid
                 if isinstance(event_base, Event):
-                    if not room_version_of_found_event:
-                        room_version_of_found_event = int(
-                            await self.federation_handler.discover_room_version(
-                                origin_server, server_name, event_base.room_id
-                            )
-                        )
                     await self.federation_handler.verify_signatures_and_annotate_event(
                         event_base, room_version_of_found_event
                     )

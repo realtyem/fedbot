@@ -150,3 +150,14 @@ class FederationServerKeyResponse(FederationBaseResponse):
             list_of_errors=base_response.errors,
             headers=base_response.headers,
         )
+
+
+@dataclass
+class MakeJoinResponse:
+    """
+    Parsed data from a make_join request
+    """
+
+    room_version: int
+    prev_events: List[str]
+    auth_events: List[str]

@@ -2,10 +2,15 @@ from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, 
 from asyncio import Queue
 import asyncio
 import json
-import ssl
 import time
 
-from aiohttp import ClientResponse, ClientSession, client_exceptions
+from aiohttp import (
+    ClientResponse,
+    ClientSession,
+    ClientTimeout,
+    TCPConnector,
+    client_exceptions,
+)
 from mautrix.types import EventID
 from mautrix.util.logging import TraceLogger
 from signedjson.key import decode_signing_key_base64, decode_verify_key_bytes
@@ -18,7 +23,13 @@ from federationbot.delegation import (
     DelegationHandler,
     check_and_maybe_split_server_name,
 )
-from federationbot.errors import MatrixError, ServerUnreachable
+from federationbot.errors import (
+    FedBotException,
+    MatrixError,
+    PluginTimeout,
+    ServerSSLException,
+    ServerUnreachable,
+)
 from federationbot.events import (
     Event,
     EventBase,
@@ -32,6 +43,7 @@ from federationbot.responses import (
     FederationErrorResponse,
     FederationServerKeyResponse,
     FederationVersionResponse,
+    MakeJoinResponse,
     ServerVerifyKeys,
 )
 from federationbot.server_result import (
@@ -47,13 +59,15 @@ from federationbot.utils import full_dict_copy, get_domain_from_id
 class FederationHandler:
     def __init__(
         self,
-        http_client: ClientSession,
         logger: TraceLogger,
         bot_mxid: str,
         server_signing_keys: Dict[str, str],
         task_controller: ReactionTaskController,
     ):
-        self.http_client = http_client
+        # TODO: Make a custom Resolver to handle server discovery
+        self.http_client = ClientSession(
+            connector=TCPConnector(keepalive_timeout=60, limit=1000, limit_per_host=3)
+        )
         self.logger = logger
         self.hosting_server = get_domain_from_id(bot_mxid)
         self.bot_mxid = bot_mxid
@@ -64,7 +78,9 @@ class FederationHandler:
         # Map the key to (server_name, event_id) -> Event
         self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
         # Map this cache to server_name -> ServerResult
-        self._server_discovery_cache: LRUCache[str, ServerResult] = LRUCache()
+        self._server_discovery_cache: LRUCache[str, ServerResult] = LRUCache(
+            expire_after_seconds=60 * 30
+        )
         self._server_keys_cache: LRUCache[str, ServerVerifyKeys] = LRUCache()
         self.room_version_cache: LRUCache[str, int] = LRUCache(
             expire_after_seconds=float(60 * 60 * 6),
@@ -77,6 +93,7 @@ class FederationHandler:
         await self._server_discovery_cache.stop()
         await self._server_keys_cache.stop()
         await self.room_version_cache.stop()
+        await self.http_client.close()
 
     async def _federation_request(
         self,
@@ -117,10 +134,10 @@ class FederationHandler:
         # the most likely port based on the scheme. Sounds handy, use that.
         if server_result:
             if server_result.unhealthy:
-                # If this server was attempted at some point and errored, there is no
-                # point trying again until the cache entry is replaced.
-                raise ServerUnreachable(f"{server_result.unhealthy}")
-
+                raise ServerUnreachable(
+                    f"{server_result.unhealthy}",
+                    "Server was previously unreachable",
+                )
             destination_port = int(server_result.port)
             resolved_destination_server = server_result.get_host()
             server_hostname_sni = (
@@ -156,17 +173,104 @@ class FederationHandler:
                 content=content,
             )
 
+        client_timeouts = ClientTimeout(
+            # Don't limit the total connection time, as incremental reads are handled distinctly by sock_read
+            total=None,
+            # connect should be None, as sock_connect is behavior intended
+            connect=None,
+            # This is the most useful for detecting bad servers
+            sock_connect=1.0,
+            # This is the one that may have the longest time, as we wait for a server to send a response
+            sock_read=timeout_seconds,
+            # defaults to 5, for roundups on timeouts
+            # ceil_threshold=5.0,
+        )
         try:
             response = await self.http_client.request(
                 method=method,
                 url=url_object,
                 headers=request_headers,
-                timeout=timeout_seconds,
+                timeout=client_timeouts,
                 server_hostname=server_hostname_sni,
                 json=content,
             )
-        except Exception as e:
-            raise e
+
+        # Split the different exceptions up based on where the information is extracted from
+        except client_exceptions.ClientConnectorCertificateError as e:
+            # This is one of the errors I found while probing for SNI TLS
+            self.logger.warning(
+                f"raising {e.__class__.__name__}: {destination_server_name}: {e.certificate_error}"
+            )
+            raise ServerSSLException(  # pylint: disable=bad-exception-cause
+                e.__class__.__name__, str(e.certificate_error)
+            ) from e
+
+        except (
+            client_exceptions.ClientConnectorSSLError,
+            client_exceptions.ClientSSLError,
+        ) as e:
+            self.logger.warning(
+                f"raising {e.__class__.__name__}: {destination_server_name}: {e.strerror}"
+            )
+            # This is one of the errors I found while probing for SNI TLS
+            raise ServerSSLException(e.__class__.__name__, e.strerror) from e
+
+        except (
+            # e is an OSError, may have e.strerror, possibly e.os_error.strerror
+            client_exceptions.ClientProxyConnectionError,
+            # e is an OSError, may have e.strerror, possibly e.os_error.strerror
+            client_exceptions.ClientConnectorError,
+            # e is an OSError, may have e.strerror
+            client_exceptions.ClientOSError,
+        ) as e:
+            # self.logger.warning(f"raising {e.__class__.__name__}: {e.strerror}")
+            if getattr(e, "os_error"):
+                raise FedBotException(
+                    e.__class__.__name__, e.os_error.strerror  # type: ignore[attr-defined]
+                ) from e
+
+            raise FedBotException(e.__class__.__name__, e.strerror) from e
+
+        except (
+            client_exceptions.ClientHttpProxyError,  # e.message
+            client_exceptions.ClientResponseError,  # e.message, base class, possibly e.status too
+            client_exceptions.ServerDisconnectedError,  # e.message
+        ) as e:
+            raise FedBotException(e.__class__.__name__, str(e.message)) from e
+
+        # except client_exceptions.ConnectionTimeoutError as e:
+        # except client_exceptions.SocketTimeoutError as e:
+        # except client_exceptions.WSServerHandshakeError:
+
+        # Pretty sure will never hit this one either, as it's not enforced here
+        # except client_exceptions.ContentTypeError:
+
+        except (client_exceptions.ServerTimeoutError, asyncio.TimeoutError) as e:
+            self.logger.warning(
+                f"raising {e.__class__.__name__}: {destination_server_name}: {e}"
+            )
+            # TODO: investigate if aiohttp.client has options to tweak responses from timeouts
+            raise PluginTimeout(
+                e.__class__.__name__,
+                f"{e.__class__.__name__} after {timeout_seconds} seconds",
+            ) from e
+
+        except (
+            ServerUnreachable,
+            ConnectionRefusedError,
+            client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
+            client_exceptions.InvalidURL,  # e.url
+            client_exceptions.ClientPayloadError,  # e
+            client_exceptions.ServerConnectionError,  # e
+            client_exceptions.ClientConnectionError,  # e
+            client_exceptions.ClientError,  # e
+            Exception,  # e
+        ) as e:
+            self.logger.info(
+                f"federation_request: General Exception: for {destination_server_name}"
+                f":\n {e}"
+            )
+            raise FedBotException(e.__class__.__name__, str(e)) from e
 
         return response
 
@@ -214,30 +318,50 @@ class FederationHandler:
         request_info = None
         server_result = None
 
+        now = time.time()
+
         # If the server is delegated in some way, this will take care of making sure we
         # get a usable host:port
         if not skip_discovery:
             server_result = self._server_discovery_cache.get(destination_server_name)
-            if not server_result or server_result.unhealthy or force_rediscover:
-                # self.logger.warning(
-                #     f"cache entry not found for {destination_server_name}"
-                # )
+
+            # Either no ServerResult, or forcing rediscovery, OR
+            # had a ServerResult but it was unhealthy and last time it was accessed was more than 5 minutes ago
+            # then try and reload the ServerResult
+            if (
+                not server_result
+                or force_rediscover
+                or (
+                    server_result.unhealthy
+                    and now
+                    - self._server_discovery_cache._cache[
+                        destination_server_name
+                    ].last_access_time_ms
+                    > 5 * 60
+                )
+            ):
+                # If this server was attempted at some point and errored, there is no
+                # point trying again until the cache entry is replaced.
+
+                self.logger.debug(
+                    f"Running server discovery for {destination_server_name}"
+                )
                 server_result = await self.delegation_handler.handle_delegation(
                     destination_server_name,
                     self.federation_request,
                     diag_info=diag_info,
                 )
 
-        try:
-            if server_result:
-                # self.logger.info(
-                #     f"Making real federation request: {destination_server_name}"
-                # )
-                # These only get filled in when diagnostics is True
-                # This will add the word "Checking: " to the front of "Connectivity"
-                diag_info.mark_step_num("Connectivity")
-                diag_info.add(f"Making request to {server_result.get_host()}{path}")
+        if server_result:
+            # self.logger.info(
+            #     f"Making real federation request: {destination_server_name}"
+            # )
+            # These only get filled in when diagnostics is True
+            # This will add the word "Checking: " to the front of "Connectivity"
+            diag_info.mark_step_num("Connectivity")
+            diag_info.add(f"Making request to {server_result.get_host()}{path}")
 
+        try:
             response = await self._federation_request(
                 destination_server_name=destination_server_name,
                 path=path,
@@ -248,110 +372,11 @@ class FederationHandler:
                 content=content,
                 timeout_seconds=timeout_seconds,
             )
-
-        except ConnectionRefusedError:
-            diag_info.error("ConnectionRefusedError")
-            error_reason = "ConnectionRefusedError"
-
-        except client_exceptions.ClientConnectorCertificateError as e:
-            assert isinstance(e._certificate_error, ssl.SSLError)
-            diag_info.error(f"SSL Certificate Error, {e._certificate_error.reason}")
-            error_reason = f"SSL Certificate Error, {e._certificate_error.reason}"
-            # This is one of the two errors I found while probing for SNI TLS
-            code = -1
-
-        except client_exceptions.ClientConnectorSSLError as e:
-            diag_info.error(f"Client Connector SSL Error, {e}")
-            error_reason = f"Client Connector SSL Error, {e}"
-            code = -1
-
-        except client_exceptions.ServerDisconnectedError:
-            diag_info.error("Server Disconnect Error")
-            error_reason = "Server Disconnect Error"
-
-        # except client_exceptions.ConnectionTimeoutError as e:
-
-        # except client_exceptions.SocketTimeoutError as e:
-
-        except client_exceptions.ServerTimeoutError:
-            diag_info.error("Server Timeout Error")
-            error_reason = "Server Timeout Error"
-
-        except client_exceptions.ServerFingerprintMismatch:
-            diag_info.error("Server Fingerprint Mismatch Error")
-            error_reason = "Server Fingerprint Mismatch Error"
-
-        except client_exceptions.ServerConnectionError:
-            diag_info.error("Server Connection Error")
-            error_reason = "ServerConnectionError"
-
-        except client_exceptions.ClientSSLError as e:
-            diag_info.error(f"ClientSSLError: {e.strerror}")
-            error_reason = f"Client SSL Error: {e.strerror}"
-            # This is one of the errors I found while probing for SNI TLS
-            code = -1
-
-        except client_exceptions.ClientProxyConnectionError:
-            diag_info.error("Client Proxy Connection Error")
-            error_reason = "Client Proxy Connection Error"
-
-        except client_exceptions.ClientConnectorError as e:
-            # code = 0
-            diag_info.error(f"ClientConnectorError: {e.strerror}")
-            error_reason = f"Client Connector Error: {e.strerror}"
-
-        except client_exceptions.ClientHttpProxyError:
-            diag_info.error("Client HTTP Proxy Error")
-            error_reason = "Client HTTP Proxy Error"
-
-        except client_exceptions.WSServerHandshakeError:
-            # Not sure this one will ever be used...
-            pass
-        except client_exceptions.ContentTypeError:
-            # Pretty sure will never hit this one either, as it's not enforced here
-            diag_info.error("Content Type Error")
-            error_reason = "Content Type Error"
-        except client_exceptions.ClientResponseError:
-            diag_info.error("Client Response Error")
-            error_reason = "Client Response Error"
-
-        except client_exceptions.ClientPayloadError:
-            diag_info.error("Client Payload Error")
-            error_reason = "Client Payload Error"
-
-        except client_exceptions.InvalidURL:
-            diag_info.error("InvalidURL Error")
-            error_reason = "InvalidURL Error"
-
-        except client_exceptions.ClientOSError:
-            diag_info.error("Client OS Error")
-            error_reason = "Client OS Error"
-
-        except client_exceptions.ClientConnectionError:
-            diag_info.error("Client Connection Error")
-            error_reason = "Client Connection Error"
-
-        except client_exceptions.ClientError:
-            diag_info.error("Client Error")
-            error_reason = "Client Error"
-
-        except ServerUnreachable as e:
-            diag_info.error(f"{e}")
-            error_reason = f"{e}"
-
-        except asyncio.TimeoutError:
-            diag_info.error(
-                "TimeoutError, this server probably doesn't exist(or is taking to long)"
-            )
-            error_reason = "Timed out. Is this server online?"
-        except Exception as e:
-            self.logger.info(
-                f"federation_request: General Exception: for {destination_server_name}"
-                f":\n {e}"
-            )
-            diag_info.error(f"General Exception: {e}")
-            error_reason = "General Exception"
-
+        except FedBotException as e:
+            # All the inner exceptions that can be raised are given a code of 0, representing an outside error
+            code = 0
+            error_reason = str(e.summary_exception)
+            diag_info.error(str(e.long_exception))
         else:
             # The server was responsive, but may not have returned something useful
             async with response:
@@ -394,46 +419,46 @@ class FederationHandler:
                 if not result_dict:
                     diag_info.add("No usable data in response")
 
-        finally:
-            # The request is complete. If the server wasn't actually there, the code
-            # will be <= 0. Anything higher means the server result can be cached, as it
-            # means a successful contact.
-            if not server_result:
-                # This will be hit when checking for well-known, it gives us an initial
-                # ServerResult to base further queries on. Don't save it in the cache
-                host, port = check_and_maybe_split_server_name(destination_server_name)
+        # The request is complete. If the server wasn't reachable, the code
+        # will be 0. Save the ServerResult in the cache, so repeatedly trying to reach a server
+        # that will not respond isn't a drain on resources. Unhealthy results will be filtered
+        # out at the beginning of this function.
+        if not server_result:
+            # This will be hit when checking for well-known, it gives us an initial
+            # ServerResult to base further queries on. Don't save it in the cache
+            host, port = check_and_maybe_split_server_name(destination_server_name)
 
-                server_result = ServerResult(
-                    host=host, port=port if port else "", diag_info=diag_info
-                )
+            server_result = ServerResult(
+                host=host, port=port if port else "", diag_info=diag_info
+            )
 
-            else:
-                server_result.unhealthy = error_reason if code <= 0 else None
-                # self.logger.warning(f"saving {server_result.host} to cache")
-                self._server_discovery_cache.set(server_result.host, server_result)
+        else:
+            server_result.unhealthy = error_reason if code <= 0 else None
+            # self.logger.warning(f"saving {server_result.host} to cache")
+            self._server_discovery_cache.set(server_result.host, server_result)
 
-            if code != 200:
-                diag_info.error(f"Request to {path} failed")
-                return FederationErrorResponse(
-                    code,
-                    error_reason,
-                    response_dict=result_dict,
-                    server_result=server_result,
-                    list_of_errors=diag_info.list_of_results,
-                    headers=headers,
-                    request_info=request_info,
-                )
-            else:
-                # Don't need a success diagnostic message here, the one above works fine
-                return FederationBaseResponse(
-                    code,
-                    reason,
-                    response_dict=result_dict,
-                    server_result=server_result,
-                    list_of_errors=diag_info.list_of_results,
-                    headers=headers,
-                    request_info=request_info,
-                )
+        if code != 200:
+            diag_info.error(f"Request to {path} failed")
+            return FederationErrorResponse(
+                code,
+                error_reason,
+                response_dict=result_dict,
+                server_result=server_result,
+                list_of_errors=diag_info.list_of_results,
+                headers=headers,
+                request_info=request_info,
+            )
+
+        # Don't need a success diagnostic message here, the one above works fine
+        return FederationBaseResponse(
+            code,
+            reason,
+            response_dict=result_dict,
+            server_result=server_result,
+            list_of_errors=diag_info.list_of_results,
+            headers=headers,
+            request_info=request_info,
+        )
 
     async def get_server_version(
         self,
@@ -466,8 +491,8 @@ class FederationHandler:
 
         if isinstance(response, FederationErrorResponse):
             return response
-        else:
-            return FederationVersionResponse.from_response(response)
+
+        return FederationVersionResponse.from_response(response)
 
     async def _get_server_keys(
         self, server_name: str, timeout: float = 10.0
@@ -480,8 +505,8 @@ class FederationHandler:
         )
         if isinstance(response, FederationErrorResponse):
             raise MatrixError(response.status_code, response.reason)
-        else:
-            return FederationServerKeyResponse.from_response(response)
+
+        return FederationServerKeyResponse.from_response(response)
 
     async def get_server_keys(
         self, server_name: str, timeout: float = 10.0
@@ -734,12 +759,10 @@ class FederationHandler:
             while True:
                 worker_event_id: str = await queue.get()
                 try:
-                    event_base_dict = await asyncio.wait_for(
-                        self.get_event_from_server(
-                            origin_server=origin_server,
-                            destination_server=destination_server,
-                            event_id=worker_event_id,
-                        ),
+                    event_base_dict = await self.get_event_from_server(
+                        origin_server=origin_server,
+                        destination_server=destination_server,
+                        event_id=worker_event_id,
                         timeout=timeout,
                     )
 
@@ -749,7 +772,7 @@ class FederationHandler:
                         {"error": "Request Timed Out", "errcode": "Timeout err"},
                     )
                     event_to_event_base[worker_event_id] = error_event
-                except Exception as e:
+                except FedBotException as e:
                     error_event = EventError(
                         EventID(worker_event_id),
                         {"error": f"{e}", "errcode": "Plugin error"},
@@ -770,7 +793,7 @@ class FederationHandler:
             await event_queue.put(event_id)
 
         tasks = []
-        for i in range(min(len(events_list), 3)):
+        for _ in range(min(len(events_list), 3)):
             task = asyncio.create_task(_get_event_worker(event_queue))
             tasks.append(task)
 
@@ -862,6 +885,10 @@ class FederationHandler:
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
+        if isinstance(response, FederationErrorResponse):
+            self.logger.debug(
+                f"  get_state_from_server: dest: {destination_server}: {response.status_code}: {response.reason}"
+            )
 
         pdus_list = response.response_dict.get("pdus", [])
         auth_chain_list = response.response_dict.get("auth_chain", [])
@@ -1046,13 +1073,11 @@ class FederationHandler:
             timeout=timeout,
         )
         if isinstance(response, FederationErrorResponse):
-            raise Exception(
-                f"{response.status_code}: {response.response_dict.get('errcode')}: {response.response_dict.get('error')}"
+            raise FedBotException(
+                f"{response.status_code}: {response.response_dict.get('errcode')}",
+                f"{response.status_code}: {response.response_dict.get('errcode')}: {response.response_dict.get('error')}",
             )
-        try:
-            room_version = int(response.response_dict.get("room_version"))
-        except Exception:
-            raise
+        room_version = response.room_version
 
         if room_version is not None:
             self.room_version_cache.set(room_id, room_version)
@@ -1104,12 +1129,17 @@ class FederationHandler:
         user_id: str,
         timeout: float = 10.0,
     ) -> FederationBaseResponse:
+        query_list = []
+        for i in range(0, 11):
+            query_list.extend([("ver", f"{i + 1}")])
+        # self.logger.info(f"make_join: dest: {destination_server}, {query_list}")
         response = await self.federation_request(
             destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
-            query_args={
-                "ver": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
-            },
+            query_args=query_list,
+            # query_args={
+            #     "ver": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+            # },
             timeout_seconds=timeout,
             origin_server=origin_server,
         )
@@ -1131,9 +1161,15 @@ class FederationHandler:
             timeout=timeout,
         )
         if isinstance(response, FederationErrorResponse):
-            return response
-        else:
-            return response
+            self.logger.warning(f"make_join: dest: {destination_server}:\n {response}")
+            raise MatrixError(response.status_code, response.reason)
+
+        room_version = response.response_dict.get("room_version")
+        prev_events = response.response_dict.get("event", {}).get("prev_events", [])
+        auth_events = response.response_dict.get("event", {}).get("auth_events", [])
+        return MakeJoinResponse(
+            room_version=room_version, prev_events=prev_events, auth_events=auth_events
+        )
 
 
 # https://spec.matrix.org/v1.9/server-server-api/#request-authentication
@@ -1180,35 +1216,27 @@ def authorization_headers(
         # 'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
         #
         # authorization_header = f'X-Matrix origin=\"{origin_name}\",key=\"{key}\",sig=\"{sig}\",destination=\"{destination_name}\"'
-        authorization_header = (
-            'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
-            % (
-                origin_name,
-                key,
-                sig,
-                destination_name,
-            )
-        )
+        authorization_header = f'X-Matrix origin="{origin_name}",key="{key}",sig="{sig}",destination="{destination_name}"'
 
     return authorization_header
 
 
 def filter_events_based_on_type(
-    events: List[EventBase], filter: str
+    events: List[EventBase], filter_by: str
 ) -> List[EventBase]:
     events_to_return = []
     for event in events:
-        if event.event_type == filter:
+        if event.event_type == filter_by:
             events_to_return.append(event)
     return events_to_return
 
 
 def filter_state_events_based_on_membership(
-    events: List[RoomMemberStateEvent], filter: str
+    events: List[RoomMemberStateEvent], filter_by: str
 ) -> List[RoomMemberStateEvent]:
     events_to_return = []
     for event in events:
-        if event.membership == filter:
+        if event.membership == filter_by:
             events_to_return.append(event)
     return events_to_return
 

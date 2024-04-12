@@ -1,10 +1,50 @@
+from typing import Optional
+
+
+class FedBotException(Exception):
+    """
+    Base class of all Exceptions in FedBot
+
+    Attributes:
+        summary_exception: A simple short explanation, usually whatever raised the original exception
+    """
+
+    summary_exception: str
+    long_exception: Optional[str]
+
+    def __init__(
+        self, summary_exception: str, long_exception: Optional[str] = None
+    ) -> None:
+        super().__init__(summary_exception, long_exception)
+        self.summary_exception = summary_exception
+        self.long_exception = long_exception
+
+
+class PluginTimeout(FedBotException):
+    """
+    A more specific type of asyncio.Timeout
+    """
+
+
+class BotConnectionError(FedBotException):
+    """
+    An error occurred while connecting
+    """
+
+
+class ServerSSLException(BotConnectionError):
+    """
+    The server has some kind of SSL error
+    """
+
+
 class MalformedServerNameError(Exception):
     """
     The server name had a scheme when it should not have(like 'https://' or 'http://')
     """
 
 
-class ServerUnreachable(Exception):
+class ServerUnreachable(FedBotException):
     """
     When the server was offline last time we checked, and we aren't trying them again
     for a while.
@@ -41,10 +81,12 @@ class MatrixError(Exception):
     """
 
     http_code: int
+    message: str
 
-    def __init__(self, http_code: int, reason: str) -> None:
-        super().__init__(reason)
+    def __init__(self, http_code: int, message: str) -> None:
+        super().__init__(message)
         self.http_code = http_code
+        self.message = message
 
 
 class MatrixNotFoundError(MatrixError):
@@ -80,4 +122,10 @@ class ReferenceKeyAlreadyExists(Exception):
 class ReferenceKeyNotFound(Exception):
     """
     The Reference Key was not found
+    """
+
+
+class EventKeyMissing(Exception):
+    """
+    The key needed from an Event was missing
     """
