@@ -24,6 +24,7 @@ class DiagnosticInfo:
     dns_test_status: ResponseStatusType
     dns_test_result: bool
     connection_test_status: ResponseStatusType
+    tls_handled_by: Optional[str]
 
     def __init__(self, enable_diagnostics: bool) -> None:
         self.diagnostics_enabled = enable_diagnostics
@@ -34,6 +35,7 @@ class DiagnosticInfo:
         self.dns_test_status = ResponseStatusType.NONE
         self.dns_test_result = False
         self.connection_test_status = ResponseStatusType.NONE
+        self.tls_handled_by = None
 
     def error(self, comment: str, front_pad: str = "   ") -> None:
         self.list_of_results.extend([f"{front_pad}{comment}"])
@@ -103,6 +105,7 @@ class ServerResult:
     error_reason: Optional[str]
     diag_info: DiagnosticInfo
     unhealthy: Optional[str] = None
+    retry_time_s: float = 0
     use_sni: bool = True
 
     def __init__(
