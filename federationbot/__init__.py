@@ -4233,6 +4233,160 @@ class FederationBot(Plugin):
                 message_id, command_event.room_id
             )
 
+    @fed_command.subcommand(name="publicrooms_raw")
+    @command.argument(name="target_server", required=False)
+    @command.argument(name="since", required=False)
+    async def publicrooms_raw_subcommand(
+        self,
+        command_event: MessageEvent,
+        target_server: Optional[str],
+        since: Optional[str],
+    ) -> None:
+        await command_event.mark_read()
+        if not target_server:
+            await command_event.reply("I need a target server to look at")
+            return
+
+        public_room_result = (
+            await self.federation_handler._get_public_rooms_from_server(
+                origin_server=None,
+                destination_server=target_server,
+                since=since,
+            )
+        )
+        await command_event.respond(
+            wrap_in_code_block_markdown(
+                json.dumps(public_room_result.json_response, indent=4)
+            )
+        )
+
+    @fed_command.subcommand(name="publicrooms")
+    @command.argument(name="target_server", required=False)
+    async def publicrooms_subcommand(
+        self, command_event: MessageEvent, target_server: Optional[str]
+    ) -> None:
+        await command_event.mark_read()
+        if not target_server:
+            await command_event.reply("I need a target server to look at")
+            return
+
+        # DisplayConfig objects, per column
+        alias_dc = DisplayLineColumnConfig("canonical_alias")
+        room_id_dc = DisplayLineColumnConfig("room_id")
+        name_dc = DisplayLineColumnConfig("name")
+        num_joined_members_dc = DisplayLineColumnConfig("num_joined_members")
+        join_rule_dc = DisplayLineColumnConfig("join_rule")
+        world_readable_dc = DisplayLineColumnConfig("world_readable")
+        guest_can_join_dc = DisplayLineColumnConfig("guest_can_join")
+        avatar_url_dc = DisplayLineColumnConfig("avatar_url")
+
+        done = False
+        since = None
+        collected_chunks_fragments = []
+        retry_count = 0
+        while not done:
+            public_room_result = (
+                await self.federation_handler._get_public_rooms_from_server(
+                    origin_server=None,
+                    destination_server=target_server,
+                    since=since,
+                )
+            )
+            if public_room_result.http_code != 200:
+                self.log.warning(
+                    f"Hit an error on public rooms: {public_room_result.http_code} {public_room_result.reason}"
+                )
+                if retry_count > 3:
+                    await command_event.respond(
+                        f"Hit an error on public rooms after {retry_count+1} retry attempts: {public_room_result.http_code}: {public_room_result.reason} on {target_server}"
+                    )
+                    return
+                retry_count += 1
+                await asyncio.sleep(3)
+                continue
+
+            since = public_room_result.json_response.get("next_batch", None)
+            self.log.info(f"Next batch: {since}")
+            if not since:
+                done = True
+
+            chunks: List[Dict[str, Any]] = public_room_result.json_response.get(
+                "chunk", []
+            )
+            for entry in chunks:
+                # self.log.info(f"chunk: {entry}")
+                alias = entry.get("canonical_alias", None)
+                room_id = entry.get("room_id", None)
+                name = entry.get("name", None)
+                num_joined_members = entry.get("num_joined_members", None)
+                join_rule = entry.get("join_rule", None)
+                world_readable = entry.get("world_readable", None)
+                guest_can_join = entry.get("guest_can_join", None)
+                avatar_url = entry.get("avatar_url", None)
+
+                alias_dc.maybe_update_column_width(alias)
+                room_id_dc.maybe_update_column_width(room_id)
+                name_dc.maybe_update_column_width(name)
+                # This next one gives up an int, which means the column will be huge. string it
+                num_joined_members_dc.maybe_update_column_width(str(num_joined_members))
+                join_rule_dc.maybe_update_column_width(join_rule)
+                world_readable_dc.maybe_update_column_width(world_readable)
+                guest_can_join_dc.maybe_update_column_width(guest_can_join)
+                avatar_url_dc.maybe_update_column_width(avatar_url)
+
+                collected_chunks_fragments.append(entry)
+            # TODO: after implementing auto-retry lose this
+            await asyncio.sleep(0.5)
+
+        list_of_buffered_lines = []
+        for chunk in collected_chunks_fragments:
+            alias = chunk.get("canonical_alias", "")
+            room_id = chunk.get("room_id", "")
+            name = chunk.get("name", "")
+            num_joined_members = chunk.get("num_joined_members", "")
+            join_rule = chunk.get("join_rule", "")
+            world_readable = chunk.get("world_readable", "")
+            guest_can_join = chunk.get("guest_can_join", "")
+            avatar_url = chunk.get("avatar_url", "")
+            list_of_buffered_lines.extend(
+                [
+                    f"{room_id_dc.pad(room_id)}: "
+                    f"{alias_dc.pad(alias)} "
+                    f"{name_dc.pad(name)} "
+                    f"{num_joined_members_dc.pad(num_joined_members)} "
+                    f"{join_rule_dc.pad(join_rule)} "
+                    f"{guest_can_join_dc.pad(guest_can_join)} "
+                    f"{world_readable_dc.pad(world_readable)} "
+                    f"{avatar_url_dc.pad(avatar_url)}"
+                ]
+            )
+
+        header_message = (
+            f"{room_id_dc.pad()}: "
+            f"{alias_dc.pad()} "
+            f"{name_dc.pad()} "
+            f"{num_joined_members_dc.pad()} "
+            f"{join_rule_dc.pad()} "
+            f"{guest_can_join_dc.pad()} "
+            f"{world_readable_dc.pad()} "
+            f"{avatar_url_dc.pad()}"
+        )
+        final_lines = combine_lines_to_fit_event(
+            list_of_buffered_lines, header_message, insert_new_lines=True
+        )
+        list_of_message_ids = []
+        for line in final_lines:
+            message_id = await command_event.respond(
+                make_into_text_event(
+                    wrap_in_code_block_markdown(line), ignore_body=True
+                )
+            )
+            list_of_message_ids.extend([message_id])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
+
     async def _resolve_room_id_or_alias(
         self,
         room_id_or_alias: Optional[str],
