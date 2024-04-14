@@ -16,16 +16,13 @@ from mautrix.util.logging import TraceLogger
 from signedjson.key import decode_signing_key_base64, decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, sign_json, verify_signed_json
 from yarl import URL
+import backoff
 
 from federationbot import ReactionTaskController
 from federationbot.cache import LRUCache
-from federationbot.delegation import (
-    DelegationHandler,
-    check_and_maybe_split_server_name,
-)
+from federationbot.delegation import DelegationHandler
 from federationbot.errors import (
     FedBotException,
-    MatrixError,
     PluginTimeout,
     ServerSSLException,
     ServerUnreachable,
@@ -39,23 +36,21 @@ from federationbot.events import (
     redact_event,
 )
 from federationbot.responses import (
-    FederationBaseResponse,
-    FederationErrorResponse,
-    FederationServerKeyResponse,
-    FederationVersionResponse,
     MakeJoinResponse,
+    MatrixError,
+    MatrixFederationResponse,
+    MatrixResponse,
+)
+from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
+from federationbot.types import (
+    KeyContainer,
+    KeyID,
     ServerVerifyKeys,
+    SignatureVerifyResult,
 )
-from federationbot.server_result import (
-    DiagnosticInfo,
-    ResponseStatusType,
-    ServerResult,
-    ServerResultError,
-)
-from federationbot.types import KeyContainer, KeyID, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
-SOCKET_TIMEOUT_SECONDS = 1.0
+SOCKET_TIMEOUT_SECONDS = 2.0
 
 
 class FederationHandler:
@@ -97,6 +92,12 @@ class FederationHandler:
         await self.room_version_cache.stop()
         await self.http_client.close()
 
+    @backoff.on_predicate(
+        backoff.runtime,
+        predicate=lambda r: r.status == 429,
+        value=lambda r: int(r.headers.get("Retry-After")),
+    )
+    @backoff.on_exception(backoff.expo, PluginTimeout, max_tries=3)
     async def _federation_request(
         self,
         destination_server_name: str,
@@ -146,7 +147,6 @@ class FederationHandler:
                 server_result.sni_server_name if server_result.use_sni else None
             )
             request_headers = {"Host": server_result.host_header}
-            # self.logger.info(f"{destination_server_name}, host: {server_result.host}, host_header: {server_result.host_header}, sni_server_name: {server_result.sni_server_name}")
 
         else:
             destination_port = None
@@ -200,9 +200,6 @@ class FederationHandler:
         # Split the different exceptions up based on where the information is extracted from
         except client_exceptions.ClientConnectorCertificateError as e:
             # This is one of the errors I found while probing for SNI TLS
-            self.logger.warning(
-                f"raising {e.__class__.__name__}: {destination_server_name}: {e.certificate_error}"
-            )
             raise ServerSSLException(  # pylint: disable=bad-exception-cause
                 e.__class__.__name__, str(e.certificate_error)
             ) from e
@@ -211,9 +208,6 @@ class FederationHandler:
             client_exceptions.ClientConnectorSSLError,
             client_exceptions.ClientSSLError,
         ) as e:
-            self.logger.warning(
-                f"raising {e.__class__.__name__}: {destination_server_name}: {e.strerror}"
-            )
             # This is one of the errors I found while probing for SNI TLS
             raise ServerSSLException(e.__class__.__name__, e.strerror) from e
 
@@ -225,8 +219,8 @@ class FederationHandler:
             # e is an OSError, may have e.strerror
             client_exceptions.ClientOSError,
         ) as e:
-            # self.logger.warning(f"raising {e.__class__.__name__}: {e.strerror}")
             if getattr(e, "os_error"):
+                # This gets type ignored, as it is defined but for some reason mypy can't figure that out
                 raise FedBotException(
                     e.__class__.__name__, e.os_error.strerror  # type: ignore[attr-defined]
                 ) from e
@@ -240,6 +234,7 @@ class FederationHandler:
         ) as e:
             raise FedBotException(e.__class__.__name__, str(e.message)) from e
 
+        # Save these other exceptions, as they might get revisited
         # except client_exceptions.ConnectionTimeoutError as e:
         # except client_exceptions.SocketTimeoutError as e:
         # except client_exceptions.WSServerHandshakeError:
@@ -248,9 +243,6 @@ class FederationHandler:
         # except client_exceptions.ContentTypeError:
 
         except client_exceptions.ServerTimeoutError as e:
-            self.logger.warning(
-                f"raising {e.__class__.__name__}: {destination_server_name}: {e}"
-            )
             raise PluginTimeout(
                 e.__class__.__name__,
                 f"{e.__class__.__name__} after {SOCKET_TIMEOUT_SECONDS} seconds",
@@ -289,13 +281,12 @@ class FederationHandler:
         path: str,
         query_args: Optional[Sequence[Tuple[str, Any]]] = None,
         method: str = "GET",
-        skip_discovery: bool = False,
         force_rediscover: bool = False,
         diagnostics: bool = False,
         timeout_seconds: float = 10.0,
         origin_server: Optional[str] = None,
         content: Optional[Dict[str, Any]] = None,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         """
         Retrieve json response from over federation. This outer-level function handles
         caching of server discovery processes and catching errors. Calls
@@ -307,7 +298,6 @@ class FederationHandler:
             path: The path component of the outgoing url
             query_args: the query component to send
             method: The method to use for the request: GET, PUT, etc
-            skip_discovery: if delegation checking should be skipped
             force_rediscover: in case we need to bypass the cache to redo server
                 discovery
             diagnostics: Collect diagnostic data. Errors are always collected
@@ -317,54 +307,34 @@ class FederationHandler:
             content: for non-GET requests, the Dict that will be transformed into json
                 to send
         Returns:
-            FederationBaseResponse: Either a Base or Error variant
+            MatrixResponse
         """
-        result_dict: Dict[str, Any] = {}
-        # error_reason: Optional[str] = None
-        # code = 0
-        headers = None
+        result_dict: Optional[Dict[str, Any]] = None
         diag_info = DiagnosticInfo(diagnostics)
-        request_info = None
-        server_result = None
-
+        server_result = self._server_discovery_cache.get(destination_server_name)
+        errcode: Optional[str] = None
+        error: Optional[str] = None
         now = time.time()
 
-        # If the server is delegated in some way, this will take care of making sure we
-        # get a usable host:port
-        if not skip_discovery:
-            server_result = self._server_discovery_cache.get(destination_server_name)
+        # Either no ServerResult, or
+        # forcing rediscovery, OR
+        # had a ServerResult, but it was unhealthy and requested retry time has passed
+        # then try and reload the ServerResult
+        if (
+            not server_result
+            or force_rediscover
+            or (server_result.unhealthy and server_result.retry_time_s < now)
+        ):
+            # If this server was attempted at some point and failed, there is no
+            # point trying again until the cache entry is replaced.
 
-            # Either no ServerResult, or forcing rediscovery, OR
-            # had a ServerResult but it was unhealthy and last time it was accessed was more than 5 minutes ago
-            # then try and reload the ServerResult
-            if (
-                not server_result
-                or force_rediscover
-                or (
-                    server_result.unhealthy
-                    and now
-                    - self._server_discovery_cache._cache[
-                        destination_server_name
-                    ].last_access_time_ms
-                    > 5 * 60
-                )
-            ):
-                # If this server was attempted at some point and errored, there is no
-                # point trying again until the cache entry is replaced.
-
-                self.logger.debug(
-                    f"Running server discovery for {destination_server_name}"
-                )
-                server_result = await self.delegation_handler.handle_delegation(
-                    destination_server_name,
-                    self._federation_request,
-                    diag_info=diag_info,
-                )
+            server_result = await self.delegation_handler.handle_delegation(
+                destination_server_name,
+                self._federation_request,
+                diag_info=diag_info,
+            )
 
         if server_result:
-            # self.logger.info(
-            #     f"Making real federation request: {destination_server_name}"
-            # )
             # These only get filled in when diagnostics is True
             # This will add the word "Checking: " to the front of "Connectivity"
             diag_info.mark_step_num("Connectivity")
@@ -386,89 +356,88 @@ class FederationHandler:
             code = 0
             error_reason = str(e.summary_exception)
             diag_info.error(str(e.long_exception))
-        else:
-            # The server was responsive, but may not have returned something useful
-            async with response:
-                code = response.status
-                reason = response.reason
-                # for errors that are not JSON decoding related(which is overridden
-                # below)
-                error_reason = response.reason
-                headers = response.headers
-                request_info = response.request_info
+            # Since there was an exception, cache the result unless it was a timeout error, as that shouldn't count
+            server_result.unhealthy = error_reason
 
-                diag_info.add(f"Request status: code:{code}, reason: {reason}")
+            if not isinstance(e, PluginTimeout):
+                # Most all errors will be cached for 5 minutes
+                server_result.retry_time_s = now + 5 * 60
+            else:
+                # Timeout errors get cached for 30 seconds
+                server_result.retry_time_s = now + 30
 
-                if 199 < code < 499:
-                    try:
-                        result_dict = await response.json()
-
-                    except client_exceptions.ContentTypeError:
-                        diag_info.error(
-                            f"Response had Content-Type: {response.headers.get('Content-Type', 'None Found')}"
-                        )
-                        diag_info.add(
-                            "Expected Content-Type of 'application/json', will try work-around"
-                        )
-
-                    # Sometimes servers don't have their well-known(or other things)
-                    # set to return a content-type of `application/json`, try and
-                    # handle it.
-                    if not result_dict:
-                        try:
-                            result = await response.text()
-                            result_dict = self.json_decoder.decode(result)
-
-                        except json.decoder.JSONDecodeError:
-                            diag_info.error("JSONDecodeError, work-around failed")
-                            error_reason = "No/bad JSON returned"
-
-                    if not result_dict:
-                        diag_info.add("No usable data in response")
-
-        # The request is complete. If the server wasn't reachable, the code
-        # will be 0. Save the ServerResult in the cache, so repeatedly trying to reach a server
-        # that will not respond isn't a drain on resources. Unhealthy results will be filtered
-        # out at the beginning of this function.
-        if not server_result:
-            # TODO: can probably lose this conditional now
-            # This will be hit when checking for well-known, it gives us an initial
-            # ServerResult to base further queries on. Don't save it in the cache
-            self.logger.warning(
-                f"HIT condition watching for: {destination_server_name}"
-            )
-            host, port = check_and_maybe_split_server_name(destination_server_name)
-
-            server_result = ServerResult(
-                host=host, port=port if port else "", diag_info=diag_info
-            )
-
-        else:
-            server_result.unhealthy = error_reason if code <= 0 else None
-            # self.logger.warning(f"saving {server_result.host} to cache")
             self._server_discovery_cache.set(server_result.host, server_result)
 
-        if code != 200:
+            return MatrixError(
+                http_code=code,
+                errcode=str(code),
+                reason=error_reason,
+                diag_info=diag_info if diagnostics else None,
+                json_response={},
+            )
+
+        # The server was responsive, but may not have returned something useful
+        async with response:
+            code = response.status
+            reason = response.reason or "No Reason/status returned"
+            headers = response.headers
+            self._server_discovery_cache.set(server_result.host, server_result)
+
+            if 200 <= code < 599:
+                result = await response.text()
+            else:
+                result = None
+
+            diag_info.add(f"Request status: code:{code}, reason: {reason}")
+
+        if result:
+            try:
+                result_dict = self.json_decoder.decode(result)
+
+            except json.decoder.JSONDecodeError:
+                diag_info.error("JSONDecodeError, work-around failed")
+                diag_info.add("No usable data in response")
+                # error_reason = "No/bad JSON returned"
+
+            else:
+                # if there was a matrix related error, pick the bits out of the json
+                if result_dict:
+                    error = result_dict.get("error", error)
+                    errcode = result_dict.get("errcode", errcode)
+
+        if diagnostics:
+            tls_handled_by = headers.get("server", None)
+            diag_info.tls_handled_by = tls_handled_by
+
+        # The request is complete.
+        # Caddy is notorious for returning a 200 as a default for non-existent endpoints. This is a problem, and
+        # I believe it is against the Spec. When this happens, there should be no JSON to decode so result_dict
+        # should still be None. Lump that in with other errors to return
+        if code != 200 or (code == 200 and result_dict is None):
             diag_info.error(f"Request to {path} failed")
-            return FederationErrorResponse(
-                code,
-                error_reason,
-                response_dict=result_dict,
-                server_result=server_result,
-                list_of_errors=diag_info.list_of_results,
-                headers=headers,
-                request_info=request_info,
+            if code == 200:
+                # Going to log this for now, see how prevalent it is
+                self.logger.warning(
+                    f"fedreq: HIT possible Caddy condition: {destination_server_name}"
+                )
+
+            return MatrixError(
+                http_code=code,
+                reason=reason,
+                diag_info=diag_info if diagnostics else None,
+                json_response=result_dict or {},
+                errcode=errcode,
+                error=error,
             )
 
         # Don't need a success diagnostic message here, the one above works fine
-        return FederationBaseResponse(
-            code,
-            reason,
-            response_dict=result_dict,
-            server_result=server_result,
-            list_of_errors=diag_info.list_of_results,
-            headers=headers,
-            request_info=request_info,
+        return MatrixFederationResponse(
+            http_code=code,
+            reason=reason,
+            diag_info=diag_info if diagnostics else None,
+            json_response=result_dict or {},
+            errcode=errcode,
+            error=error,
         )
 
     async def get_server_version(
@@ -477,7 +446,7 @@ class FederationHandler:
         force_rediscover: bool = False,
         diagnostics: bool = False,
         timeout_seconds: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server_name=server_name,
             path="/_matrix/federation/v1/version",
@@ -486,51 +455,46 @@ class FederationHandler:
             diagnostics=diagnostics,
             timeout_seconds=timeout_seconds,
         )
-        # TODO: This was behaving oddly, disect it later
-        # if response.status_code == 404:
-        #     response.server_result.diag_info.connection_test_status = (
-        #         ResponseStatusType.NONE
-        #     )
-        if response.status_code != 200:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.ERROR
-            )
-        else:
-            response.server_result.diag_info.connection_test_status = (
-                ResponseStatusType.OK
-            )
 
-        if isinstance(response, FederationErrorResponse):
-            return response
+        if diagnostics and response.diag_info is not None:
+            # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
+            if response.http_code != 200:
+                response.diag_info.connection_test_status = ResponseStatusType.ERROR
+            else:
+                response.diag_info.connection_test_status = ResponseStatusType.OK
 
-        return FederationVersionResponse.from_response(response)
+        return response
 
     async def _get_server_keys(
         self, server_name: str, timeout: float = 10.0
-    ) -> FederationServerKeyResponse:
+    ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server_name=server_name,
             path="/_matrix/key/v2/server",
             method="GET",
             timeout_seconds=timeout,
         )
-        if isinstance(response, FederationErrorResponse):
-            raise MatrixError(response.status_code, response.reason)
 
-        return FederationServerKeyResponse.from_response(response)
+        return response
 
     async def get_server_keys(
         self, server_name: str, timeout: float = 10.0
     ) -> ServerVerifyKeys:
         response = await self._get_server_keys(server_name=server_name, timeout=timeout)
-        return response.server_verify_keys
 
-    async def get_server_keys_from_notary(
-        self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
-    ) -> ServerVerifyKeys:
-        minimum_valid_until_ts = int(time.time() * 1000) + (
-            30 * 60 * 1000
-        )  # Add 30 minutes
+        if response.http_code != 200:
+            self.logger.warning(f"get_server_keys: {server_name}: got {response}")
+
+        json_response = response.json_response
+        return ServerVerifyKeys(json_response)
+
+    async def _notary_keys_request(
+        self,
+        fetch_server_name: str,
+        from_server_name: str,
+        minimum_valid_until_ts: int,
+        timeout: float = 10.0,
+    ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server_name=from_server_name,
             path=f"/_matrix/key/v2/query/{fetch_server_name}",
@@ -538,10 +502,30 @@ class FederationHandler:
             method="GET",
             timeout_seconds=timeout,
         )
-        if isinstance(response, FederationErrorResponse):
-            raise MatrixError(response.status_code, response.reason)
+
+        return response
+
+    async def get_server_keys_from_notary(
+        self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
+    ) -> ServerVerifyKeys:
+        minimum_valid_until_ts = int(time.time() * 1000) + (
+            30 * 60 * 1000
+        )  # Add 30 minutes
+
+        response = await self._notary_keys_request(
+            fetch_server_name=fetch_server_name,
+            from_server_name=from_server_name,
+            minimum_valid_until_ts=minimum_valid_until_ts,
+            timeout=timeout,
+        )
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_server_keys_from_notary: {fetch_server_name}: got {response}"
+            )
+
         server_verify_keys = ServerVerifyKeys({})
-        server_verify_keys.update_key_data_from_list(response.response_dict)
+
+        server_verify_keys.update_key_data_from_list(response.json_response)
 
         return server_verify_keys
 
@@ -555,29 +539,16 @@ class FederationHandler:
             if key_id_formatted in cached_server_keys.verify_keys:
                 return cached_server_keys.verify_keys
 
-        server_verify_keys = None
-        try:
-            server_verify_keys = await self.get_server_keys(for_server_name, timeout)
-        except MatrixError as e:
-            self.logger.warning(
-                f"Keys not available directly from {for_server_name}, trying notary: {e}"
+        server_verify_keys = await self.get_server_keys(for_server_name, timeout)
+
+        if key_id_formatted not in server_verify_keys.verify_keys:
+            server_verify_keys = await self.get_server_keys_from_notary(
+                for_server_name, self.hosting_server, timeout
             )
 
-        if (
-            server_verify_keys is None
-            or key_id_formatted not in server_verify_keys.verify_keys
-        ):
-            try:
-                server_verify_keys = await self.get_server_keys_from_notary(
-                    for_server_name, self.hosting_server, timeout
-                )
-            except MatrixError:
-                self.logger.warning(
-                    f"Keys not available from notary for {for_server_name}, giving up"
-                )
-
-        if server_verify_keys is None:
-            return {}
+        # TODO: verify can remove this, as it can never be None but can be empty
+        # if server_verify_keys is None:
+        #     return {}
 
         # At this point we know
         # 1. Wasn't in the cache before(or at least this one key id wasn't)
@@ -685,6 +656,7 @@ class FederationHandler:
             event_id: The opaque string of the id given to the Event
             timeout:
             inject_new_data: Allow for injecting data into the structure for testing verification later
+            keys_to_pop: Allow for removing data by key(s) from the structure for testing verification
 
         Returns: A tuple containing the FederationResponse received and the Event
             contained in a List
@@ -703,18 +675,18 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
 
-        if response.status_code != 200:
-            # self.logger.warning(
-            #     f"get_event_from_server had an error\n{event_id}\n{response.status_code}:{response.reason}"
-            # )
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_event_from_server: {destination_server}, {event_id}: {response}"
+            )
             new_event_base = EventError(
                 EventID(event_id),
-                {"error": f"{response.reason}", "errcode": f"{response.status_code}"},
+                {"error": f"{response.reason}", "errcode": f"{response.http_code}"},
             )
 
             return {event_id: new_event_base}
 
-        pdu_list: List[Dict[str, Any]] = response.response_dict.get("pdus", [])
+        pdu_list: List[Dict[str, Any]] = response.json_response.get("pdus", [])
         split_keys: List[str] = []
         if keys_to_pop:
             if "," in keys_to_pop:
@@ -777,6 +749,7 @@ class FederationHandler:
                         timeout=timeout,
                     )
 
+                # TODO: may not need these any more
                 except asyncio.TimeoutError:
                     error_event = EventError(
                         EventID(worker_event_id),
@@ -876,8 +849,13 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
 
-        pdu_list = response.response_dict.get("pdu_ids", [])
-        auth_chain_list = response.response_dict.get("auth_chain_ids", [])
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_state_ids_from_server: {destination_server}: got {response}"
+            )
+
+        pdu_list = response.json_response.get("pdu_ids", [])
+        auth_chain_list = response.json_response.get("auth_chain_ids", [])
 
         return pdu_list, auth_chain_list
 
@@ -896,13 +874,14 @@ class FederationHandler:
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
-        if isinstance(response, FederationErrorResponse):
-            self.logger.debug(
-                f"  get_state_from_server: dest: {destination_server}: {response.status_code}: {response.reason}"
+
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_state_from_server: {destination_server}: got {response}"
             )
 
-        pdus_list = response.response_dict.get("pdus", [])
-        auth_chain_list = response.response_dict.get("auth_chain", [])
+        pdus_list = response.json_response.get("pdus", [])
+        auth_chain_list = response.json_response.get("auth_chain", [])
 
         return pdus_list, auth_chain_list
 
@@ -913,13 +892,18 @@ class FederationHandler:
         room_id: str,
         event_id: str,
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
+
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_event_auth_for_event_from_server: {destination_server}: got {response}"
+            )
 
         return response
 
@@ -930,7 +914,7 @@ class FederationHandler:
         room_id: str,
         utc_time_at_ms: int,
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         # With no errors, will produce a json like:
         # {
         #    "event_id": "$somehash",
@@ -944,6 +928,11 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_timestamp_to_event_from_server: {destination_server}: got {response}"
+            )
+
         return response
 
     async def get_backfill_from_server(
@@ -954,7 +943,7 @@ class FederationHandler:
         event_id: str,
         limit: str = "10",
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
 
         response = await self.federation_request(
             destination_server_name=destination_server,
@@ -964,6 +953,11 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_backfill_from_server: {destination_server}: got {response}"
+            )
+
         return response
 
     async def get_user_devices_from_server(
@@ -972,7 +966,7 @@ class FederationHandler:
         destination_server: str,
         user_mxid: str,
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         # url = URL(
         #     f"https://{destination_server}/_matrix/federation/v1/user/devices/{mxid}"
         # )
@@ -984,23 +978,29 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_user_devices_from_server: {destination_server}: got {response}"
+            )
+
         return response
 
     async def get_room_alias_from_server(
         self,
         origin_server: str,
-        # destination_server: Optional[str],
         room_alias: str,
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         try:
             _, destination_server = room_alias.split(":", maxsplit=1)
         except ValueError:
-            return FederationErrorResponse(
-                status_code=0,
-                status_reason="Malformed Room Alias: missing a domain",
-                response_dict={},
-                server_result=ServerResultError(),
+            self.logger.warning(
+                f"get_room_alias_from_server: {room_alias} had malformed destination server"
+            )
+            return MatrixError(
+                http_code=0,
+                reason="Malformed Room Alias: missing a domain",
+                json_response={},
             )
         response = await self.federation_request(
             destination_server_name=destination_server,
@@ -1010,6 +1010,11 @@ class FederationHandler:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            self.logger.warning(
+                f"get_room_alias_from_server: {destination_server}: got {response.http_code}: {response.reason}"
+            )
+
         return response
 
     async def _send_transaction_to_server(
@@ -1018,7 +1023,7 @@ class FederationHandler:
         destination_server: str,
         pdus_to_send: Sequence[Dict[str, Any]],
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         formatted_data: Dict[str, Any] = {}
         now = int(time.time() * 1000)
         formatted_data["origin"] = origin_server
@@ -1039,9 +1044,12 @@ class FederationHandler:
             timeout_seconds=timeout,
             origin_server=origin_server,
         )
-        # self.logger.info(
-        #     f"_send_transaction_to_server responded: {response.response_dict}"
-        # )
+
+        if response.http_code != 200:
+            self.logger.warning(
+                f"_send_transaction_to_server: {destination_server}: got {response}"
+            )
+
         return response
 
     async def send_events_to_server(
@@ -1050,13 +1058,58 @@ class FederationHandler:
         destination_server: str,
         event_data: Sequence[Dict[str, Any]],
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         response = await self._send_transaction_to_server(
             origin_server=origin_server,
             destination_server=destination_server,
             pdus_to_send=event_data,
             timeout=timeout,
         )
+
+        if response.http_code != 200:
+            self.logger.warning(
+                f"_send_events_to_server: {destination_server}: got {response}"
+            )
+
+        return response
+
+    async def _get_public_rooms_from_server(
+        self,
+        origin_server: Optional[str],
+        destination_server: Optional[str],
+        include_all_networks: bool = False,
+        limit: int = 10,
+        since: Optional[str] = None,
+        third_party_instance_id: Optional[str] = None,
+        timeout: float = 10.0,
+    ) -> MatrixResponse:
+        if not origin_server:
+            origin_server = self.hosting_server
+        if not destination_server:
+            destination_server = origin_server
+
+        query_args = [
+            ("include_all_networks", str(include_all_networks).lower()),
+            ("limit", limit),
+        ]
+
+        if since:
+            query_args.append(("since", since))
+        if third_party_instance_id:
+            query_args.append(("third_party_instance_id", third_party_instance_id))
+
+        response = await self.federation_request(
+            origin_server=origin_server,
+            path="/_matrix/federation/v1/publicRooms",
+            destination_server_name=destination_server,
+            query_args=query_args,
+            timeout_seconds=timeout,
+        )
+
+        if response.http_code != 200:
+            self.logger.warning(
+                f"_send_transaction_to_server: {destination_server}: got {response}"
+            )
 
         return response
 
@@ -1066,33 +1119,35 @@ class FederationHandler:
         destination_server: Optional[str],
         room_id: str,
         timeout: float = 10.0,
-    ) -> str:
+    ) -> int:
         room_version = self.room_version_cache.get(room_id)
         if room_version:
-            return str(room_version)
+            return room_version
 
         if not origin_server:
             origin_server = self.hosting_server
         if not destination_server:
             destination_server = origin_server
 
-        response = await self.make_join_to_server(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            user_id=self.bot_mxid,
-            timeout=timeout,
-        )
-        if isinstance(response, FederationErrorResponse):
-            raise FedBotException(
-                f"{response.status_code}: {response.response_dict.get('errcode')}",
-                f"{response.status_code}: {response.response_dict.get('errcode')}: {response.response_dict.get('error')}",
+        try:
+            response = await self.make_join_to_server(
+                origin_server=origin_server,
+                destination_server=destination_server,
+                room_id=room_id,
+                user_id=self.bot_mxid,
+                timeout=timeout,
             )
-        room_version = response.room_version
+        except MatrixError:
+            # TODO: Could do something smarter here, like check state
+            room_version = 0
 
-        if room_version is not None:
+        else:
+            room_version = response.room_version
+
+        if room_version > 0:
             self.room_version_cache.set(room_id, room_version)
-        return str(room_version)
+
+        return room_version
 
     async def filter_state_for_type(
         self,
@@ -1109,8 +1164,8 @@ class FederationHandler:
             room_id=room_id,
             utc_time_at_ms=now,
         )
-        if not isinstance(ts_response, FederationErrorResponse):
-            event_id = ts_response.response_dict.get("event_id")
+        if isinstance(ts_response, MatrixFederationResponse):
+            event_id = ts_response.json_response.get("event_id")
 
         assert event_id is not None
         state_ids, _ = await self.get_state_ids_from_server(
@@ -1139,7 +1194,7 @@ class FederationHandler:
         room_id: str,
         user_id: str,
         timeout: float = 10.0,
-    ) -> FederationBaseResponse:
+    ) -> MatrixResponse:
         query_list = []
         for i in range(0, 11):
             query_list.extend([("ver", f"{i + 1}")])
@@ -1154,6 +1209,12 @@ class FederationHandler:
             timeout_seconds=timeout,
             origin_server=origin_server,
         )
+
+        if response.http_code != 200:
+            self.logger.warning(
+                f"_make_join_to_server: {destination_server}: got {response}"
+            )
+
         return response
 
     async def make_join_to_server(
@@ -1163,7 +1224,20 @@ class FederationHandler:
         room_id: str,
         user_id: str,
         timeout: float = 10.0,
-    ):
+    ) -> MakeJoinResponse:
+        """
+
+        Args:
+            origin_server:
+            destination_server:
+            room_id:
+            user_id:
+            timeout:
+
+        Returns: A MakeJoinResponse
+        Raises: MatrixError with the data of why
+
+        """
         response = await self._make_join_to_server(
             origin_server=origin_server,
             destination_server=destination_server,
@@ -1171,13 +1245,15 @@ class FederationHandler:
             user_id=user_id,
             timeout=timeout,
         )
-        if isinstance(response, FederationErrorResponse):
-            self.logger.warning(f"make_join: dest: {destination_server}:\n {response}")
-            raise MatrixError(response.status_code, response.reason)
+        if response.http_code != 200:
+            self.logger.warning(f"make_join: dest: {destination_server}: {response}")
+            assert isinstance(response, MatrixError)
+            raise response
 
-        room_version = response.response_dict.get("room_version")
-        prev_events = response.response_dict.get("event", {}).get("prev_events", [])
-        auth_events = response.response_dict.get("event", {}).get("auth_events", [])
+        room_version: int = int(response.json_response.get("room_version", 0))
+        assert room_version > 0
+        prev_events = response.json_response.get("event", {}).get("prev_events", [])
+        auth_events = response.json_response.get("event", {}).get("auth_events", [])
         return MakeJoinResponse(
             room_version=room_version, prev_events=prev_events, auth_events=auth_events
         )

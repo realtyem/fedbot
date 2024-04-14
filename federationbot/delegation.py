@@ -3,7 +3,7 @@ from asyncio import sleep
 import ipaddress
 import json
 
-from aiohttp import ClientSession, client_exceptions
+from aiohttp import client_exceptions
 from dns.asyncresolver import Resolver
 from mautrix.util.logging import TraceLogger
 import dns.resolver
@@ -347,7 +347,7 @@ class DelegationHandler:
             host: The basic host to check
             diag_info: DiagnosticInfo object to append info/errors too
 
-        Returns: A Tuple of (A Json Dict or None, DiagnosticInfo)
+        Returns: A Dict[str, Any] of the JSON returned, or None
 
         """
         content: Optional[Dict[str, Any]] = None
@@ -361,7 +361,6 @@ class DelegationHandler:
         # The callback used above handles a boatload of individual exceptions and consolidates them into one
         # that is easier to extract displayable data from.
         except FedBotException as e:
-            self.logger.warning(f"{e.__class__.__name__}: {host}: {e}")
             diag_info.error(f"{e.summary_exception}")
             if e.__class__.__name__ != "PluginTimeout":
                 diag_info.add(f"{e.long_exception}")
@@ -392,19 +391,22 @@ class DelegationHandler:
                         # self.logger.info(f"text_result: {text_result}")
                         diag_info.error("JSONDecodeError, work-around failed")
 
-                else:
-                    diag_info.add(f"seems ok {content}")
-                    # self.logger.info(f"content: {content}")
-
         diag_info.add(f"Request status: code:{status}, reason: {reason}")
 
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
         if status == 404:
             diag_info.mark_no_well_known()
-        elif status != 200:
+        elif status != 200 or (status == 200 and content is None):
+            # Don't forget to work around Caddy defaulting to 200 for unknown endpoints. I still believe this is against
+            # spec and therefore is an error. This condition only holds water for well-known, as there are instances
+            # where a 200 and an empty {} are legitimate responses(like for /send)
+            if status == 200:
+                self.logger.debug(f"well-known: HIT possible caddy condition: {host}")
             # For whatever reason(which should be in the errors/diag returned),
             # there was no usable well-known
             diag_info.mark_error_on_well_known()
+        else:
+            diag_info.add(f"{content}")
 
         return content
 

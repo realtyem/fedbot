@@ -3,7 +3,7 @@ from typing import Optional
 
 class FedBotException(Exception):
     """
-    Base class of all Exceptions in FedBot
+    Base class of all Exceptions in FedBot. Not Matrix related errors
 
     Attributes:
         summary_exception: A simple short explanation, usually whatever raised the original exception
@@ -72,32 +72,6 @@ class WellKnownHasSchemeError(WellKnownError):
 class WellKnownParsingError(WellKnownError):
     """
     Error occurred while parsing the well-known response
-    """
-
-
-class MatrixError(Exception):
-    """
-    Generic Matrix-related error
-    """
-
-    http_code: int
-    message: str
-
-    def __init__(self, http_code: int, message: str) -> None:
-        super().__init__(message)
-        self.http_code = http_code
-        self.message = message
-
-
-class MatrixNotFoundError(MatrixError):
-    """
-    The homeserver returned a 404 M_NOT_FOUND
-    """
-
-
-class MatrixForbiddenError(MatrixError):
-    """
-    The homeserver returned a 403 M_FORBIDDEN
     """
 
 
