@@ -155,7 +155,7 @@ class TaskSetEntry:
         for _ in range(0, limit):
             self.tasks.append(asyncio.create_task(new_task(*args)))  # type: ignore[arg-type]
 
-    async def gather_results(self, return_exceptions: bool = False) -> Tuple[T]:
+    async def gather_results(self, return_exceptions: bool = True) -> Tuple[T]:
         """
         If you have elected for your Task to return a result, this will get them as a Tuple
         Args:
@@ -175,7 +175,7 @@ class TaskSetEntry:
             task.cancel()
         # Use return_exceptions set to True so all tasks actually are finished before exiting the system(or some
         # get left behind and keep running as orphans)
-        await self.gather_results(True)
+        await self.gather_results()
 
 
 class ReactionTaskController:
