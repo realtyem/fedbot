@@ -51,14 +51,18 @@ class DisplayLineColumnConfig:
         self.justification = justify
         self.horizontal_separator = horizontal_separator
 
-    def maybe_update_column_width(self, new_value: int) -> None:
+    def maybe_update_column_width(self, new_value: Optional[Union[int, str]]) -> None:
         """
         Use to potentially update the column width. Uses max() under the hood.
 
         Args:
             new_value: To apply to the column width
         """
-        self.line_size = max(self.line_size, new_value)
+        if new_value:
+            if isinstance(new_value, str):
+                self.line_size = max(self.line_size, len(new_value))
+            else:
+                self.line_size = max(self.line_size, new_value)
 
     @property
     def size(self) -> int:
