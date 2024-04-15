@@ -2,6 +2,7 @@ from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, 
 from asyncio import Queue
 import asyncio
 import json
+import logging
 import time
 
 from aiohttp import (
@@ -11,6 +12,7 @@ from aiohttp import (
     TCPConnector,
     client_exceptions,
 )
+from backoff._typing import Details
 from mautrix.types import EventID
 from mautrix.util.logging import TraceLogger
 from signedjson.key import decode_signing_key_base64, decode_verify_key_bytes
@@ -50,7 +52,18 @@ from federationbot.types import (
 )
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
+backoff_logger = logging.getLogger("backoff")
 SOCKET_TIMEOUT_SECONDS = 2.0
+
+
+def backoff_logging_handler(details: Details) -> None:
+    wait = details.get("wait", 0.0)
+    tries = details.get("tries", 0)
+    host = details.get("kwargs", {}).get("destination_server_name", "not found")
+    backoff_logger.info(
+        "Backing off {wait:0.2f} seconds after {tries} tries on "
+        "host {host}".format(wait=wait, tries=tries, host=host)
+    )
 
 
 class FederationHandler:
@@ -97,7 +110,17 @@ class FederationHandler:
         predicate=lambda r: r.status == 429,
         value=lambda r: int(r.headers.get("Retry-After")),
     )
-    @backoff.on_exception(backoff.expo, PluginTimeout, max_tries=3)
+    @backoff.on_exception(
+        backoff.expo,
+        PluginTimeout,
+        max_tries=3,
+        backoff_log_level=logging.INFO,
+        giveup_log_level=logging.INFO,
+        on_backoff=backoff_logging_handler,
+        logger=None,
+        max_value=1.0,
+        base=1.25,
+    )
     async def _federation_request(
         self,
         destination_server_name: str,
