@@ -258,25 +258,16 @@ class FederationHandler:
             raise FedBotException(e.__class__.__name__, str(e.message)) from e
 
         # Save these other exceptions, as they might get revisited
-        # except client_exceptions.ConnectionTimeoutError as e:
-        # except client_exceptions.SocketTimeoutError as e:
         # except client_exceptions.WSServerHandshakeError:
 
         # Pretty sure will never hit this one either, as it's not enforced here
         # except client_exceptions.ContentTypeError:
 
         except client_exceptions.ServerTimeoutError as e:
+            # ServerTimeoutError is asyncio.TimeoutError under it's hood
             raise PluginTimeout(
                 e.__class__.__name__,
                 f"{e.__class__.__name__} after {SOCKET_TIMEOUT_SECONDS} seconds",
-            ) from e
-        except asyncio.TimeoutError as e:
-            self.logger.warning(
-                f"raising {e.__class__.__name__}: {destination_server_name}: {e}"
-            )
-            raise PluginTimeout(
-                e.__class__.__name__,
-                f"{e.__class__.__name__} after {timeout_seconds} seconds",
             ) from e
 
         except (
