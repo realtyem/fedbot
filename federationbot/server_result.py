@@ -25,6 +25,7 @@ class DiagnosticInfo:
     dns_test_result: bool
     connection_test_status: ResponseStatusType
     tls_handled_by: Optional[str]
+    retries: int = 0
 
     def __init__(self, enable_diagnostics: bool) -> None:
         self.diagnostics_enabled = enable_diagnostics

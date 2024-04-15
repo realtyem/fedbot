@@ -66,6 +66,14 @@ def backoff_logging_handler(details: Details) -> None:
     )
 
 
+def backoff_update_retries_handler(details: Details) -> None:
+    server_result: Optional[ServerResult] = details.get("kwargs", {}).get(
+        "server_result", None
+    )
+    if server_result and server_result.diag_info:
+        server_result.diag_info.retries += 1
+
+
 class FederationHandler:
     def __init__(
         self,
@@ -116,7 +124,7 @@ class FederationHandler:
         max_tries=3,
         backoff_log_level=logging.INFO,
         giveup_log_level=logging.INFO,
-        on_backoff=backoff_logging_handler,
+        on_backoff=[backoff_logging_handler, backoff_update_retries_handler],
         logger=None,
         max_value=1.0,
         base=1.25,

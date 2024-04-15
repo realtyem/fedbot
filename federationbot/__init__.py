@@ -2446,6 +2446,7 @@ class FederationBot(Plugin):
         dns_status_col = DisplayLineColumnConfig("DNS")
         connective_test_status_col = DisplayLineColumnConfig("Test")
         tls_served_by_col = DisplayLineColumnConfig("TLS served by")
+        retries_col = DisplayLineColumnConfig("Retries")
 
         # Iterate through the server names to widen the column, if necessary.
         for server_name, response in server_to_server_data.items():
@@ -2474,6 +2475,7 @@ class FederationBot(Plugin):
             f"{dns_status_col.pad()} | "
             f"{connective_test_status_col.pad()} | "
             f"{tls_served_by_col.pad()} | "
+            f"{retries_col.pad()} | "
             f"Errors\n"
         )
 
@@ -2521,6 +2523,10 @@ class FederationBot(Plugin):
                     f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')}"
                     " | "
                 )
+
+                num_of_retries = diag_info.retries
+                buffered_message += f"{retries_col.pad(num_of_retries)} | "
+
                 if response.http_code != 200:
 
                     buffered_message += f"{response.reason}"
