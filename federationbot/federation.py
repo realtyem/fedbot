@@ -692,11 +692,14 @@ class FederationHandler:
 
         if response.http_code != 200:
             self.logger.warning(
-                f"get_event_from_server: {destination_server}, {event_id}: {response}"
+                f"get_event_from_server: {destination_server}, {event_id}: {response.http_code}:{response.reason}"
             )
             new_event_base = EventError(
                 EventID(event_id),
-                {"error": f"{response.reason}", "errcode": f"{response.http_code}"},
+                {
+                    "error": f"{response.error or response.reason}",
+                    "errcode": f"{response.errcode or response.http_code}",
+                },
             )
 
             return {event_id: new_event_base}
