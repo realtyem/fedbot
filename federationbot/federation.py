@@ -700,9 +700,9 @@ class FederationHandler:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_event_from_server: {destination_server}, {event_id}: {response.http_code}:{response.reason}"
-            )
+            # self.logger.warning(
+            #     f"get_event_from_server: {destination_server}, {event_id}: {response.http_code}:{response.reason}"
+            # )
             new_event_base = EventError(
                 EventID(event_id),
                 {
@@ -904,7 +904,7 @@ class FederationHandler:
 
         if response.http_code != 200:
             self.logger.warning(
-                f"get_state_from_server: {destination_server}: got {response}"
+                f"get_state_from_server: {destination_server}: got {response.errcode or response.http_code} {response.error or response.reason}"
             )
 
         pdus_list = response.json_response.get("pdus", [])
@@ -1281,7 +1281,7 @@ class FederationHandler:
 
         if response.http_code != 200:
             self.logger.warning(
-                f"_make_join_to_server: {destination_server}: got {response}"
+                f"_make_join_to_server: {destination_server}: got {response.errcode or response.http_code} {response.error or response.reason}"
             )
 
         return response
