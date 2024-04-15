@@ -4173,11 +4173,26 @@ class FederationBot(Plugin):
             buffered_message = ""
             if result:
                 if isinstance(result, EventError):
+                    errcode_result = ""
+                    if result.errcode is not None:
+                        try:
+                            errcode = int(result.errcode)
+                        except ValueError:
+                            errcode_result = (
+                                dc_host_config.horizontal_separator + result.errcode
+                            )
+                        else:
+                            errcode_result = (
+                                dc_host_config.horizontal_separator + result.errcode
+                                if errcode > 0
+                                else ""
+                            )
                     buffered_message += (
                         f"{dc_host_config.pad(host)}"
                         f"{dc_host_config.horizontal_separator}"
                         f"{dc_result_config.pad('Fail')}"
                         # f"{dc_result_config.pad(add_color(bold('Fail'), foreground=Colors.WHITE, background=Colors.RED))}"
+                        f"{errcode_result}"
                         f"{dc_host_config.horizontal_separator}{result.error}"
                     )
                     servers_not_had += 1
