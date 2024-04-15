@@ -262,6 +262,10 @@ class FederationBot(Plugin):
     ) -> None:
         await command_event.respond(f"Received Test Command on: {self.client.mxid}")
 
+    @command.new(name="fed", help="`!fed`: Federation requests for information")
+    async def fed_command(self, command_event: MessageEvent) -> None:
+        pass
+
     @test_command.subcommand(name="color", help="Test color palette and layout")
     async def color_subcommand(self, command_event: MessageEvent) -> None:
         await command_event.mark_read()
@@ -2280,10 +2284,6 @@ class FederationBot(Plugin):
     #   - event   [event_id] - retrieve a specific event(or last in room)
     #   - events  [room_id][how_many]   - retrieve the last how_many(or 10) events from
     #                                       room_id(or current room)
-
-    @command.new(name="fed", help="`!fed`: Federation requests for information")
-    async def fed_command(self, command_event: MessageEvent) -> None:
-        pass
 
     @fed_command.subcommand(
         name="summary", help="Print summary of the delegation portion of the spec"
