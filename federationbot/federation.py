@@ -201,7 +201,8 @@ class FederationHandler:
         client_timeouts = ClientTimeout(
             # Don't limit the total connection time, as incremental reads are handled distinctly by sock_read
             total=None,
-            # connect should be None, as sock_connect is behavior intended
+            # connect should be None, as sock_connect is behavior intended. This is for waiting for a connection from
+            # the pool as well as establishing the connection itself.
             connect=None,
             # This is the most useful for detecting bad servers
             sock_connect=SOCKET_TIMEOUT_SECONDS,
