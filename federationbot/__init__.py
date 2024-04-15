@@ -2150,9 +2150,7 @@ class FederationBot(Plugin):
             )
             list_of_message_ids.extend([current_message])
             try:
-                joined_members = await self.client.get_joined_members(
-                    RoomID(room_id)
-                )
+                joined_members = await self.client.get_joined_members(RoomID(room_id))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
