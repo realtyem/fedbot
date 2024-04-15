@@ -25,6 +25,7 @@ from federationbot.cache import LRUCache
 from federationbot.delegation import DelegationHandler
 from federationbot.errors import (
     FedBotException,
+    MalformedRoomAliasError,
     PluginTimeout,
     ServerSSLException,
     ServerUnreachable,
@@ -1011,23 +1012,13 @@ class FederationHandler:
 
         return response
 
-    async def get_room_alias_from_server(
+    async def _get_room_alias(
         self,
         origin_server: str,
+        destination_server: str,
         room_alias: str,
         timeout: float = 10.0,
     ) -> MatrixResponse:
-        try:
-            _, destination_server = room_alias.split(":", maxsplit=1)
-        except ValueError:
-            self.logger.warning(
-                f"get_room_alias_from_server: {room_alias} had malformed destination server"
-            )
-            return MatrixError(
-                http_code=0,
-                reason="Malformed Room Alias: missing a domain",
-                json_response={},
-            )
         response = await self.federation_request(
             destination_server_name=destination_server,
             path="/_matrix/federation/v1/query/directory",
@@ -1040,8 +1031,60 @@ class FederationHandler:
             self.logger.warning(
                 f"get_room_alias_from_server: {destination_server}: got {response.http_code}: {response.reason}"
             )
+        else:
+            self.logger.info(json.dumps(response.json_response, indent=4))
 
         return response
+
+    async def resolve_room_alias(
+        self,
+        room_alias: str,
+        origin_server: str,
+    ) -> Tuple[str, List[str]]:
+        """
+
+        Args:
+            room_alias:
+            origin_server: The server that is sending the request
+
+        Returns:
+        Raises: ValueError if room_alias does not start with '#' or contain a ':'
+        """
+        # Sort out if the room id or alias passed in is valid and resolve the alias
+        # to the room id if it is.
+        try:
+            assert room_alias.startswith("#")
+            _, destination_server = room_alias.split(":", maxsplit=1)
+        except ValueError as e:
+            self.logger.warning(
+                f"resolve_room_alias: {room_alias} had malformed destination server"
+            )
+            raise MalformedRoomAliasError(
+                summary_exception="Room Alias did not have ':'"
+            ) from e
+        except AssertionError as e:
+            self.logger.warning(
+                f"resolve_room_alias: {room_alias} does not start with '#'"
+            )
+            raise MalformedRoomAliasError(
+                summary_exception="Room Alias did not start with '#'"
+            ) from e
+
+        # look up the room alias. The server is extracted from the alias itself.
+        alias_result = await self._get_room_alias(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            room_alias=room_alias,
+        )
+        if alias_result.http_code != 200:
+            raise FedBotException(
+                summary_exception=f"{alias_result.errcode or alias_result.http_code}: {alias_result.error or alias_result.reason}"
+            )
+
+        room_id: str = alias_result.json_response["room_id"]
+        list_of_servers: List[str] = alias_result.json_response.get("servers", [])
+
+        return room_id, list_of_servers
 
     async def _send_transaction_to_server(
         self,

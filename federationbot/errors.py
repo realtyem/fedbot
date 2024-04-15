@@ -44,6 +44,12 @@ class MalformedServerNameError(Exception):
     """
 
 
+class MalformedRoomAliasError(FedBotException):
+    """
+    The Room Alias did not meet expectations. Either missing '#' or ':' (for the domain)
+    """
+
+
 class ServerUnreachable(FedBotException):
     """
     When the server was offline last time we checked, and we aren't trying them again

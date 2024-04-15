@@ -30,6 +30,7 @@ from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
 from federationbot.controllers import ReactionTaskController
+from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.events import (
     CreateRoomStateEvent,
     Event,
@@ -352,7 +353,7 @@ class FederationBot(Plugin):
 
         # Sort out the room id
         if room_id_or_alias:
-            room_to_check = await self._resolve_room_id_or_alias(
+            room_to_check, _ = await self.resolve_room_id_or_alias(
                 room_id_or_alias, command_event, origin_server
             )
             if not room_to_check:
@@ -705,7 +706,7 @@ class FederationBot(Plugin):
 
         # Sort out the room id
         if room_id_or_alias:
-            room_id = await self._resolve_room_id_or_alias(
+            room_id, _ = await self.resolve_room_id_or_alias(
                 room_id_or_alias, command_event, origin_server
             )
             if not room_id:
@@ -1568,7 +1569,7 @@ class FederationBot(Plugin):
 
         # This does place a request, so need to use origin for auth
         await command_event.respond("Resolving room alias(if it was one)")
-        room_id = await self._resolve_room_id_or_alias(
+        room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
             room_id_or_alias, command_event, origin_server
         )
         if not room_id:
@@ -1578,9 +1579,12 @@ class FederationBot(Plugin):
         # One way or another, we have a room id by now
         assert room_id is not None
         await command_event.respond(f"Collecting last event from room {room_id}")
+        # Try to use a server from the room alias response, but if there was none use something else
         head_data = await self.federation_handler.make_join_to_server(
             origin_server,
-            destination_server,
+            list_of_room_alias_servers[0]
+            if list_of_room_alias_servers
+            else destination_server,
             room_id,
             str(self.client.mxid),
         )
@@ -1967,7 +1971,7 @@ class FederationBot(Plugin):
             )
             return
 
-        room_id = await self._resolve_room_id_or_alias(
+        room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
             room_id_or_alias, command_event, origin_server
         )
         if not room_id:
@@ -1977,7 +1981,9 @@ class FederationBot(Plugin):
 
         room_version = await self.federation_handler.discover_room_version(
             origin_server=origin_server,
-            destination_server=origin_server,
+            destination_server=list_of_room_alias_servers[0]
+            if list_of_room_alias_servers
+            else origin_server,
             room_id=room_id,
         )
         if not room_version:
@@ -2115,17 +2121,21 @@ class FederationBot(Plugin):
     ) -> None:
         await command_event.mark_read()
         origin_server = get_domain_from_id(self.client.mxid)
-        room_id = await self._resolve_room_id_or_alias(
+        room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
             room_id_or_alias, command_event, origin_server
         )
         if not room_id:
             # The user facing error message was already sent
             return
+        self.log.warning(f"list_of_servers: {list_of_room_alias_servers}")
+        destination_server = origin_server
+        if list_of_room_alias_servers:
+            destination_server = list_of_room_alias_servers[0]
 
         list_of_message_ids = []
         try:
             head_response = await self.federation_handler.make_join_to_server(
-                origin_server, origin_server, room_id, str(self.client.mxid)
+                origin_server, destination_server, room_id, str(self.client.mxid)
             )
         except MatrixError as e:
             message_id = await command_event.reply(
@@ -2139,7 +2149,7 @@ class FederationBot(Plugin):
         # room_version = head_response.room_version
         self.log.info(f"head: {head_response.prev_events}")
         host_list = await self.get_hosts_in_room_ordered(
-            origin_server, origin_server, room_id, head_response.prev_events[0]
+            origin_server, destination_server, room_id, head_response.prev_events[0]
         )
         if not host_list:
             # Either the origin server doesn't have the state, or some other problem
@@ -2355,7 +2365,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check = await self._resolve_room_id_or_alias(
+            room_to_check, _ = await self.resolve_room_id_or_alias(
                 maybe_room_id, command_event, origin_server
             )
             # Need to cancel server_to_check, but can't use None
@@ -3005,7 +3015,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check = await self._resolve_room_id_or_alias(
+            room_to_check, _ = await self.resolve_room_id_or_alias(
                 maybe_room_id, command_event, origin_server
             )
             # Need to cancel server_to_check, but can't use None
@@ -3229,7 +3239,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check = await self._resolve_room_id_or_alias(
+            room_to_check, _ = await self.resolve_room_id_or_alias(
                 maybe_room_id, command_event, origin_server
             )
             # Need to cancel server_to_check, but can't use None
@@ -3496,7 +3506,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check = await self._resolve_room_id_or_alias(
+            room_to_check, _ = await self.resolve_room_id_or_alias(
                 maybe_room_id, command_event, origin_server
             )
             # Need to cancel server_to_check, but can't use None
@@ -4116,7 +4126,7 @@ class FederationBot(Plugin):
             )
             return
 
-        room_id = await self._resolve_room_id_or_alias(
+        room_id, _ = await self.resolve_room_id_or_alias(
             room_id_or_alias, command_event, origin_server
         )
         if not room_id:
@@ -4433,53 +4443,68 @@ class FederationBot(Plugin):
                 message_id, command_event.room_id
             )
 
-    async def _resolve_room_id_or_alias(
+    async def resolve_room_id_or_alias(
         self,
         room_id_or_alias: Optional[str],
         command_event: MessageEvent,
         origin_server: str,
-    ) -> Optional[str]:
+    ) -> Tuple[Optional[str], Optional[List[str]]]:
+        """
+        If this is a room alias, return a room id and a list of servers to join through. If
+        this is a room id, just return that and no list of server. If it was nothing, return
+        the room id of the room the command was issued from.
+
+        Depending on errors, let the user know there was a problem.
+
+        Args:
+            room_id_or_alias:
+            command_event:
+            origin_server:
+
+        Returns:
+
+        """
+        list_of_servers = None
         if room_id_or_alias:
             # Sort out if the room id or alias passed in is valid and resolve the alias
             # to the room id if it is.
             if room_id_or_alias.startswith("#"):
                 # look up the room alias. The server is extracted from the alias itself.
-                alias_result = await self.federation_handler.get_room_alias_from_server(
-                    origin_server=origin_server,
-                    room_alias=room_id_or_alias,
-                )
-                if alias_result.http_code != 200:
+                try:
+                    (
+                        room_id,
+                        list_of_servers,
+                    ) = await self.federation_handler.resolve_room_alias(
+                        origin_server=origin_server,
+                        room_alias=room_id_or_alias,
+                    )
+                except MalformedRoomAliasError as e:
                     message_id = await command_event.reply(
-                        "Received an error while querying for room alias: "
-                        f"{alias_result.http_code}: {alias_result.reason}"
+                        f"{e.summary_exception}: '{room_id_or_alias}'"
                     )
                     await self.reaction_task_controller.add_cleanup_control(
                         message_id, command_event.room_id
                     )
-                    self.log.warning(
-                        f"_resolve_room_id_or_alias: alias_result: {alias_result}"
+                    return None, None
+                except FedBotException as e:
+                    message_id = await command_event.reply(
+                        "Received an error while querying for room alias:\n\n"
+                        f"{e.summary_exception}: '{room_id_or_alias}'"
                     )
-                    return None
-                else:
-                    room_id = alias_result.json_response.get("room_id")
-            elif room_id_or_alias.startswith("!"):
-                room_id = room_id_or_alias
+                    await self.reaction_task_controller.add_cleanup_control(
+                        message_id, command_event.room_id
+                    )
+                    return None, None
+
             else:
-                # Probably won't ever hit this, as it will be prefiltered at the command
-                # invocation.
-                message_id = await command_event.reply(
-                    "Room ID or Alias supplied doesn't have the appropriate sigil"
-                    f"(either a `!` or a `#`), '{room_id_or_alias}'"
-                )
-                await self.reaction_task_controller.add_cleanup_control(
-                    message_id, command_event.room_id
-                )
-                return None
+                room_id = room_id_or_alias
+
         else:
             # When not supplied a room id, we assume they want the room the command was
             # issued from.
             room_id = str(command_event.room_id)
-        return room_id
+
+        return room_id, list_of_servers
 
     async def get_hosts_in_room_ordered(
         self,
@@ -4563,12 +4588,12 @@ class FederationBot(Plugin):
         room_id_or_alias: Optional[str],
         event_id: Optional[str],
     ) -> Optional[Tuple[str, str, int]]:
-        room_id = await self._resolve_room_id_or_alias(
+        room_id, _ = await self.resolve_room_id_or_alias(
             room_id_or_alias, command_event, origin_server
         )
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
-            # function
+            # function.
             return None
 
         origin_server_ts = None
