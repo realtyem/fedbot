@@ -2136,6 +2136,7 @@ class FederationBot(Plugin):
             )
             return
 
+        # room_version = head_response.room_version
         self.log.info(f"head: {head_response.prev_events}")
         host_list = await self.get_hosts_in_room_ordered(
             origin_server, origin_server, room_id, head_response.prev_events[0]
@@ -2200,20 +2201,46 @@ class FederationBot(Plugin):
         ].gather_results()
 
         list_of_buffered_messages: List[str] = []
-        room_version = None
+
+        server_name_dc = DisplayLineColumnConfig("Server Name")
+        last_event_dc = DisplayLineColumnConfig("Last Event")
+        last_event_map: Dict[str, str] = {}
+        for host, fed_response in results:
+            server_name_dc.maybe_update_column_width(host)
+            if isinstance(fed_response, MakeJoinResponse):
+                prev_events = fed_response.prev_events
+                retrieved_prev_events = (
+                    await self.federation_handler.get_events_from_server(
+                        origin_server=origin_server,
+                        destination_server=host,
+                        events_list=prev_events,
+                    )
+                )
+                for (
+                    retrieved_event_id,
+                    retrieved_event,
+                ) in retrieved_prev_events.items():
+                    # Save the initial map entry
+                    last_event_map.setdefault(host, retrieved_event_id)
+
+                    if (
+                        retrieved_event.depth
+                        > retrieved_prev_events[last_event_map[host]].depth
+                    ):
+                        last_event_map[host] = retrieved_event_id
+
         for result in results:
             self.log.info(f"head_command: result: {result}")
             host, fed_response = result
             if isinstance(fed_response, MatrixError):
                 list_of_buffered_messages.extend(
-                    (f"{host}: {fed_response.http_code}, {fed_response.reason}",)
+                    (
+                        f"{server_name_dc.pad(host)}: {fed_response.http_code}, {fed_response.reason}",
+                    )
                 )
             else:
-                if not room_version:
-                    room_version = fed_response.room_version
-
                 list_of_buffered_messages.extend(
-                    (f"{host}: {fed_response.prev_events[0]}",)
+                    (f"{server_name_dc.pad(host)}: {last_event_map[host]}",)
                 )
         await self.reaction_task_controller.cancel(reference_task_key)
 
