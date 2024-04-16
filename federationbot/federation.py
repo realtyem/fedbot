@@ -10,6 +10,7 @@ from aiohttp import (
     ClientSession,
     ClientTimeout,
     TCPConnector,
+    TraceConfig,
     client_exceptions,
 )
 from backoff._typing import Details
@@ -45,6 +46,24 @@ from federationbot.responses import (
     MatrixResponse,
 )
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
+from federationbot.tracing import (
+    on_connection_create_end,
+    on_connection_create_start,
+    on_connection_queued_end,
+    on_connection_queued_start,
+    on_connection_reuseconn,
+    on_dns_cache_hit,
+    on_dns_cache_miss,
+    on_dns_resolvehost_end,
+    on_dns_resolvehost_start,
+    on_request_chunk_sent,
+    on_request_end,
+    on_request_exception,
+    on_request_headers_sent,
+    on_request_redirect,
+    on_request_start,
+    on_response_chunk_received,
+)
 from federationbot.types import (
     KeyContainer,
     KeyID,
@@ -83,6 +102,24 @@ class FederationHandler:
         server_signing_keys: Dict[str, str],
         task_controller: ReactionTaskController,
     ):
+        trace_config = TraceConfig()
+        trace_config.on_request_start.append(on_request_start)
+        trace_config.on_request_end.append(on_request_end)
+        trace_config.on_request_chunk_sent.append(on_request_chunk_sent)
+        trace_config.on_request_redirect.append(on_request_redirect)
+        trace_config.on_request_exception.append(on_request_exception)
+        trace_config.on_request_headers_sent.append(on_request_headers_sent)
+        trace_config.on_response_chunk_received.append(on_response_chunk_received)
+        trace_config.on_connection_create_end.append(on_connection_create_end)
+        trace_config.on_connection_create_start.append(on_connection_create_start)
+        trace_config.on_connection_reuseconn.append(on_connection_reuseconn)
+        trace_config.on_connection_queued_end.append(on_connection_queued_end)
+        trace_config.on_connection_queued_start.append(on_connection_queued_start)
+        trace_config.on_dns_cache_hit.append(on_dns_cache_hit)
+        trace_config.on_dns_cache_miss.append(on_dns_cache_miss)
+        trace_config.on_dns_resolvehost_end.append(on_dns_resolvehost_end)
+        trace_config.on_dns_resolvehost_start.append(on_dns_resolvehost_start)
+
         # TODO: Make a custom Resolver to handle server discovery
         self.http_client = ClientSession(
             connector=TCPConnector(keepalive_timeout=60, limit=1000, limit_per_host=3)
