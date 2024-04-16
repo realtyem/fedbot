@@ -2114,7 +2114,7 @@ class FederationBot(Plugin):
                 message_id, command_event.room_id
             )
 
-    @test_command.subcommand(
+    @fed_command.subcommand(
         name="head", help="experiment for retrieving information about a room"
     )
     @command.argument(
@@ -2218,7 +2218,8 @@ class FederationBot(Plugin):
 
         server_name_dc = DisplayLineColumnConfig("Server Name")
         last_event_dc = DisplayLineColumnConfig("Last Event")
-        last_event_map: Dict[str, str] = {}
+        # Tuple should be event_id and Event
+        last_event_map: Dict[str, Tuple[str, Optional[Event]]] = {}
         for host, fed_response in results:
             server_name_dc.maybe_update_column_width(host)
             if isinstance(fed_response, MakeJoinResponse):
@@ -2230,18 +2231,22 @@ class FederationBot(Plugin):
                         events_list=prev_events,
                     )
                 )
+
                 for (
                     retrieved_event_id,
                     retrieved_event,
                 ) in retrieved_prev_events.items():
                     # Save the initial map entry
-                    last_event_map.setdefault(host, retrieved_event_id)
-
-                    if (
-                        retrieved_event.depth
-                        > retrieved_prev_events[last_event_map[host]].depth
-                    ):
-                        last_event_map[host] = retrieved_event_id
+                    if isinstance(retrieved_event, Event):
+                        last_event_map.setdefault(
+                            host, (retrieved_event_id, retrieved_event)
+                        )
+                        last_event_entry_id, last_event_entry_ts = last_event_map[host]
+                        if (
+                            retrieved_event.origin_server_ts
+                            > retrieved_prev_events[last_event_entry_id].origin_server_ts  # type: ignore[attr-defined]
+                        ):
+                            last_event_map[host] = retrieved_event_id, retrieved_event
 
         for result in results:
             self.log.info(f"head_command: result: {result}")
@@ -2253,9 +2258,20 @@ class FederationBot(Plugin):
                     )
                 )
             else:
-                list_of_buffered_messages.extend(
-                    (f"{server_name_dc.pad(host)}: {last_event_map[host]}",)
+                le_id, le_event = last_event_map[host]
+                glyph_auth_events = "".join(
+                    ["A" for _ in range(0, len(fed_response.auth_events))]
                 )
+                glyph_prev_events = "".join(
+                    ["P" for _ in range(0, len(fed_response.prev_events))]
+                )
+                if le_event and isinstance(le_event, Event):
+
+                    list_of_buffered_messages.extend(
+                        (
+                            f"{server_name_dc.pad(host)}: {le_id} | {pretty_print_timestamp(le_event.origin_server_ts)} | {glyph_auth_events}:{glyph_prev_events}",
+                        )
+                    )
         await self.reaction_task_controller.cancel(reference_task_key)
 
         final_buffer_messages = combine_lines_to_fit_event(
