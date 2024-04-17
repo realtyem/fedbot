@@ -1,6 +1,7 @@
 from typing import List, Optional
 from dataclasses import dataclass
 from enum import Enum
+from types import SimpleNamespace
 
 
 class ResponseStatusType(Enum):
@@ -26,6 +27,7 @@ class DiagnosticInfo:
     connection_test_status: ResponseStatusType
     tls_handled_by: Optional[str]
     retries: int = 0
+    trace_ctx: Optional[SimpleNamespace] = None
 
     def __init__(self, enable_diagnostics: bool) -> None:
         self.diagnostics_enabled = enable_diagnostics

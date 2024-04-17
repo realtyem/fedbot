@@ -122,7 +122,8 @@ class FederationHandler:
 
         # TODO: Make a custom Resolver to handle server discovery
         self.http_client = ClientSession(
-            connector=TCPConnector(keepalive_timeout=60, limit=1000, limit_per_host=3)
+            connector=TCPConnector(keepalive_timeout=60, limit=1000, limit_per_host=3),
+            trace_configs=[trace_config],
         )
         self.logger = logger
         self.hosting_server = get_domain_from_id(bot_mxid)
@@ -257,6 +258,8 @@ class FederationHandler:
             # defaults to 5, for roundups on timeouts
             # ceil_threshold=5.0,
         )
+        trace_context = {"url": url_object}
+
         try:
             response = await self.http_client.request(
                 method=method,
@@ -265,6 +268,7 @@ class FederationHandler:
                 timeout=client_timeouts,
                 server_hostname=server_hostname_sni,
                 json=content,
+                trace_request_ctx=trace_context,
             )
 
         # Split the different exceptions up based on where the information is extracted from
@@ -372,6 +376,7 @@ class FederationHandler:
         """
         result_dict: Optional[Dict[str, Any]] = None
         diag_info = DiagnosticInfo(diagnostics)
+        context = None
         server_result = self._server_discovery_cache.get(destination_server_name)
         errcode: Optional[str] = None
         error: Optional[str] = None
@@ -443,6 +448,10 @@ class FederationHandler:
             reason = response.reason or "No Reason/status returned"
             headers = response.headers
             self._server_discovery_cache.set(server_result.host, server_result)
+            for ctx in response._traces:
+                context = ctx._trace_config_ctx
+                diag_info.trace_ctx = context
+                self.logger.info(f"Found context info in _traces: {context}")
 
             if 200 <= code < 599:
                 result = await response.text()
@@ -489,6 +498,7 @@ class FederationHandler:
                 json_response=result_dict or {},
                 errcode=errcode,
                 error=error,
+                tracing_context=context,
             )
 
         # Don't need a success diagnostic message here, the one above works fine
@@ -499,6 +509,7 @@ class FederationHandler:
             json_response=result_dict or {},
             errcode=errcode,
             error=error,
+            tracing_context=context,
         )
 
     async def get_server_version(

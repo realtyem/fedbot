@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 from federationbot.server_result import DiagnosticInfo
 
@@ -30,6 +31,7 @@ class MatrixResponse:
     diag_info: Optional[DiagnosticInfo] = None
     errcode: Optional[str] = None
     error: Optional[str] = None
+    tracing_context: Optional[SimpleNamespace] = None
 
 
 @dataclass
