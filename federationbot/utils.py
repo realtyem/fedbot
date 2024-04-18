@@ -594,7 +594,7 @@ def br(message: str) -> str:
     Returns: message string appended with <br> tag
 
     """
-    return f"{message}<br>"
+    return f"{message}<br>\n"
 
 
 def bold(message: str) -> str:
@@ -628,8 +628,18 @@ def wrap_in_details(message: str, summary: Optional[str] = None) -> str:
     return f"<details>{summary_render}{message}</details>"
 
 
-def add_color(message: str, foreground: Colors, background: Colors) -> str:
-    return f'<font color="#{foreground.value}" data-mx-bg-color="#{background.value}">{message}</font>'
+def add_color(
+    message: str,
+    foreground: Optional[Colors] = None,
+    background: Optional[Colors] = None,
+) -> str:
+    buffered_message = "<font"
+    if foreground:
+        buffered_message += f' color="#{foreground.value}"'
+    if background:
+        buffered_message += f' data-mx-bg-color="#{background.value}"'
+    buffered_message += f">{message}</font>"
+    return buffered_message
 
 
 def combine_lines_to_fit_event(
@@ -672,8 +682,9 @@ def combine_lines_to_fit_event(
 
 def combine_lines_to_fit_event_html(
     list_of_all_lines: List[str],
-    header_line: Optional[str],
+    header_lines: Optional[List[str]],
     add_code_tags: bool = True,
+    apply_pre_tags: bool = False,
     insert_new_lines: bool = True,
 ) -> List[str]:
     """
@@ -682,30 +693,36 @@ def combine_lines_to_fit_event_html(
 
     Args:
         list_of_all_lines: strings to render(don't forget newlines)
-        header_line: if you want a line at the top(description or whatever)
+        header_lines: if you want a line at the top(description or whatever)
         add_code_tags: bool if lines should be wrapped in <code></code> tags
+        apply_pre_tags: bool if entire finished combined lines should be wrapped in <pre></pre> tags
         insert_new_lines: bool if <br> html tags should be appended to each line
 
     Returns: List strings designed to fit into an Event's size restrictions
 
     """
     list_of_combined_lines = []
-    buffered_line = ""
-    half_rendered_header_line = ""
-    if header_line:
-        half_rendered_header_line += header_line
+    buffered_line = "<pre>" if apply_pre_tags else ""
+    rendered_header_lines = ""
+    for header_line in header_lines:
+        half_rendered_header_line = header_line
         if add_code_tags:
-            half_rendered_header_line += wrap_in_code_tags(half_rendered_header_line)
+            half_rendered_header_line = wrap_in_code_tags(half_rendered_header_line)
         if insert_new_lines:
             half_rendered_header_line = br(half_rendered_header_line)
-        buffered_line += half_rendered_header_line
-        # buffered_line += "\n" if insert_new_lines else ""
+        # Take a copy, otherwise the reference passing plays games
+        rendered_header_lines += str(half_rendered_header_line)
+    buffered_line += rendered_header_lines
+
     for line in list_of_all_lines:
         if len(buffered_line) + len(line) > MAX_EVENT_SIZE_FOR_SENDING:
             # This buffer is full, add it to the final list
+            buffered_line += "</pre>" if apply_pre_tags else ""
             list_of_combined_lines.extend([buffered_line])
+
             # Don't forget to start the new buffer
-            buffered_line = half_rendered_header_line
+            buffered_line = "<pre>" if apply_pre_tags else ""
+            buffered_line += rendered_header_lines
 
         half_rendered_line = line
         if add_code_tags:
@@ -714,6 +731,7 @@ def combine_lines_to_fit_event_html(
             half_rendered_line = br(half_rendered_line)
         buffered_line += half_rendered_line
 
+    buffered_line += "</pre>" if apply_pre_tags else ""
     # Grab the last buffer too
     list_of_combined_lines.extend([buffered_line])
     return list_of_combined_lines

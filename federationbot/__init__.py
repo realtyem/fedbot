@@ -276,7 +276,7 @@ class FederationBot(Plugin):
 
         await command_event.respond(
             make_into_text_event(
-                combine_lines_to_fit_event_html(test_message_list, "")[0],
+                combine_lines_to_fit_event_html(test_message_list, [""])[0],
                 allow_html=True,
             ),
             allow_html=True,
@@ -294,7 +294,7 @@ class FederationBot(Plugin):
 
         await command_event.respond(
             make_into_text_event(
-                combine_lines_to_fit_event_html(test_message_list, "")[0],
+                combine_lines_to_fit_event_html(test_message_list, [""])[0],
                 allow_html=True,
             ),
             allow_html=True,
