@@ -74,6 +74,7 @@ from federationbot.utils import full_dict_copy, get_domain_from_id
 
 backoff_logger = logging.getLogger("backoff")
 SOCKET_TIMEOUT_SECONDS = 2.0
+USER_AGENT_STRING = "Maubot/Fedbot 0.0.6"
 
 
 def backoff_logging_handler(details: Details) -> None:
@@ -205,6 +206,7 @@ class FederationHandler:
         #
         # From what I understand, having a port as 'None' will cause the URL to select
         # the most likely port based on the scheme. Sounds handy, use that.
+        request_headers = {"User-Agent": USER_AGENT_STRING}
         if server_result:
             if server_result.unhealthy:
                 raise ServerUnreachable(
@@ -216,13 +218,12 @@ class FederationHandler:
             server_hostname_sni = (
                 server_result.sni_server_name if server_result.use_sni else None
             )
-            request_headers = {"Host": server_result.host_header}
+            request_headers.update({"Host": server_result.host_header})
 
         else:
             destination_port = None
             resolved_destination_server = destination_server_name
             server_hostname_sni = None
-            request_headers = None
 
         url_object = URL.build(
             scheme="https",
