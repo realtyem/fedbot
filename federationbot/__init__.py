@@ -3000,6 +3000,150 @@ class FederationBot(Plugin):
             )
 
     @fed_command.subcommand(
+        name="ping",
+        help="Check a server(or current room) for application response time",
+    )
+    @command.argument(name="server_to_check", label="Server to check", required=False)
+    async def ping_command(
+        self, command_event: MessageEvent, server_to_check: Optional[str]
+    ) -> None:
+        # Let the user know the bot is paying attention
+        await command_event.mark_read()
+
+        list_of_servers_to_check = set()
+        list_of_message_ids = []
+
+        room_to_check = command_event.room_id
+
+        # If the server was not passed in, then this will be None
+        if not server_to_check:
+            # Get the members this bot knows about in this room
+            # TODO: try and find a way to not use the client API for this
+            try:
+                assert isinstance(room_to_check, str)
+                joined_members = await self.client.get_joined_members(
+                    RoomID(room_to_check)
+                )
+
+            except MForbidden:
+                await command_event.respond(NOT_IN_ROOM_ERROR)
+                return
+            else:
+                for member in joined_members:
+                    list_of_servers_to_check.add(get_domain_from_id(member))
+        else:
+            if server_to_check.startswith("#") or server_to_check.startswith("!"):
+                await command_event.reply(
+                    "Please use the bot in the room you want to check."
+                )
+                return
+            list_of_servers_to_check.add(server_to_check)
+
+        number_of_servers = len(list_of_servers_to_check)
+
+        current_message_id = await command_event.respond(
+            f"Testing federation response time of `/version` for {number_of_servers} server"
+            f"{'s' if number_of_servers > 1 else ''}"
+        )
+        list_of_message_ids.extend([current_message_id])
+
+        started_at = time.monotonic()
+        server_to_version_data = await self._get_versions_from_servers(
+            list_of_servers_to_check
+        )
+        total_time = time.monotonic() - started_at
+
+        # Establish the initial size of the padding for each row
+        server_name_col = DisplayLineColumnConfig(
+            "Server Name", horizontal_separator=" | "
+        )
+        ok_or_fail_col = DisplayLineColumnConfig(
+            "Result", justify=Justify.RIGHT, horizontal_separator=" | "
+        )
+        response_time_col = DisplayLineColumnConfig("Response time")
+
+        # Iterate over all the data to collect the column sizes
+        for server, result in server_to_version_data.items():
+            server_name_col.maybe_update_column_width(len(server))
+
+        # Construct the message response now
+        #
+        # Want it to look like
+        # Server Name         | Result | Application Response Time
+        # ---------------------------------------------------------
+        # example.org         |   Fail | ClientConnectorError
+        # matrix.org          |   Pass | 1.234 ms
+        # dendrite.matrix.org |   Pass | 0.13.5+13c5173
+
+        # Create the header lines
+        header_messages = [
+            f"{server_name_col.pad()} | "
+            f"{ok_or_fail_col.pad()} | "
+            f"{response_time_col.pad()}"
+        ]
+
+        # Create the delimiter line
+        header_message_line_size = len(header_messages[0])
+        header_messages.extend([f"{pad('', header_message_line_size, pad_with='-')}"])
+
+        # Alphabetical looks nicer
+        sorted_list_of_servers = sorted(list_of_servers_to_check)
+
+        # Collect all the output lines for chunking afterward
+        list_of_result_data = []
+
+        for server_name in sorted_list_of_servers:
+            buffered_message = ""
+            server_data = server_to_version_data[server_name]
+
+            buffered_message += f"{server_name_col.pad(server_name)}{server_name_col.horizontal_separator}"
+            # Federation request may have had an error, handle those errors here
+            if server_data.http_code != 200:
+                # Pad the software column with spaces, so the error and the code end up in the version column
+                # Additionally, since this is the error clause, don't include the vertical line to separate
+                # the column, giving a more distinctive visual indicator.
+                buffered_message += f"{add_color(bold(ok_or_fail_col.pad('ERROR')), foreground=Colors.RED)}"
+                buffered_message += f"{ok_or_fail_col.horizontal_separator}"
+
+                buffered_message += f"{str(server_data.http_code) + ': ' if server_data.http_code > 0 else ''}"
+                buffered_message += f"{server_data.reason}"
+
+            else:
+                buffered_message += f"{add_color(bold(ok_or_fail_col.pad('PASS')), foreground=Colors.GREEN)}"
+                buffered_message += f"{ok_or_fail_col.horizontal_separator}"
+                calculated_time = -1.0
+                if server_data.diag_info:
+                    context = server_data.diag_info.trace_ctx
+                    if context:
+                        end_time = context.request_end
+                        # if context.request_chunk_sent:
+                        start_time = context.request_chunk_sent
+                        # else:
+                        #     start_time =
+                        calculated_time = (end_time - start_time) * 1000
+                buffered_message += f"{calculated_time:.3f} ms"
+            list_of_result_data.extend([buffered_message])
+
+        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds"
+        list_of_result_data.extend([footer_message])
+
+        final_list_of_data = combine_lines_to_fit_event_html(
+            list_of_result_data, header_messages, insert_new_lines=True
+        )
+
+        # Wrap in code block markdown before sending
+        for chunk in final_list_of_data:
+            current_message_id = await command_event.respond(
+                make_into_text_event(chunk, allow_html=True, ignore_body=True),
+                allow_html=True,
+            )
+            list_of_message_ids.extend([current_message_id])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(
+                message_id, command_event.room_id
+            )
+
+    @fed_command.subcommand(
         name="version",
         aliases=["versions"],
         help="Check a server in the room for version info",
@@ -3187,6 +3331,7 @@ class FederationBot(Plugin):
 
                 result = await self.federation_handler.get_server_version(
                     worker_server_name,
+                    diagnostics=True,
                 )
 
                 server_to_version_data[worker_server_name] = result
@@ -3201,9 +3346,7 @@ class FederationBot(Plugin):
             reference_key,
             _version_worker,
             version_queue,
-            limit=min(
-                len(servers_to_check), MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST
-            ),
+            limit=len(servers_to_check),
         )
         await version_queue.join()
         await self.reaction_task_controller.cancel(reference_key)
