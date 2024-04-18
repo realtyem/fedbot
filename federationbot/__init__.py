@@ -933,10 +933,6 @@ class FederationBot(Plugin):
                 # But still add it to the pile so that we don't do it twice
                 event_id_attempted_once.update(next_event_ids)
 
-                if back_off_time > 5.0:  # SECONDS_BEFORE_IGNORE_BACKOFF:
-                    self.log.info(f"{worker_name}: Backing off for {back_off_time}")
-                    await asyncio.sleep(back_off_time)
-
                 iter_start_time = time.time()
                 if next_event_ids:
                     pulled_event_map = (
