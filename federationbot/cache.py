@@ -1,4 +1,5 @@
 from typing import Callable, Dict, Generic, Optional, TypeVar
+from threading import Lock
 import asyncio
 import time
 
@@ -43,6 +44,7 @@ class LRUCache(Generic[KT, VT]):
         """
         cache: Dict[KT, LRUCacheEntry[VT]] = {}
         self._cache = cache
+        self._lock = Lock()
         self.time_cb = time.time
         self.eviction_condition_cb = (
             eviction_condition_func or self.default_expiry_condition
@@ -54,17 +56,19 @@ class LRUCache(Generic[KT, VT]):
         self.set = self.__setitem__
 
     def __setitem__(self, key: KT, value: VT) -> None:
-        cache_entry = self._cache.setdefault(key, LRUCacheEntry())
-        cache_entry.cache_value = value
-        cache_entry.last_access_time_ms = self.time_cb()
-        self._cache[key] = cache_entry
+        with self._lock:
+            cache_entry = self._cache.setdefault(key, LRUCacheEntry())
+            cache_entry.cache_value = value
+            cache_entry.last_access_time_ms = self.time_cb()
+            self._cache[key] = cache_entry
 
     def __getitem__(self, item: KT, _default: Optional[VT] = None) -> Optional[VT]:
-        if item in self._cache:
-            self._cache[item].last_access_time_ms = self.time_cb()
-            cache_entry = self._cache.get(item)
-            assert cache_entry is not None
-            return cache_entry.cache_value
+        with self._lock:
+            if item in self._cache:
+                self._cache[item].last_access_time_ms = self.time_cb()
+                cache_entry = self._cache.get(item)
+                assert cache_entry is not None
+                return cache_entry.cache_value
 
         return _default
 
