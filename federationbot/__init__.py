@@ -1,5 +1,5 @@
 from typing import Any, Collection, Dict, List, Optional, Set, Tuple, Type, Union, cast
-from asyncio import Queue, QueueEmpty
+from asyncio import QueueEmpty
 from datetime import datetime
 from enum import Enum
 from itertools import chain
@@ -454,7 +454,8 @@ class FederationBot(Plugin):
         )
 
         async def _inner_walking_fetcher(
-            for_direction: PaginationDirection, queue: Queue
+            for_direction: PaginationDirection,
+            queue: asyncio.Queue[Tuple[float, Optional[SyncToken]]],
         ) -> None:
             retry_token = False
             back_off_time = 0.0
@@ -496,7 +497,9 @@ class FederationBot(Plugin):
         discovery_cumulative_iter_time = 0.0
         discovery_collection_of_event_ids = set()
         response_list: List[Tuple[float, PaginatedMessages]] = []
-        discovery_fetch_queue: Queue[Tuple[float, Optional[SyncToken]]] = Queue()
+        discovery_fetch_queue: asyncio.Queue[
+            Tuple[float, Optional[SyncToken]]
+        ] = asyncio.Queue()
 
         task = asyncio.create_task(
             _inner_walking_fetcher(PaginationDirection.FORWARD, discovery_fetch_queue)
@@ -561,7 +564,9 @@ class FederationBot(Plugin):
         await asyncio.gather(task, return_exceptions=True)
 
         backwalk_iterations = 0
-        backwalk_fetch_queue: Queue[Tuple[float, Optional[SyncToken]]] = Queue()
+        backwalk_fetch_queue: asyncio.Queue[
+            Tuple[float, Optional[SyncToken]]
+        ] = asyncio.Queue()
         # List of tuples, (time_spent float, NamedTuple of data)
         response_list = []
 
@@ -900,8 +905,8 @@ class FederationBot(Plugin):
 
         async def _event_walking_fetcher(
             worker_name: str,
-            _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
-            _event_error_queue: Queue[str],
+            _event_fetch_queue: asyncio.Queue[Tuple[float, bool, Set[str]]],
+            _event_error_queue: asyncio.Queue[str],
         ) -> None:
             while True:
                 if self.reaction_task_controller.is_stopped(pinned_message):
@@ -1038,8 +1043,8 @@ class FederationBot(Plugin):
         async def _room_repair_worker(
             worker_name: str,
             room_version: int,
-            _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
-            _event_error_queue: Queue[str],
+            _event_fetch_queue: asyncio.Queue[Tuple[float, bool, Set[str]]],
+            _event_error_queue: asyncio.Queue[str],
         ) -> None:
             """
             Responsible for hunting down an Event(by its ID) and walking its
@@ -1077,7 +1082,7 @@ class FederationBot(Plugin):
                 already_searching_for_event_id = set()
 
                 # These will be local queues to organize what this worker is currently working on.
-                event_ids_to_try_next: Queue[str] = Queue()
+                event_ids_to_try_next: asyncio.Queue[str] = asyncio.Queue()
                 event_ids_to_try_next.put_nowait(next_event_id)
                 done = False
                 while not done:
@@ -1271,7 +1276,7 @@ class FederationBot(Plugin):
 
         async def _waiting_retry_worker(
             worker_name: str,
-            _event_fetch_queue: Queue[Tuple[float, bool, Set[str]]],
+            _event_fetch_queue: asyncio.Queue[Tuple[float, bool, Set[str]]],
             _bot_working_status_counter: Dict[str, bool],
             event_id_to_check: str,
             num_of_events_prev_sent: int,
@@ -1342,10 +1347,12 @@ class FederationBot(Plugin):
             _bot_working_status_counter[worker_name] = False
 
         # Tuple[suggested_backoff, is_this_a_retry, event_ids_to_fetch]
-        roomwalk_fetch_queue: Queue[Tuple[float, bool, Set[str]]] = Queue()
+        roomwalk_fetch_queue: asyncio.Queue[
+            Tuple[float, bool, Set[str]]
+        ] = asyncio.Queue()
         # The Queue of errors, matches with _event_error_queue on workers
         # Tuple[suggested_backoff, event_id_to_fetch]
-        roomwalk_error_queue: Queue[str] = Queue()
+        roomwalk_error_queue: asyncio.Queue[str] = asyncio.Queue()
 
         # This is a grouping of one-off fired tasks, specifically the ones with a long
         # wait timer. The room walker worker will create these
@@ -1623,7 +1630,7 @@ class FederationBot(Plugin):
             )
 
         list_of_server_and_event_id_to_send = []
-        event_ids_to_try_next: Queue[str] = Queue()
+        event_ids_to_try_next: asyncio.Queue[str] = asyncio.Queue()
         event_ids_to_try_next.put_nowait(event_id)
         not_done = True
         while not_done:
@@ -2172,12 +2179,12 @@ class FederationBot(Plugin):
                     if host not in host_list:
                         host_list.extend([host])
 
-        host_queue: Queue[str] = asyncio.Queue()
+        host_queue: asyncio.Queue[str] = asyncio.Queue()
         for host in host_list:
             host_queue.put_nowait(host)
 
         async def _head_task(
-            _queue: Queue[str],
+            _queue: asyncio.Queue[str],
         ) -> Tuple[str, Union[MakeJoinResponse, MatrixError]]:
             _host = await _queue.get()
             try:
@@ -2434,7 +2441,7 @@ class FederationBot(Plugin):
         # map of server name -> (server brand, server version)
         server_to_server_data: Dict[str, MatrixResponse] = {}
 
-        async def _delegation_worker(queue: Queue) -> None:
+        async def _delegation_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
 
@@ -2451,7 +2458,7 @@ class FederationBot(Plugin):
 
                 queue.task_done()
 
-        delegation_queue: Queue[str] = asyncio.Queue()
+        delegation_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await delegation_queue.put(server_name)
 
@@ -3321,7 +3328,7 @@ class FederationBot(Plugin):
         # Return this at the end
         server_to_version_data: Dict[str, MatrixResponse] = {}
 
-        async def _version_worker(queue: Queue) -> None:
+        async def _version_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
 
@@ -3333,7 +3340,7 @@ class FederationBot(Plugin):
                 server_to_version_data[worker_server_name] = result
                 queue.task_done()
 
-        version_queue: Queue[str] = asyncio.Queue()
+        version_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in servers_to_check:
             version_queue.put_nowait(server_name)
 
@@ -3449,7 +3456,7 @@ class FederationBot(Plugin):
         )
         list_of_message_ids.extend([prerender_message])
 
-        async def _server_keys_worker(queue: Queue[str]) -> None:
+        async def _server_keys_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
 
@@ -3462,7 +3469,7 @@ class FederationBot(Plugin):
 
                 queue.task_done()
 
-        keys_queue: Queue[str] = asyncio.Queue()
+        keys_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 
@@ -3734,7 +3741,7 @@ class FederationBot(Plugin):
             30 * 60 * 1000
         )  # Add 30 minutes
 
-        async def _server_keys_from_notary_worker(queue: Queue) -> None:
+        async def _server_keys_from_notary_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
 
@@ -3746,7 +3753,7 @@ class FederationBot(Plugin):
 
                 queue.task_done()
 
-        keys_queue: Queue[str] = asyncio.Queue()
+        keys_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 

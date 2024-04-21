@@ -1,5 +1,4 @@
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union
-from asyncio import Queue
 import asyncio
 import json
 import logging
@@ -814,7 +813,7 @@ class FederationHandler:
         # in the response and the event won't exist here
         event_to_event_base: Dict[str, EventBase] = {}
 
-        async def _get_event_worker(queue: Queue) -> None:
+        async def _get_event_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_event_id: str = await queue.get()
                 try:
@@ -848,7 +847,7 @@ class FederationHandler:
                 finally:
                     queue.task_done()
 
-        event_queue: Queue[str] = asyncio.Queue()
+        event_queue: asyncio.Queue[str] = asyncio.Queue()
         for event_id in events_list:
             await event_queue.put(event_id)
 
@@ -872,11 +871,13 @@ class FederationHandler:
     ) -> Dict[str, EventBase]:
         host_to_event_status_map: Dict[str, EventBase] = {}
 
-        host_queue: Queue[str] = Queue()
+        host_queue: asyncio.Queue[str] = asyncio.Queue()
         for host in servers_to_check:
             host_queue.put_nowait(host)
 
-        async def _event_finding_worker(queue: Queue[str]) -> Tuple[str, EventBase]:
+        async def _event_finding_worker(
+            queue: asyncio.Queue[str],
+        ) -> Tuple[str, EventBase]:
             worker_host = await queue.get()
             returned_events = await self.get_event_from_server(
                 origin_server=origin_server,
