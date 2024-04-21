@@ -701,6 +701,8 @@ def combine_lines_to_fit_event_html(
     Returns: List strings designed to fit into an Event's size restrictions
 
     """
+    if header_lines is None:
+        header_lines = []
     list_of_combined_lines = []
     buffered_line = "<pre>" if apply_pre_tags else ""
     rendered_header_lines = ""
