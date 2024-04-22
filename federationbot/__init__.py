@@ -3378,6 +3378,42 @@ class FederationBot(Plugin):
 
         return server_to_version_data
 
+    async def _get_versions_from_servers_v2(
+        self,
+        servers_to_check: Collection[str],
+    ) -> Dict[str, MatrixResponse]:
+
+        # map of server name -> json of /version response: (server brand, server version)
+        # Return this at the end
+        server_to_version_data: Dict[str, MatrixResponse] = {}
+
+        async def _version_worker(_host: str) -> Tuple[str, MatrixResponse]:
+            _result = await self.federation_handler.get_server_version(
+                _host,
+                diagnostics=True,
+            )
+            return _host, _result
+
+        reference_key = self.reaction_task_controller.setup_task_set()
+        for host in servers_to_check:
+            await self.reaction_task_controller.add_threaded_tasks(
+                reference_key, _version_worker, host
+            )
+
+        results_tuple = await self.reaction_task_controller.get_task_results(
+            reference_key, threaded=True
+        )
+
+        for result in results_tuple:
+            if isinstance(result, BaseException):
+                self.log.warning(f"Got an Exception somehow: {result}")
+                continue
+
+            host, unfinished_result = result
+            server_to_version_data[host] = unfinished_result
+
+        return server_to_version_data
+
     @fed_command.subcommand(name="server_keys")
     @command.argument(name="server_to_check", required=True)
     async def server_keys_command(
