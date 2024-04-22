@@ -1,4 +1,16 @@
-from typing import Any, Collection, Dict, List, Optional, Set, Tuple, Type, Union, cast
+from typing import (
+    Any,
+    Collection,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 from asyncio import QueueEmpty
 from datetime import datetime
 from enum import Enum
@@ -2211,11 +2223,14 @@ class FederationBot(Plugin):
             limit=len(host_list),
         )
 
-        results: Tuple[
-            Tuple[str, Union[MakeJoinResponse, MatrixError]]
-        ] = await self.reaction_task_controller.tasks_sets[
-            reference_task_key
-        ].gather_results()
+        results: Sequence[
+            Tuple[str, MakeJoinResponse | MatrixError] | BaseException
+        ] = cast(
+            Sequence[Tuple[str, MakeJoinResponse | MatrixError] | BaseException],
+            await self.reaction_task_controller.tasks_sets[
+                reference_task_key
+            ].gather_results(),
+        )
 
         list_of_buffered_messages: List[str] = []
 
@@ -2223,7 +2238,11 @@ class FederationBot(Plugin):
         last_event_dc = DisplayLineColumnConfig("Last Event")
         # Tuple should be event_id and Event
         last_event_map: Dict[str, Tuple[str, Optional[Event]]] = {}
-        for host, fed_response in results:
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+
+            host, fed_response = result
             server_name_dc.maybe_update_column_width(host)
             if isinstance(fed_response, MakeJoinResponse):
                 prev_events = fed_response.prev_events
@@ -2253,6 +2272,9 @@ class FederationBot(Plugin):
 
         for result in results:
             self.log.info(f"head_command: result: {result}")
+            if isinstance(result, BaseException):
+                raise result
+
             host, fed_response = result
             if isinstance(fed_response, MatrixError):
                 list_of_buffered_messages.extend(

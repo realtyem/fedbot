@@ -1,8 +1,22 @@
-from typing import Any, Callable, Dict, Hashable, List, Optional, Set, Tuple, TypeVar
-from asyncio import Task
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Dict,
+    Generic,
+    Hashable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    TypeVar,
+)
+from asyncio import AbstractEventLoop, Task
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 import asyncio
 import random
+import threading
 
 from maubot.matrix import MaubotMatrixClient
 from mautrix.types import EventID, MessageEvent, ReactionEvent, RoomID
@@ -129,19 +143,29 @@ class ReactionControlEntry:
         return self.current_status
 
 
-class TaskSetEntry:
+class TaskSetEntry(Generic[T]):
     """
     A collection object for holding and grouping Task's.
 
     Mainly used for cleaning up any running Task coroutines if they need to be stopped, like during a bot restart.
     """
 
-    tasks: List[Task]
+    tasks: List[Task[T]]
+    coros: List[Coroutine[Any, Any, T]]
+    loop: AbstractEventLoop
 
     def __init__(self) -> None:
         self.tasks = []
+        self.coros = []
+        self.loop = asyncio.get_event_loop()
+        self.loop.set_debug(False)
 
-    def add_tasks(self, new_task: Callable[[Any], T], *args, limit: int = 1) -> None:
+    def add_tasks(
+        self,
+        new_task: Callable[..., Coroutine[Any, Any, T | None]],
+        *args,
+        limit: int = 1,
+    ) -> None:
         """
         Add this Callable and its args 'limit' number of times to the grouping of Tasks.
 
@@ -152,12 +176,65 @@ class TaskSetEntry:
                 large grouping of one-off requests.
 
         """
-        for _ in range(0, limit):
+        for _ in range(limit):
             self.tasks.append(asyncio.create_task(new_task(*args)))  # type: ignore[arg-type]
 
-    async def gather_results(self, return_exceptions: bool = True) -> Tuple[T]:
+    async def add_threaded_tasks(
+        self,
+        new_task: Callable[..., Coroutine[Any, Any, T]],
+        *args,
+        executor: ThreadPoolExecutor,
+        limit: int = 1,
+    ) -> None:
         """
-        If you have elected for your Task to return a result, this will get them as a Tuple
+        Add this Callable and its args 'limit' number of times to the grouping of Tasks.
+        NOTE: This currently does not work as expected
+
+        Args:
+            new_task: The function name without the ()
+            *args: all the bits that are passed to the function
+            limit: How many copies of this Task should be created. Multiple copies implies either a worker model or a
+                large grouping of one-off requests.
+            executor:
+
+        """
+        for _ in range(limit):
+            self.coros.append(
+                await self.loop.run_in_executor(executor, new_task, *args)
+            )
+
+    # Currently, this is unused/broken. It is part of the experiment threaded Task experiment
+    # def run(
+    #     self,
+    #     new_task: Callable[..., Coroutine[Any, Any, T]],
+    #     *args,
+    # ):
+    #     curr_thread_id = threading.current_thread().ident
+    #     assert curr_thread_id is not None
+    #
+    #     if curr_thread_id not in self.loop_mapping:
+    #         self.loop_mapping[curr_thread_id] = asyncio.new_event_loop()
+    #
+    #     thread_loop = self.loop_mapping[curr_thread_id]
+    #     if not thread_loop.is_running():
+    #         thread_loop.run_forever()
+    #         thread_loop.set_debug(True)
+    #
+    #     coro = new_task(*args)
+    #     task = thread_loop.create_task(coro)
+    #     self.loop_to_futures_set.setdefault(curr_thread_id, set()).add(task)
+    #     return task
+
+    async def gather_results(
+        self, return_exceptions: bool = True
+    ) -> Sequence[T | BaseException]:
+        """
+        If you have elected for your Task to return a result, this will get them as a Sequence.
+
+        gather() returns something that is, not stricly speaking, a List. However, it is Typed as a Tuple as
+        it's elements do not have to homogenous. Therefore, we will use a Sequence and a Union, allowing
+        to collect Exceptions as well.
+
         Args:
             return_exceptions: Recommend False for most instances. See asyncio.gather docstring for details
 
@@ -166,6 +243,25 @@ class TaskSetEntry:
         """
         return await asyncio.gather(*self.tasks, return_exceptions=return_exceptions)
 
+    async def gather_threaded_results(
+        self, return_exceptions: bool = True
+    ) -> Sequence[T | BaseException]:
+        """
+        If you have elected for your Task to return a result, this will get them as a Sequence.
+
+        gather() returns something that is, not striclty speaking, a List. However, it is Typed as a Tuple as
+        it's elements do not have to homogenous. Therefore, we will use a Sequence and a Union, allowing
+        to collect Exceptions as well.
+
+        Args:
+            return_exceptions: Recommend False for most instances. See asyncio.gather docstring for details
+
+        Returns: Tuple of results collected
+
+        """
+
+        return await asyncio.gather(*self.coros, return_exceptions=return_exceptions)
+
     async def clear_all_tasks(self) -> None:
         """
         Cancel all the tasks in this grouping. Mostly used when finished with a command or on restart to avoid orphans
@@ -173,12 +269,14 @@ class TaskSetEntry:
         """
         for task in self.tasks:
             task.cancel()
+        for coro in self.coros:
+            coro.close()
         # Use return_exceptions set to True so all tasks actually are finished before exiting the system(or some
         # get left behind and keep running as orphans)
         await self.gather_results()
 
 
-class ReactionTaskController:
+class ReactionTaskController(Generic[T]):
     """
     Now you can add reactions to a running command as a controlling mechanism, as well as group any Tasks that may be
     used for processing the command into a cancellable format.
@@ -193,13 +291,29 @@ class ReactionTaskController:
     """
 
     tracked_reactions: Dict[EventID, ReactionControlEntry]
-    tasks_sets: Dict[Hashable, TaskSetEntry]
+    tasks_sets: Dict[Hashable, TaskSetEntry[T]]
     client: MaubotMatrixClient
+    executor: ThreadPoolExecutor
 
     def __init__(self, client: MaubotMatrixClient) -> None:
         self.tracked_reactions = {}
         self.tasks_sets = {}
         self.client = client
+        self.max_workers = 10
+        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
+
+    # Currently unused/broken. It was part of the threaded Task experiment.
+    # def maybe_shutdown_thread_loop(self, thread_id: int) -> None:
+    #     # currently unused
+    #     # curr_thread_id = threading.current_thread().ident
+    #     if thread_id not in self.event_loops_per_thread:
+    #         return
+    #
+    #     thread_loop = self.event_loops_per_thread[thread_id]
+    #     if thread_loop.is_running():
+    #         thread_loop.stop()
+    #         thread_loop.close()
+    #         self.event_loops_per_thread.pop(thread_id)
 
     async def setup_control_reactions(
         self,
@@ -217,7 +331,10 @@ class ReactionTaskController:
         await control_entry.setup(pinned_message)
         self.tracked_reactions[pinned_message] = control_entry
 
-    def setup_task_set(self, reference_key: Optional[Hashable] = None) -> Hashable:
+    def setup_task_set(
+        self,
+        reference_key: Optional[Hashable] = None,
+    ) -> Hashable:
         if reference_key is None:
             # Use a nice large base for the random key
             reference_key = random.randint(0, 1024 * 1024)
@@ -305,15 +422,60 @@ class ReactionTaskController:
             del self.tracked_reactions[event_id_to_remove]
 
     def add_tasks(
-        self, reference_key: Hashable, new_task: Callable, *args, limit: int = 1
+        self,
+        reference_key: Hashable,
+        new_task: Callable[..., Coroutine[Any, Any, T | None]],
+        *args,
+        limit: int = 1,
     ) -> None:
         if reference_key not in self.tasks_sets:
             raise ReferenceKeyNotFound("Need to run setup_task_set() first")
 
         self.tasks_sets[reference_key].add_tasks(new_task, *args, limit=limit)
 
-    async def get_task_results(self, reference_key: Hashable):
-        return await self.tasks_sets[reference_key].gather_results()
+    async def add_threaded_tasks(
+        self,
+        reference_key: Hashable,
+        new_task: Callable[..., Coroutine[Any, Any, T]],
+        *args,
+        limit: int = 1,
+    ) -> None:
+        """
+        NOTE: Currently does not work correctly. The ThreadPoolExecutor does not like receiving an asyncio Task
+        coroutine.
+
+        Args:
+            reference_key:
+            new_task:
+            *args:
+            limit:
+
+        Returns:
+
+        """
+        if reference_key not in self.tasks_sets:
+            raise ReferenceKeyNotFound("Need to run setup_task_set() first")
+
+        await self.tasks_sets[reference_key].add_threaded_tasks(
+            new_task,
+            *args,
+            limit=limit,
+            executor=self.executor,
+        )
+
+    async def get_task_results(
+        self,
+        reference_key: Hashable,
+        threaded: bool = False,
+        return_exceptions: bool = True,
+    ) -> Sequence[T | BaseException]:
+        if threaded:
+            return await self.tasks_sets[reference_key].gather_threaded_results(
+                return_exceptions=return_exceptions
+            )
+        return await self.tasks_sets[reference_key].gather_results(
+            return_exceptions=return_exceptions
+        )
 
     async def add_cleanup_control(
         self, related_message: EventID, room_id: RoomID
@@ -343,3 +505,29 @@ class ReactionTaskController:
                 )
 
         return
+
+
+# Save these for a later time, as they are incomplete
+def async_func_wrapper(await_func, *args):
+    loop = asyncio.new_event_loop()
+    results = loop.run_until_complete(await_func(args))
+    loop.close()
+    return results
+
+
+def wait_loop(loop_mapping: Dict[int, AbstractEventLoop]):
+    # use in get_task_results for threaded results(doesn't work yet)
+    #
+    # futures = [self.tasks_sets[reference_key].loop.run_in_executor(
+    #     self.executor, self.wait_loop, self.tasks_sets[reference_key].loop_mapping
+    #     ) for _ in range(self.max_workers)]
+    # return await asyncio.gather(*futures)
+
+    curr_thread_id = threading.current_thread().ident
+    assert curr_thread_id is not None
+    if curr_thread_id in loop_mapping:
+        threads_event_loop = loop_mapping[curr_thread_id]
+
+        return threads_event_loop.run_until_complete(
+            asyncio.gather(*asyncio.all_tasks())
+        )

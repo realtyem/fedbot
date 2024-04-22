@@ -902,7 +902,11 @@ class FederationHandler:
 
         results = await self.task_controller.get_task_results(reference_task_key)
 
-        for host, response in results:
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+            response: EventBase
+            host, response = result
             host_to_event_status_map[host] = response
 
         # Make sure to cancel all tasks
