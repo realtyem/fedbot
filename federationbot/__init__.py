@@ -3299,25 +3299,25 @@ class FederationBot(Plugin):
 
         for server_name in sorted_list_of_servers:
             buffered_message = ""
-            server_data = server_to_version_data[server_name]
-
+            server_data = server_to_version_data.get(server_name, None)
             buffered_message += f"{server_name_col.front_pad(server_name)} | "
-            # Federation request may have had an error, handle those errors here
-            if server_data.http_code != 200:
-                # Pad the software column with spaces, so the error and the code end up in the version column
-                # Additionally, since this is the error clause, don't include the vertical line to separate
-                # the column, giving a more distinctive visual indicator.
-                buffered_message += f"{server_software_col.pad('')}   "
+            if server_data:
+                # Federation request may have had an error, handle those errors here
+                if server_data.http_code != 200:
+                    # Pad the software column with spaces, so the error and the code end up in the version column
+                    # Additionally, since this is the error clause, don't include the vertical line to separate
+                    # the column, giving a more distinctive visual indicator.
+                    buffered_message += f"{server_software_col.pad('')}   "
 
-                buffered_message += f"{str(server_data.http_code) + ': ' if server_data.http_code > 0 else ''}{server_data.reason}\n"
+                    buffered_message += f"{str(server_data.http_code) + ': ' if server_data.http_code > 0 else ''}{server_data.reason}\n"
 
+                else:
+                    server_block = server_data.json_response.get("server", {})
+                    server_software = server_block.get("name")
+                    server_version = server_block.get("version")
+                    buffered_message += f"{server_software_col.pad(server_software)} | {server_version}\n"
             else:
-                server_block = server_data.json_response.get("server", {})
-                server_software = server_block.get("name")
-                server_version = server_block.get("version")
-                buffered_message += (
-                    f"{server_software_col.pad(server_software)} | {server_version}\n"
-                )
+                buffered_message += "Probably a threading error(WIP) sorry bout that"
 
             list_of_result_data.extend([buffered_message])
 
