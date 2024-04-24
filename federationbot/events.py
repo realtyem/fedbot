@@ -99,10 +99,7 @@ class EventBase:
 
     def verify_event_id(self, room_version: int, event_id_to_test: str) -> bool:
         generated_event_id = self.generate_event_id(room_version)
-        if generated_event_id == event_id_to_test:
-            return True
-        else:
-            return False
+        return generated_event_id == event_id_to_test
 
     def to_json(self, condensed: bool = False) -> str:
         indent = None if condensed else 4
@@ -302,7 +299,7 @@ class EventBase:
 
 
 class EventError(EventBase):
-    def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:
+    def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:  # noqa W0231
         # super().__init__(event_id, data)
         self.error = data.get("error", "Unknown Error")
         self.errcode = data.get("errcode", "Unknown Error")
@@ -347,11 +344,11 @@ class EventError(EventBase):
 def represent_signature_verify_result_as_symbol(result: SignatureVerifyResult) -> str:
     if result == SignatureVerifyResult.SUCCESS:
         return "✅"  # Green check mark
-    elif result == SignatureVerifyResult.FAIL:
+    if result == SignatureVerifyResult.FAIL:
         return "❌"  # Red X
-    else:
-        # This represents SignatureVerifyResult.UNKNOWN
-        return "❓"  # Red Question Mark
+
+    # This represents SignatureVerifyResult.UNKNOWN, the only other option
+    return "❓"  # Red Question Mark
 
 
 class RelatesTo:
@@ -454,7 +451,7 @@ class Event(EventBase):
         if relations:
             self.relations = RelatesTo(relations)
         self.signatures_verified = {}
-        for server_name in self.signatures.servers.keys():
+        for server_name in self.signatures.servers:
             self.signatures_verified[server_name] = SignatureVerifyResult.UNKNOWN
 
     def verify_content_hash(self) -> bool:
@@ -467,10 +464,8 @@ class Event(EventBase):
         existing_hash: Optional[str] = hashes.get("sha256", None)
         if existing_hash is not None:
             decoded_existing_hash = decode_base64(existing_hash)
-            if hashed_event == decoded_existing_hash:
-                return True
-            else:
-                return False
+            return hashed_event == decoded_existing_hash
+
         # For some reason the hash was missing on the event, auto fail that
         return False
 
@@ -536,7 +531,7 @@ class Event(EventBase):
             summary += f"{dc.front_pad(hashes_header)}: {pretty_hash_result} {hash_type}: {hash_value}\n"
 
         # The previous output does not add a new line(well, it does now) but create some
-        # space anyways
+        # space anyway
         summary += "\n"
         if self.relations:
             summary += self.relations.to_pretty_relations_summary(dc)
@@ -607,6 +602,7 @@ class EncryptedRoomEvent(Event):
 
         Args:
             dc: The DisplayLineColumnConfig to control the vertical layout
+            room_version: If this is passed in, run content hash verification
 
         Returns: A long string constructed with several new lines and ended with a new
             line.
@@ -876,12 +872,12 @@ def determine_content_msgtype(data_to_use: Dict[str, Any]) -> UnencryptedRoomCon
     msgtype = data_to_use.get("msgtype", None)
     if msgtype in MessageContent.MESSAGE_TYPES:
         return MessageContent(data_to_use)
-    elif msgtype in FileBasedContent.MESSAGE_TYPES:
+    if msgtype in FileBasedContent.MESSAGE_TYPES:
         return FileBasedContent(data_to_use)
-    elif msgtype in LocationContent.MESSAGE_TYPES:
+    if msgtype in LocationContent.MESSAGE_TYPES:
         return LocationContent(data_to_use)
-    else:
-        return UnencryptedRoomContent(data_to_use)
+
+    return UnencryptedRoomContent(data_to_use)
 
 
 class UnencryptedRoomEvent(Event):
@@ -1838,44 +1834,45 @@ def determine_what_kind_of_event(
         event_type = data_to_use.get("type", None)
         if event_type == "m.room.canonical_alias":
             return CanonicalAliasStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.create":
+        if event_type == "m.room.create":
             return CreateRoomStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.join_rules":
+        if event_type == "m.room.join_rules":
             return JoinRulesStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.member":
+        if event_type == "m.room.member":
             return RoomMemberStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.power_levels":
+        if event_type == "m.room.power_levels":
             return PowerLevelStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.redaction":
+        if event_type == "m.room.redaction":
             return RedactionStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.name":
+        if event_type == "m.room.name":
             return RoomNameStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.topic":
+        if event_type == "m.room.topic":
             return RoomTopicStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.avatar":
+        if event_type == "m.room.avatar":
             return RoomAvatarStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.encryption":
+        if event_type == "m.room.encryption":
             return RoomEncryptionStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.pinned_events":
+        if event_type == "m.room.pinned_events":
             return RoomPinnedEventsStateEvent(event_id, data_to_use)
-        elif event_type == "m.room.history_visibility":
+        if event_type == "m.room.history_visibility":
             return HistoryVisibilityStateEvent(event_id, data_to_use)
-        elif event_type == "m.space.parent":
+        if event_type == "m.space.parent":
             return SpaceParentStateEvent(event_id, data_to_use)
-        elif event_type == "m.space.child":
+        if event_type == "m.space.child":
             return SpaceChildStateEvent(event_id, data_to_use)
-        else:
-            return GenericStateEvent(event_id, data_to_use)
-    else:
-        event_type = data_to_use.get("type")
-        if event_type == "m.room.encrypted":
-            return EncryptedRoomEvent(event_id, data_to_use)
-        elif event_type in UnencryptedRoomEvent.EVENT_TYPES:
-            return UnencryptedRoomEvent(event_id, data_to_use)
-        elif event_type in StickerRoomEvent.EVENT_TYPES:
-            return StickerRoomEvent(event_id, data_to_use)
-        else:
-            return Event(event_id, data_to_use)
+
+        return GenericStateEvent(event_id, data_to_use)
+
+    # Not a state Event
+    event_type = data_to_use.get("type")
+    if event_type == "m.room.encrypted":
+        return EncryptedRoomEvent(event_id, data_to_use)
+    if event_type in UnencryptedRoomEvent.EVENT_TYPES:
+        return UnencryptedRoomEvent(event_id, data_to_use)
+    if event_type in StickerRoomEvent.EVENT_TYPES:
+        return StickerRoomEvent(event_id, data_to_use)
+
+    return Event(event_id, data_to_use)
 
 
 def construct_event_id_from_event_v3(
@@ -2149,7 +2146,7 @@ def _redact_with(
     list_of_keys_to_keep: List[str],
     map_of_keys_from_content_to_keep: Dict[str, List[str]],
 ) -> Dict[str, Any]:
-    redacted_data_result: Dict[str, Any] = dict()
+    redacted_data_result: Dict[str, Any] = {}
     # grab the type early, for use with the 'map' argument
     event_type = data_to_use.get("type")
 
@@ -2188,24 +2185,24 @@ def redact_event(room_version: int, data_to_use: Dict[str, Any]) -> Dict[str, An
             v1_to_v5_list_of_keys_to_keep,
             v1_to_v5_map_of_keys_from_content_to_keep,
         )
-    elif 5 < room_version <= 7:
+    if 5 < room_version <= 7:
         return _redact_with(
             data_to_use,
             v6_to_v7_list_of_keys_to_keep,
             v6_to_v7_map_of_keys_from_content_to_keep,
         )
-    elif room_version == 8:
+    if room_version == 8:
         return _redact_with(
             data_to_use, v8_list_of_keys_to_keep, v8_map_of_keys_from_content_to_keep
         )
-    elif 8 < room_version <= 10:
+    if 8 < room_version <= 10:
         return _redact_with(
             data_to_use,
             v9_to_v10_list_of_keys_to_keep,
             v9_to_v10_map_of_keys_from_content_to_keep,
         )
-    else:
-        # Greater than room version 10
-        return _redact_with(
-            data_to_use, v11_list_of_keys_to_keep, v11_map_of_keys_from_content_to_keep
-        )
+
+    # Greater than room version 10
+    return _redact_with(
+        data_to_use, v11_list_of_keys_to_keep, v11_map_of_keys_from_content_to_keep
+    )

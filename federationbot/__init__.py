@@ -119,22 +119,22 @@ json_decoder = json.JSONDecoder()
 def is_event_id(maybe_event_id: str) -> Optional[str]:
     if maybe_event_id.startswith("$"):
         return maybe_event_id
-    else:
-        return None
+
+    return None
 
 
 def is_room_id(maybe_room_id: str) -> Optional[str]:
     if maybe_room_id.startswith("!"):
         return maybe_room_id
-    else:
-        return None
+
+    return None
 
 
 def is_room_alias(maybe_room_alias: str) -> Optional[str]:
     if maybe_room_alias.startswith("#"):
         return maybe_room_alias
-    else:
-        return None
+
+    return None
 
 
 def is_room_id_or_alias(maybe_room: str) -> Optional[str]:
@@ -148,8 +148,8 @@ def is_room_id_or_alias(maybe_room: str) -> Optional[str]:
 def is_mxid(maybe_mxid: str) -> Optional[str]:
     if maybe_mxid.startswith("@"):
         return maybe_mxid
-    else:
-        return None
+
+    return None
 
 
 def is_int(maybe_int: str) -> Optional[int]:
@@ -157,15 +157,15 @@ def is_int(maybe_int: str) -> Optional[int]:
         result = int(maybe_int)
     except ValueError:
         return None
-    else:
-        return result
+
+    return result
 
 
 def is_command_type(maybe_subcommand: str) -> Optional[str]:
     if maybe_subcommand in CommandType:
         return maybe_subcommand
-    else:
-        return None
+
+    return None
 
 
 class FederationBot(Plugin):
@@ -425,15 +425,15 @@ class FederationBot(Plugin):
                 "). Please supply an event_id instead at the place in time of query"
             )
             return
-        else:
-            event_id = ts_response.json_response.get("event_id", None)
-            assert isinstance(event_id, str)
-            event_result = await self.federation_handler.get_event_from_server(
-                origin_server, origin_server, event_id
-            )
-            event = event_result.get(event_id, None)
-            assert event is not None
-            room_depth = event.depth
+
+        event_id = ts_response.json_response.get("event_id", None)
+        assert isinstance(event_id, str)
+        event_result = await self.federation_handler.get_event_from_server(
+            origin_server, origin_server, event_id
+        )
+        event = event_result.get(event_id, None)
+        assert event is not None
+        room_depth = event.depth
 
         # Initial messages and lines setup. Never end in newline, as the helper handles
         header_lines = ["Room Back-walking Procedure: Running"]
@@ -913,7 +913,7 @@ class FederationBot(Plugin):
             pinned_message, command_event
         )
 
-        bot_working: Dict[str, bool] = dict()
+        bot_working: Dict[str, bool] = {}
 
         async def _event_walking_fetcher(
             worker_name: str,
@@ -1135,8 +1135,7 @@ class FederationBot(Plugin):
                             )
 
                     count_of_how_many_servers_tried = 0
-                    for host_in_order in good_host_list:
-                        server_name = host_in_order
+                    for server_name in good_host_list:
                         _event_base = server_to_event_result_map.get(server_name)
                         count_of_how_many_servers_tried += 1
                         if isinstance(_event_base, Event):
@@ -1205,7 +1204,7 @@ class FederationBot(Plugin):
                                         f"{worker_name}: All events for {_event_base.event_id} were found locally"
                                     )
                                 # The event was found, we can skip the rest of the host list on this iteration
-                                break
+
                             else:
                                 self.log.warning(
                                     f"{worker_name}: Event did not pass signature check, {_event_base.event_id}"
@@ -1423,7 +1422,7 @@ class FederationBot(Plugin):
                 continue
 
             if roomwalk_fetch_queue.qsize() == 0 and roomwalk_error_queue.qsize() == 0:
-                if all([not x for x in bot_working.values()]):
+                if all({not x for x in bot_working.values()}):
                     retry_for_finish += 1
                     self.log.warning(
                         f"Unexpectedly found no work being processed. Retry count: {retry_for_finish}"
@@ -1571,20 +1570,20 @@ class FederationBot(Plugin):
                 f"I need you to provide me with an event_id, got {event_id}"
             )
             return
-        else:
-            await command_event.respond("Making sure event is not already in room")
-            event_map = await self.federation_handler.get_event_from_server(
-                origin_server=origin_server,
-                destination_server=destination_server,
-                event_id=event_id,
+
+        await command_event.respond("Making sure event is not already in room")
+        event_map = await self.federation_handler.get_event_from_server(
+            origin_server=origin_server,
+            destination_server=destination_server,
+            event_id=event_id,
+        )
+        sampled_event = event_map.get(event_id, None)
+        if not isinstance(sampled_event, EventError):
+            await command_event.reply(
+                f"It appears that the Event referenced by '{event_id}' is already "
+                f"on the target server: {destination_server}"
             )
-            sampled_event = event_map.get(event_id, None)
-            if not isinstance(sampled_event, EventError):
-                await command_event.reply(
-                    f"It appears that the Event referenced by '{event_id}' is already "
-                    f"on the target server: {destination_server}"
-                )
-                return
+            return
 
         # This does place a request, so need to use origin for auth
         await command_event.respond("Resolving room alias(if it was one)")
@@ -1657,7 +1656,7 @@ class FederationBot(Plugin):
             await command_event.respond(
                 f"Found event {popped_event_id} on {len(server_to_event_result_map)} servers"
             )
-            for server_name, event_base in server_to_event_result_map.items():
+            for event_base in server_to_event_result_map.values():
                 # But first, verify the events are valid
                 if isinstance(event_base, Event):
                     await self.federation_handler.verify_signatures_and_annotate_event(
@@ -1903,7 +1902,7 @@ class FederationBot(Plugin):
         range_list = []
 
         constants_display_string = ""
-        for digit, value in progress_bar.constants.items():
+        for value in progress_bar.constants.values():
             constants_display_string += f"'{value}', "
         spaces_display_string = "' ', ' ', ' ', ' ', ' '"
 
@@ -1938,7 +1937,7 @@ class FederationBot(Plugin):
             set_to_pull = set()
             start_time = time.time()
             if style_type == BitmapProgressBarStyle.SCATTER:
-                for j in range(0, min(int(how_many_to_pull), len(range_list))):
+                for _ in range(min(int(how_many_to_pull), len(range_list))):
                     entry_index = random.randint(0, len(range_list) - 1)
                     entry = range_list.pop(entry_index)
                     set_to_pull.add(entry)
@@ -2070,8 +2069,8 @@ class FederationBot(Plugin):
                 f" not in that room, so I can not access it.\n\n{event.errcode}"
             )
             return
-        else:
-            assert event is not None and isinstance(event, EventBase)
+
+        assert event is not None and isinstance(event, EventBase)
 
         room_id = event.room_id
 
@@ -2185,11 +2184,11 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    host = get_domain_from_id(member)
-                    if host not in host_list:
-                        host_list.extend([host])
+
+            for member in joined_members:
+                host = get_domain_from_id(member)
+                if host not in host_list:
+                    host_list.extend([host])
 
         host_queue: asyncio.Queue[str] = asyncio.Queue()
         for host in host_list:
@@ -2235,7 +2234,7 @@ class FederationBot(Plugin):
         list_of_buffered_messages: List[str] = []
 
         server_name_dc = DisplayLineColumnConfig("Server Name")
-        last_event_dc = DisplayLineColumnConfig("Last Event")
+
         # Tuple should be event_id and Event
         last_event_map: Dict[str, Tuple[str, Optional[Event]]] = {}
         for result in results:
@@ -2263,7 +2262,7 @@ class FederationBot(Plugin):
                         last_event_map.setdefault(
                             host, (retrieved_event_id, retrieved_event)
                         )
-                        last_event_entry_id, last_event_entry_ts = last_event_map[host]
+                        last_event_entry_id, _ = last_event_map[host]
                         if (
                             retrieved_event.origin_server_ts
                             > retrieved_prev_events[last_event_entry_id].origin_server_ts  # type: ignore[attr-defined]
@@ -2437,9 +2436,9 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    list_of_servers_to_check.add(get_domain_from_id(member))
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
 
         # The first of the 'entire room' limitations
         number_of_servers = len(list_of_servers_to_check)
@@ -3053,9 +3052,10 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    list_of_servers_to_check.add(get_domain_from_id(member))
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
         else:
             if server_to_check.startswith("#") or server_to_check.startswith("!"):
                 await command_event.reply(
@@ -3088,7 +3088,7 @@ class FederationBot(Plugin):
         response_time_col = DisplayLineColumnConfig("Response time")
 
         # Iterate over all the data to collect the column sizes
-        for server, result in server_to_version_data.items():
+        for server in server_to_version_data:
             server_name_col.maybe_update_column_width(len(server))
 
         # Construct the message response now
@@ -3225,9 +3225,10 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    list_of_servers_to_check.add(get_domain_from_id(member))
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
         else:
             list_of_servers_to_check.add(server_to_check)
 
@@ -3483,9 +3484,10 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    list_of_servers_to_check.add(get_domain_from_id(member))
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
         else:
             list_of_servers_to_check.add(server_to_check)
 
@@ -3750,9 +3752,10 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    list_of_servers_to_check.add(get_domain_from_id(member))
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
         else:
             list_of_servers_to_check.add(server_to_check)
 
@@ -4417,11 +4420,11 @@ class FederationBot(Plugin):
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
-            else:
-                for member in joined_members:
-                    host = get_domain_from_id(member)
-                    if host not in host_list:
-                        host_list.extend([host])
+
+            for member in joined_members:
+                host = get_domain_from_id(member)
+                if host not in host_list:
+                    host_list.extend([host])
 
         started_at = time.time()
         host_to_event_status_map = await self.federation_handler.find_event_on_servers(
@@ -4847,9 +4850,10 @@ class FederationBot(Plugin):
                     "). Please supply an event_id instead at the place in time of query"
                 )
                 return None
-            else:
-                # TODO: maybe try make join for this instead/as well
-                event_id = ts_response.json_response.get("event_id", None)
+
+            # TODO: maybe try make join for this instead/as well
+            # ts_response.http_code == 200
+            event_id = ts_response.json_response.get("event_id", None)
 
         assert event_id is not None
         event_result = await self.federation_handler.get_event_from_server(
