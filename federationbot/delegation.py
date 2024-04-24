@@ -371,7 +371,7 @@ class DelegationHandler:
             reason = response.reason
             headers = response.headers
 
-            if 199 < status < 499:
+            if status == 200:
                 # Potentially anything from 200 up to 500 can have something to say
                 try:
                     content = await response.json()
