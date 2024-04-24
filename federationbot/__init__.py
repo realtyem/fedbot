@@ -3248,7 +3248,7 @@ class FederationBot(Plugin):
         list_of_message_ids.extend([current_message_id])
 
         started_at = time.monotonic()
-        server_to_version_data = await self._get_versions_from_servers(
+        server_to_version_data = await self._get_versions_from_servers_v2(
             list_of_servers_to_check
         )
         total_time = time.monotonic() - started_at
