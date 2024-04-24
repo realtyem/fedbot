@@ -3799,40 +3799,52 @@ class FederationBot(Plugin):
             30 * 60 * 1000
         )  # Add 30 minutes
 
-        async def _server_keys_from_notary_worker(queue: asyncio.Queue[str]) -> None:
-            while True:
-                worker_server_name = await queue.get()
+        async def _server_keys_from_notary_worker(
+            _queue: asyncio.Queue[str],
+        ) -> Tuple[str, MatrixResponse]:
+            worker_server_name = await _queue.get()
 
-                server_to_server_data[
-                    worker_server_name
-                ] = await self.federation_handler._notary_keys_request(
-                    worker_server_name, notary_server_to_use, minimum_valid_until_ts
-                )
+            response = await self.federation_handler._notary_keys_request(
+                worker_server_name, notary_server_to_use, minimum_valid_until_ts
+            )
 
-                queue.task_done()
+            _queue.task_done()
+            return worker_server_name, response
 
         keys_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 
         # Setup the task into the controller
-        self.reaction_task_controller.setup_task_set(command_event.event_id)
-        self.reaction_task_controller.add_tasks(
-            command_event.event_id,
+        reference_key = self.reaction_task_controller.setup_task_set(
+            command_event.event_id
+        )
+
+        await self.reaction_task_controller.add_threaded_tasks(
+            reference_key,
             _server_keys_from_notary_worker,
             keys_queue,
-            limit=min(
-                len(list_of_servers_to_check),
-                MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST,
-            ),
+            limit=len(list_of_servers_to_check),
         )
 
         started_at = time.monotonic()
-        await keys_queue.join()
+
+        results = await self.reaction_task_controller.get_task_results(
+            reference_key, threaded=True
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                self.log.warning(
+                    f"_server_keys_from_notary: got an Exception: {result}"
+                )
+                continue
+
+            host, response = result
+            server_to_server_data[host] = response
 
         total_time = time.monotonic() - started_at
         # Cancel our worker tasks.
-        await self.reaction_task_controller.cancel(command_event.event_id)
+        await self.reaction_task_controller.cancel(reference_key)
 
         # Preprocess the data to get the column sizes
         # Want it to look like this for now, for the whole room version. Obviously a
