@@ -105,6 +105,7 @@ class Config(BaseProxyConfig):
     def do_update(self, helper: ConfigUpdateHelper) -> None:
         helper.copy("whitelist")
         helper.copy("server_signing_keys")
+        helper.copy("thread_pool_max_workers")
 
 
 class CommandType(Enum):
@@ -181,7 +182,16 @@ class FederationBot(Plugin):
     async def start(self) -> None:
         await super().start()
         self.server_signing_keys = {}
-        self.reaction_task_controller = ReactionTaskController(self.client)
+        # Set the default, in case the config file got lost somehow
+        max_workers: int = 10
+
+        if self.config:
+            self.config.load_and_update()
+            max_workers = self.config["thread_pool_max_workers"]
+            for server, key_data in self.config["server_signing_keys"].items():
+                self.server_signing_keys[server] = key_data
+
+        self.reaction_task_controller = ReactionTaskController(self.client, max_workers)
 
         self.client.add_event_handler(
             EventType.REACTION,
@@ -189,11 +199,6 @@ class FederationBot(Plugin):
             True,
         )
 
-        if self.config:
-            self.config.load_and_update()
-            # self.log.info(str(self.config["server_signing_keys"]))
-            for server, key_data in self.config["server_signing_keys"].items():
-                self.server_signing_keys[server] = key_data
         self.federation_handler = FederationHandler(
             logger=self.log,
             bot_mxid=self.client.mxid,

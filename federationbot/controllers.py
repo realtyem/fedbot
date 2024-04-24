@@ -295,12 +295,11 @@ class ReactionTaskController(Generic[T]):
     client: MaubotMatrixClient
     executor: ThreadPoolExecutor
 
-    def __init__(self, client: MaubotMatrixClient) -> None:
+    def __init__(self, client: MaubotMatrixClient, max_workers: int) -> None:
         self.tracked_reactions = {}
         self.tasks_sets = {}
         self.client = client
-        self.max_workers = 1000
-        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
     # Currently unused/broken. It was part of the threaded Task experiment.
     # def maybe_shutdown_thread_loop(self, thread_id: int) -> None:
