@@ -299,7 +299,7 @@ class ReactionTaskController(Generic[T]):
         self.tracked_reactions = {}
         self.tasks_sets = {}
         self.client = client
-        self.max_workers = 10
+        self.max_workers = 1000
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
 
     # Currently unused/broken. It was part of the threaded Task experiment.
