@@ -3030,11 +3030,13 @@ class FederationBot(Plugin):
 
     @fed_command.subcommand(
         name="ping",
-        help="Check a server(or current room) for application response time",
+        help="Check a server(or room) for application response time",
     )
-    @command.argument(name="server_to_check", label="Server to check", required=False)
+    @command.argument(
+        name="thing_to_test", label="Server or Room to test", required=False
+    )
     async def ping_command(
-        self, command_event: MessageEvent, server_to_check: Optional[str]
+        self, command_event: MessageEvent, thing_to_test: Optional[str]
     ) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
@@ -3042,11 +3044,32 @@ class FederationBot(Plugin):
         list_of_servers_to_check = set()
         list_of_message_ids = []
 
-        room_to_check = command_event.room_id
+        room_to_check: Optional[str] = str(command_event.room_id)
 
-        # If the server was not passed in, then this will be None
-        if not server_to_check:
-            # Get the members this bot knows about in this room
+        # Figure out what goes into list_of_servers_to_check
+        if thing_to_test is not None:
+            # First, filter out if the thing passed in was a room. If it wasn't that means it was a server
+            if thing_to_test.startswith("#") or thing_to_test.startswith("!"):
+                if bool(is_room_id_or_alias(thing_to_test)):
+                    origin_server = get_domain_from_id(self.client.mxid)
+                    room_to_check, _ = await self.resolve_room_id_or_alias(
+                        thing_to_test, command_event, origin_server
+                    )
+
+                    if room_to_check is None:
+                        # This means they started with a room sigil, but it's not actually a room
+                        # or failed for another reason.
+                        # Don't need to actually display an error, that's handled in the above
+                        # function
+                        return
+
+            else:
+                # Assume whatever else they passed in must be a server
+                list_of_servers_to_check.add(thing_to_test)
+
+        if not list_of_servers_to_check:
+            # If nothing was passed in, or it wasn't a server name,
+            # then it must be a room or use the current room
             # TODO: try and find a way to not use the client API for this
             try:
                 assert isinstance(room_to_check, str)
@@ -3060,14 +3083,6 @@ class FederationBot(Plugin):
 
             for member in joined_members:
                 list_of_servers_to_check.add(get_domain_from_id(member))
-
-        else:
-            if server_to_check.startswith("#") or server_to_check.startswith("!"):
-                await command_event.reply(
-                    "Please use the bot in the room you want to check."
-                )
-                return
-            list_of_servers_to_check.add(server_to_check)
 
         number_of_servers = len(list_of_servers_to_check)
 
