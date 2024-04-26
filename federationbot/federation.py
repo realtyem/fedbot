@@ -94,10 +94,6 @@ class FederationHandler:
         if key_id_formatted not in server_verify_keys.verify_keys:
             server_verify_keys = await self.get_server_keys_from_notary(for_server_name, self.hosting_server, timeout)
 
-        # TODO: verify can remove this, as it can never be None but can be empty
-        # if server_verify_keys is None:
-        #     return {}
-
         # At this point we know
         # 1. Wasn't in the cache before(or at least this one key id wasn't)
         # 2. We have some kind of result
