@@ -244,12 +244,12 @@ class FederationBot(Plugin):
             # TODO: Lose this after Tom saw
             good_server_results, bad_server_results = partition(
                 lambda x: x.cache_value.unhealthy is not None,
-                self.federation_handler._server_discovery_cache._cache.values(),
+                self.federation_handler.api.server_discovery_cache._cache.values(),
             )
             buffered_line = (
                 f"Event Cache size: {len(self.federation_handler._events_cache)}\n"
                 f"Room Version Cache size: {len(self.federation_handler.room_version_cache)}\n"
-                f"New server_result cache: {len(self.federation_handler._server_discovery_cache)}\n"
+                f"New server_result cache: {len(self.federation_handler.api.server_discovery_cache)}\n"
                 # TODO: Lose this after Tom seen it(engrish is grate)
                 f" Good server results: {len([1 for _ in good_server_results])}\n"
                 f" Bad server results: {len([1 for _ in bad_server_results])}\n"
@@ -418,7 +418,7 @@ class FederationBot(Plugin):
         now = int(time.time() * 1000)
         time_to_check = now
         room_depth = 0
-        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
+        ts_response = await self.federation_handler.api.get_timestamp_to_event(
             origin_server=origin_server,
             destination_server=origin_server,
             room_id=room_to_check,
@@ -827,7 +827,7 @@ class FederationBot(Plugin):
         # Get the last event that was in the room, for its depth and as a starting spot
         now = int(time.time() * 1000)
         # TODO: swap this out for 'fed head'
-        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
+        ts_response = await self.federation_handler.api.get_timestamp_to_event(
             origin_server=origin_server,
             destination_server=origin_server,
             room_id=room_id,
@@ -873,7 +873,7 @@ class FederationBot(Plugin):
         _ = await self._get_versions_from_servers(host_list)
 
         for host in host_list:
-            server_check = self.federation_handler._server_discovery_cache.get(
+            server_check = self.federation_handler.api.server_discovery_cache.get(
                 host, None
             )
             if server_check and server_check.unhealthy is None:
@@ -1630,7 +1630,7 @@ class FederationBot(Plugin):
         await command_event.respond("Filtering out dead/unresponsive hosts")
         await self._get_versions_from_servers(host_list)
         for host in host_list:
-            server_result = self.federation_handler._server_discovery_cache.get(
+            server_result = self.federation_handler.api.server_discovery_cache.get(
                 host, None
             )
             if server_result and not server_result.unhealthy:
@@ -2479,7 +2479,7 @@ class FederationBot(Plugin):
                 # collecting diagnostic data.
                 server_to_server_data[
                     worker_server_name
-                ] = await self.federation_handler.get_server_version(
+                ] = await self.federation_handler.api.get_server_version(
                     worker_server_name,
                     force_rediscover=True,
                     diagnostics=True,
@@ -3381,7 +3381,7 @@ class FederationBot(Plugin):
             while True:
                 worker_server_name = await queue.get()
 
-                result = await self.federation_handler.get_server_version(
+                result = await self.federation_handler.api.get_server_version(
                     worker_server_name,
                     diagnostics=True,
                 )
@@ -3415,7 +3415,7 @@ class FederationBot(Plugin):
         server_to_version_data: Dict[str, MatrixResponse] = {}
 
         async def _version_worker(_host: str) -> Tuple[str, MatrixResponse]:
-            _result = await self.federation_handler.get_server_version(
+            _result = await self.federation_handler.api.get_server_version(
                 _host,
                 diagnostics=True,
             )
@@ -3548,7 +3548,7 @@ class FederationBot(Plugin):
 
                 server_to_server_data[
                     worker_server_name
-                ] = await self.federation_handler._get_server_keys(
+                ] = await self.federation_handler.api.get_server_keys(
                     worker_server_name,
                     timeout=10.0,
                 )
@@ -3833,7 +3833,7 @@ class FederationBot(Plugin):
         ) -> Tuple[str, MatrixResponse]:
             worker_server_name = await _queue.get()
 
-            response = await self.federation_handler._notary_keys_request(
+            response = await self.federation_handler.api.get_server_notary_keys(
                 worker_server_name, notary_server_to_use, minimum_valid_until_ts
             )
 
@@ -4207,11 +4207,11 @@ class FederationBot(Plugin):
         assert event_id is not None
 
         started_at = time.monotonic()
-        response = await self.federation_handler.get_event_auth_for_event_from_server(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            event_id=event_id,
+        response = await self.federation_handler.api.get_event_auth(
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
         )
         total_time = time.monotonic() - started_at
 
@@ -4325,10 +4325,10 @@ class FederationBot(Plugin):
         )
         list_of_message_ids.extend([prerender_message])
 
-        response = await self.federation_handler.get_user_devices_from_server(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            user_mxid=user_mxid,
+        response = await self.federation_handler.api.get_user_devices(
+            origin_server,
+            destination_server,
+            user_mxid,
         )
 
         if response.http_code != 200:
@@ -4411,7 +4411,7 @@ class FederationBot(Plugin):
 
         # Can not assume that the event_id supplied is in the room requested to search
         # hosts of. Get the current hosts in the room
-        ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
+        ts_response = await self.federation_handler.api.get_timestamp_to_event(
             origin_server, origin_server, room_id, int(time.time() * 1000)
         )
         if ts_response.http_code != 200:
@@ -4564,12 +4564,10 @@ class FederationBot(Plugin):
             await command_event.reply("I need a target server to look at")
             return
 
-        public_room_result = (
-            await self.federation_handler._get_public_rooms_from_server(
-                origin_server=None,
-                destination_server=target_server,
-                since=since,
-            )
+        public_room_result = await self.federation_handler.get_public_rooms_from_server(
+            None,
+            target_server,
+            since=since,
         )
         await command_event.respond(
             wrap_in_code_block_markdown(
@@ -4603,9 +4601,9 @@ class FederationBot(Plugin):
         retry_count = 0
         while not done:
             public_room_result = (
-                await self.federation_handler._get_public_rooms_from_server(
-                    origin_server=None,
-                    destination_server=target_server,
+                await self.federation_handler.get_public_rooms_from_server(
+                    None,
+                    target_server,
                     since=since,
                 )
             )
@@ -4861,13 +4859,11 @@ class FederationBot(Plugin):
         if not event_id:
             # No event id was supplied, find out what the last event in the room was
             now = int(time.time() * 1000)
-            ts_response = (
-                await self.federation_handler.get_timestamp_to_event_from_server(
-                    origin_server=origin_server,
-                    destination_server=destination_server,
-                    room_id=room_id,
-                    utc_time_at_ms=now,
-                )
+            ts_response = await self.federation_handler.api.get_timestamp_to_event(
+                origin_server,
+                destination_server,
+                room_id,
+                now,
             )
             if ts_response.http_code != 200:
                 await command_event.respond(
@@ -4929,11 +4925,11 @@ class FederationBot(Plugin):
                 origin_server, destination_server, room_id
             )
         )
-        response = await self.federation_handler.get_backfill_from_server(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            event_id=start_event_id,
+        response = await self.federation_handler.api.get_backfill(
+            origin_server,
+            destination_server,
+            room_id,
+            start_event_id,
             limit=str(limit),
         )
         if response.http_code != 200:
