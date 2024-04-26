@@ -2288,7 +2288,7 @@ class FederationBot(Plugin):
                     )
                 )
             else:
-                le_id, le_event = last_event_map[host]
+                le_id, le_event = last_event_map.get(host, ("eventid missing", None))
                 glyph_auth_events = "".join(
                     ["A" for _ in range(0, len(fed_response.auth_events))]
                 )
