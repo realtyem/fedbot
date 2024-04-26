@@ -8,9 +8,9 @@ from mautrix.types import EventID
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
 
-from federationbot import ReactionTaskController
 from federationbot.api import FederationApi
 from federationbot.cache import LRUCache
+from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.events import (
     Event,
