@@ -409,19 +409,31 @@ class FederationHandler:
             diag_info.mark_step_num("Connectivity")
             diag_info.add(f"Making request to {server_result.get_host()}{path}")
 
+        reference_key = self.task_controller.setup_task_set()
+        await self.task_controller.add_threaded_tasks(
+            reference_key,
+            self._federation_request,
+            destination_server_name,
+            path,
+            query_args=query_args,
+            method=method,
+            origin_server=origin_server,
+            server_result=server_result,
+            content=content,
+            timeout_seconds=timeout_seconds,
+        )
         try:
-            response = await self._federation_request(
-                destination_server_name=destination_server_name,
-                path=path,
-                query_args=query_args,
-                method=method,
-                origin_server=origin_server,
-                server_result=server_result,
-                content=content,
-                timeout_seconds=timeout_seconds,
+            response_tuple = await self.task_controller.get_task_results(
+                reference_key, threaded=True
             )
+            response = response_tuple[0]
+            if isinstance(response, BaseException):
+
+                raise response
+
         except FedBotException as e:
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
+            await self.task_controller.cancel(reference_key)
             code = 0
             error_reason = str(e.summary_exception)
             diag_info.error(str(e.long_exception))
@@ -446,6 +458,7 @@ class FederationHandler:
             )
 
         # The server was responsive, but may not have returned something useful
+        # assert not isinstance(response, BaseException)
         async with response:
             code = response.status
             reason = response.reason or "No Reason/status returned"
@@ -462,6 +475,9 @@ class FederationHandler:
                 result = None
 
             diag_info.add(f"Request status: code:{code}, reason: {reason}")
+
+        # Should be done with that threaded task by now, clean it up
+        await self.task_controller.cancel(reference_key)
 
         if result:
             try:
