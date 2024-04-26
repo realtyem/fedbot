@@ -1,16 +1,4 @@
-from typing import (
-    Any,
-    Callable,
-    Coroutine,
-    Dict,
-    Generic,
-    Hashable,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TypeVar,
-)
+from typing import Any, Callable, Coroutine, Dict, Generic, Hashable, List, Optional, Sequence, Set, TypeVar
 from asyncio import AbstractEventLoop, Task
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
@@ -201,11 +189,7 @@ class TaskSetEntry(Generic[T]):
 
         """
         for _ in range(limit):
-            self.coros.append(
-                await self.loop.run_in_executor(
-                    executor, functools.partial(new_task, *args, **kwargs)
-                )
-            )
+            self.coros.append(await self.loop.run_in_executor(executor, functools.partial(new_task, *args, **kwargs)))
 
     # Currently, this is unused/broken. It is part of the experiment threaded Task experiment
     # def run(
@@ -229,9 +213,7 @@ class TaskSetEntry(Generic[T]):
     #     self.loop_to_futures_set.setdefault(curr_thread_id, set()).add(task)
     #     return task
 
-    async def gather_results(
-        self, return_exceptions: bool = True
-    ) -> Sequence[T | BaseException]:
+    async def gather_results(self, return_exceptions: bool = True) -> Sequence[T | BaseException]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
 
@@ -247,9 +229,7 @@ class TaskSetEntry(Generic[T]):
         """
         return await asyncio.gather(*self.tasks, return_exceptions=return_exceptions)
 
-    async def gather_threaded_results(
-        self, return_exceptions: bool = True
-    ) -> Sequence[T | BaseException]:
+    async def gather_threaded_results(self, return_exceptions: bool = True) -> Sequence[T | BaseException]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
 
@@ -328,9 +308,7 @@ class ReactionTaskController(Generic[T]):
             raise MessageAlreadyHasReactions
 
         # The creation will place the starting status as STOP, make it a start instead
-        control_entry = ReactionControlEntry(
-            command_event, self.client, default_starting_status
-        )
+        control_entry = ReactionControlEntry(command_event, self.client, default_starting_status)
         await control_entry.setup(pinned_message)
         self.tracked_reactions[pinned_message] = control_entry
 
@@ -365,8 +343,7 @@ class ReactionTaskController(Generic[T]):
     def is_started(self, pinned_message: EventID) -> bool:
         if (
             pinned_message in self.tracked_reactions
-            and self.tracked_reactions[pinned_message].get_status()
-            == ReactionCommandStatus.START
+            and self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.START
         ):
             return True
         return False
@@ -374,8 +351,7 @@ class ReactionTaskController(Generic[T]):
     def is_paused(self, pinned_message: EventID) -> bool:
         if (
             pinned_message in self.tracked_reactions
-            and self.tracked_reactions[pinned_message].get_status()
-            == ReactionCommandStatus.PAUSE
+            and self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.PAUSE
         ):
             return True
         return False
@@ -388,8 +364,7 @@ class ReactionTaskController(Generic[T]):
     def is_stopped(self, pinned_message: EventID) -> bool:
         if (
             pinned_message in self.tracked_reactions
-            and self.tracked_reactions[pinned_message].get_status()
-            == ReactionCommandStatus.STOP
+            and self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.STOP
         ):
             return True
         return False
@@ -405,17 +380,13 @@ class ReactionTaskController(Generic[T]):
             # The cancel() includes a built-in stop()
             await self.tracked_reactions[pinned_message].cancel()
             if add_cleanup_control:
-                await self.tracked_reactions[pinned_message].add_cleanup_control(
-                    pinned_message
-                )
+                await self.tracked_reactions[pinned_message].add_cleanup_control(pinned_message)
             self.tracked_reactions.pop(pinned_message, None)
         if isinstance(pinned_message, Hashable) and pinned_message in self.tasks_sets:
             await self.tasks_sets[pinned_message].clear_all_tasks()
             self.tasks_sets.pop(pinned_message)
 
-    async def remove_last_display_of(
-        self, event_id_to_remove: EventID, room_id: RoomID
-    ) -> None:
+    async def remove_last_display_of(self, event_id_to_remove: EventID, room_id: RoomID) -> None:
         await self.client.redact(
             room_id,
             event_id_to_remove,
@@ -474,16 +445,10 @@ class ReactionTaskController(Generic[T]):
         return_exceptions: bool = True,
     ) -> Sequence[T | BaseException]:
         if threaded:
-            return await self.tasks_sets[reference_key].gather_threaded_results(
-                return_exceptions=return_exceptions
-            )
-        return await self.tasks_sets[reference_key].gather_results(
-            return_exceptions=return_exceptions
-        )
+            return await self.tasks_sets[reference_key].gather_threaded_results(return_exceptions=return_exceptions)
+        return await self.tasks_sets[reference_key].gather_results(return_exceptions=return_exceptions)
 
-    async def add_cleanup_control(
-        self, related_message: EventID, room_id: RoomID
-    ) -> None:
+    async def add_cleanup_control(self, related_message: EventID, room_id: RoomID) -> None:
         # Just sticking the reaction the handler will look for onto the message
         await self.client.react(
             room_id,
@@ -504,9 +469,7 @@ class ReactionTaskController(Generic[T]):
                     self.tracked_reactions[reaction_data.event_id].start()
 
             if reaction_data.key == ReactionCommandStatus.CLEANUP.value:
-                await self.remove_last_display_of(
-                    reaction_data.event_id, react_evt.room_id
-                )
+                await self.remove_last_display_of(reaction_data.event_id, react_evt.room_id)
 
         return
 
@@ -532,6 +495,4 @@ def wait_loop(loop_mapping: Dict[int, AbstractEventLoop]):
     if curr_thread_id in loop_mapping:
         threads_event_loop = loop_mapping[curr_thread_id]
 
-        return threads_event_loop.run_until_complete(
-            asyncio.gather(*asyncio.all_tasks())
-        )
+        return threads_event_loop.run_until_complete(asyncio.gather(*asyncio.all_tasks()))

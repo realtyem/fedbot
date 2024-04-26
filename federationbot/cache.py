@@ -46,9 +46,7 @@ class LRUCache(Generic[KT, VT]):
         self._cache = cache
         self._lock = Lock()
         self.time_cb = time.time
-        self.eviction_condition_cb = (
-            eviction_condition_func or self.default_expiry_condition
-        )
+        self.eviction_condition_cb = eviction_condition_func or self.default_expiry_condition
         self.expire_time_seconds = expire_after_seconds
         self.cleanup_iteration_sleep_seconds = cleanup_task_sleep_time_seconds
         self._cleanup_task = asyncio.create_task(self._cleanup_cache_task())
@@ -76,9 +74,7 @@ class LRUCache(Generic[KT, VT]):
         return len(self._cache)
 
     def default_expiry_condition(self, cache_entry: LRUCacheEntry) -> bool:
-        return (
-            self.time_cb() > cache_entry.last_access_time_ms + self.expire_time_seconds
-        )
+        return self.time_cb() > cache_entry.last_access_time_ms + self.expire_time_seconds
 
     async def _cleanup_cache_task(self) -> None:
         while True:

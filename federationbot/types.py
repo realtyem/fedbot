@@ -142,9 +142,7 @@ class ServerVerifyKeys:
                 # It is extremely unlikely that a notary response will have a
                 # primary 'key set' with an older timestamp than we already have.
                 # But, if it should be newer update what's here.
-                self.verify_keys[key_id].valid_until_ts = max(
-                    valid_until_ts, self.verify_keys[key_id].valid_until_ts
-                )
+                self.verify_keys[key_id].valid_until_ts = max(valid_until_ts, self.verify_keys[key_id].valid_until_ts)
             else:
                 # First instance seen of this key at this point, add it
                 self.verify_keys[key_id] = KeyContainer(key_data, valid_until_ts)
@@ -153,17 +151,13 @@ class ServerVerifyKeys:
             if o_key_id in self.verify_keys:
                 expired_ts = o_key_data.get("expired_ts", 0)
                 # Update the data if the timestamp is newer
-                self.verify_keys[o_key_id].valid_until_ts = max(
-                    expired_ts, self.verify_keys[o_key_id].valid_until_ts
-                )
+                self.verify_keys[o_key_id].valid_until_ts = max(expired_ts, self.verify_keys[o_key_id].valid_until_ts)
             else:
                 # The KeyContainer class can deal with the attached 'expired_ts'
                 # directly
                 self.verify_keys[o_key_id] = KeyContainer(o_key_data, None)
 
-    def update_key_data_from_list(
-        self, data_from_notary_response: Dict[str, List[Dict[str, Any]]]
-    ) -> None:
+    def update_key_data_from_list(self, data_from_notary_response: Dict[str, List[Dict[str, Any]]]) -> None:
         """
         Suitable for passing a notary response into directly. Make sure the
         "server_keys" part of the dict/json is passed in or this will do nothing.

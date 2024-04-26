@@ -7,13 +7,7 @@ from canonicaljson import encode_canonical_json
 from mautrix.types import EventID
 from unpaddedbase64 import decode_base64, encode_base64
 
-from federationbot.types import (
-    KeyID,
-    ServerName,
-    Signature,
-    Signatures,
-    SignatureVerifyResult,
-)
+from federationbot.types import KeyID, ServerName, Signature, Signatures, SignatureVerifyResult
 from federationbot.utils import (
     DisplayLineColumnConfig,
     extract_max_key_len_from_dict,
@@ -92,9 +86,7 @@ class EventBase:
 
     def generate_event_id(self, room_version: int) -> str:
         raw_data_copy = full_dict_copy(self.raw_data)
-        generated_event_id = construct_event_id_from_event_v3(
-            room_version, raw_data_copy
-        )
+        generated_event_id = construct_event_id_from_event_v3(room_version, raw_data_copy)
         return generated_event_id
 
     def verify_event_id(self, room_version: int, event_id_to_test: str) -> bool:
@@ -201,9 +193,7 @@ class EventBase:
             verify_event_id = self.verify_event_id(room_version, self.event_id)
 
         is_event_id_ok = f"{'✅' if verify_event_id else '❌'}"
-        summary += dc.render_pretty_line(
-            event_id_header, f"{is_event_id_ok} {self.event_id}"
-        )
+        summary += dc.render_pretty_line(event_id_header, f"{is_event_id_ok} {self.event_id}")
         summary += dc.render_pretty_line(type_header, self.event_type)
         summary += dc.render_pretty_line(room_id_header, self.room_id)
         summary += dc.render_pretty_line(sender_header, self.sender)
@@ -505,9 +495,7 @@ class Event(EventBase):
 
         # datetime.fromtimestamp() will give a 'datetime' object, it will render as a
         # date and a time string for this purpose.
-        summary += dc.render_pretty_line(
-            origin_ts_header, datetime.fromtimestamp(self.origin_server_ts / 1000)
-        )
+        summary += dc.render_pretty_line(origin_ts_header, datetime.fromtimestamp(self.origin_server_ts / 1000))
 
         # There is no helper class specifically designed around signatures and hashes.
         # Custom code it for now. Should look like:
@@ -515,9 +503,7 @@ class Event(EventBase):
         #    Signatures: example.com ed25519:k3y1D
         #
         for server, signature_container in self.signatures.servers.items():
-            result_symbol = represent_signature_verify_result_as_symbol(
-                self.signatures_verified[server]
-            )
+            result_symbol = represent_signature_verify_result_as_symbol(self.signatures_verified[server])
             summary += f"{dc.front_pad(sig_header)}: {result_symbol} {server} "
             for key_id in signature_container.keyid:
                 summary += f"{key_id}\n"
@@ -614,12 +600,8 @@ class EncryptedRoomEvent(Event):
 
         summary = super().to_pretty_summary(dc, room_version)
         summary += dc.render_pretty_line(algo_header, self.encrypted_content.algorithm)
-        summary += dc.render_pretty_line(
-            sess_id_header, self.encrypted_content.session_id
-        )
-        summary += dc.render_pretty_line(
-            ciphertext_size_header, self.encrypted_content.ciphertext_size
-        )
+        summary += dc.render_pretty_line(sess_id_header, self.encrypted_content.session_id)
+        summary += dc.render_pretty_line(ciphertext_size_header, self.encrypted_content.ciphertext_size)
         return summary
 
 
@@ -753,15 +735,11 @@ class FileBasedContent(UnencryptedRoomContent):
         if self.url and self.info:
             # This file was unencrypted, both of these are required
             summary += dc.render_pretty_line(url_header, self.url)
-            summary += dc.render_pretty_list(
-                info_header, self.info.to_pretty_summary_as_list()
-            )
+            summary += dc.render_pretty_list(info_header, self.info.to_pretty_summary_as_list())
         if self.thumbnail_url and self.thumbnail_info:
             # This file was unencrypted
             summary += dc.render_pretty_line(thumbnail_url_header, self.thumbnail_url)
-            summary += dc.render_pretty_list(
-                thumbnail_info_header, self.thumbnail_info.to_pretty_summary_as_list()
-            )
+            summary += dc.render_pretty_list(thumbnail_info_header, self.thumbnail_info.to_pretty_summary_as_list())
 
         return summary
 
@@ -804,9 +782,7 @@ class MessageContent(UnencryptedRoomContent):
 
         summary = super().to_pretty_content_summary(dc)
         summary += dc.render_pretty_line(format_header, self.format)
-        summary += dc.render_pretty_line(
-            formatted_body_size_header, self.formatted_body_size
-        )
+        summary += dc.render_pretty_line(formatted_body_size_header, self.formatted_body_size)
 
         return summary
 
@@ -855,9 +831,7 @@ class LocationContent(UnencryptedRoomContent):
         summary += dc.render_pretty_line(geo_uri_header, self.geo_uri)
         summary += dc.render_pretty_line(thumbnail_url_header, self.thumbnail_url)
         if self.thumbnail_info:
-            summary += dc.render_pretty_list(
-                thumbnail_info_header, self.thumbnail_info.to_pretty_summary_as_list()
-            )
+            summary += dc.render_pretty_list(thumbnail_info_header, self.thumbnail_info.to_pretty_summary_as_list())
 
         return summary
 
@@ -907,9 +881,7 @@ class UnencryptedRoomEvent(Event):
         summary = super().to_pretty_summary(dc, room_version)
         summary += self.rc.to_pretty_content_summary(dc)
         if self.rc.mentions:
-            summary += dc.render_pretty_list(
-                mentions_header, self.rc.mentions.to_list()
-            )
+            summary += dc.render_pretty_list(mentions_header, self.rc.mentions.to_list())
 
         return summary
 
@@ -943,9 +915,7 @@ class StickerRoomEvent(Event):
         summary = super().to_pretty_summary(dc, room_version)
         summary += self.rc.to_pretty_content_summary(dc)
         if self.rc.mentions:
-            summary += dc.render_pretty_list(
-                mentions_header, self.rc.mentions.to_list()
-            )
+            summary += dc.render_pretty_list(mentions_header, self.rc.mentions.to_list())
 
         return summary
 
@@ -986,9 +956,7 @@ class GenericStateEvent(StrippedStateEvent, Event):
     def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:
         super().__init__(event_id, data)
         # Recall that auth_events and prev_events are part of the base class EventBase
-        self.replaces_state = self.unrecognized.get("unsigned", {}).pop(
-            "replaces_state", None
-        )
+        self.replaces_state = self.unrecognized.get("unsigned", {}).pop("replaces_state", None)
         self.prev_state = self.unrecognized.pop("prev_state", [])
 
     def to_pretty_summary_footer(
@@ -999,7 +967,9 @@ class GenericStateEvent(StrippedStateEvent, Event):
         dc.maybe_update_column_width(17)
         summary = super().to_pretty_summary_footer(event_data_map, dc)
         for prev_state in self.prev_state:
-            summary += f"{dc.front_pad('<- Prev State')}: {prev_state}: {event_data_map.get(prev_state, 'Data Missing')}\n"
+            summary += (
+                f"{dc.front_pad('<- Prev State')}: {prev_state}: {event_data_map.get(prev_state, 'Data Missing')}\n"
+            )
         if self.replaces_state:
             summary += f"{dc.front_pad('-> Replaces State')}: {self.replaces_state}: {event_data_map.get(self.replaces_state, 'Data Missing')}\n"
 
@@ -1089,9 +1059,7 @@ class CreateRoomStateEvent(GenericStateEvent):
         last_event_id: Optional[str] = predecessor_content.get("event_id", None)
         last_room_id: Optional[str] = predecessor_content.get("room_id", None)
         if last_event_id and last_room_id:
-            self.predecessor = PreviousRoom(
-                room_id=last_room_id, event_id=last_event_id
-            )
+            self.predecessor = PreviousRoom(room_id=last_room_id, event_id=last_event_id)
         self.room_version = int(self.content.pop("room_version", 1))
         self.room_type = self.content.pop("room_type", None)
 
@@ -1112,9 +1080,7 @@ class CreateRoomStateEvent(GenericStateEvent):
         summary += dc.render_pretty_line(creator_header, self.creator)
         summary += dc.render_pretty_line(fed_allowed_header, self.federation_allowed)
         if self.predecessor:
-            summary += dc.render_pretty_list(
-                pred_header, self.predecessor.to_pretty_list()
-            )
+            summary += dc.render_pretty_list(pred_header, self.predecessor.to_pretty_list())
 
         summary += dc.render_pretty_line(ver_header, self.room_version)
         summary += dc.render_pretty_line(room_type_header, self.room_type)
@@ -1262,9 +1228,7 @@ class RoomMemberStateEvent(GenericStateEvent):
         self.avatar_url = self.content.pop("avatar_url", None)
         self.displayname = self.content.pop("displayname", None)
         self.is_direct = self.content.pop("is_direct", None)
-        self.join_authorised_via_users_server = self.content.pop(
-            "join_authorised_via_users_server", None
-        )
+        self.join_authorised_via_users_server = self.content.pop("join_authorised_via_users_server", None)
         self.membership = self.content.pop("membership", "Defaulting to 'leave'")
         self.reason = self.content.pop("reason", None)
         third_party_invite = self.content.pop("third_party_invite", {})
@@ -1321,9 +1285,7 @@ class RoomMemberStateEvent(GenericStateEvent):
         summary += dc.render_pretty_line(reason_header, self.reason)
         summary += dc.render_pretty_line(displayname_header, self.displayname)
         summary += dc.render_pretty_line(avatar_url_header, self.avatar_url)
-        summary += dc.render_pretty_line(
-            JAVUS_header, self.join_authorised_via_users_server
-        )
+        summary += dc.render_pretty_line(JAVUS_header, self.join_authorised_via_users_server)
         summary += dc.render_pretty_line(
             third_party_invite_header,
             self.third_party_invite.signed.mxid if self.third_party_invite else None,
@@ -1353,15 +1315,9 @@ class PowerLevelStateEvent(GenericStateEvent):
         self.invite = self.content.pop("invite", "Not Found(Defaults to 0)")
         self.kick = self.content.pop("kick", "Not Found(Defaults to 50)")
         self.redact = self.content.pop("redact", "Not Found(Defaults to 50)")
-        self.events_default = self.content.pop(
-            "events_default", "Not Found(Defaults to 0)"
-        )
-        self.state_default = self.content.pop(
-            "state_default", "Not Found(Defaults to 50)"
-        )
-        self.users_default = self.content.pop(
-            "users_default", "Not Found(Defaults to 0)"
-        )
+        self.events_default = self.content.pop("events_default", "Not Found(Defaults to 0)")
+        self.state_default = self.content.pop("state_default", "Not Found(Defaults to 50)")
+        self.users_default = self.content.pop("users_default", "Not Found(Defaults to 0)")
         self.events = self.content.pop("events", {})
         self.notifications = self.content.pop("notifications", {})
         self.users = self.content.pop("users", {})
@@ -1390,9 +1346,7 @@ class PowerLevelStateEvent(GenericStateEvent):
         notif_val_col = DisplayLineColumnConfig("")
         notif_num_entries = len(self.notifications)
 
-        max_entries_to_display = max(
-            user_num_entries, events_num_entries, notif_num_entries
-        )
+        max_entries_to_display = max(user_num_entries, events_num_entries, notif_num_entries)
 
         # Prepare the whole list of entries, so we know how many lines will be needed
         complex_buffer_lines_list = []
@@ -1436,14 +1390,10 @@ class PowerLevelStateEvent(GenericStateEvent):
             summary += f"{user_key_col.front_pad()}:{user_val_col.pad()} | "
             count = 0
             for user, level in self.users.items():
-                complex_buffer_lines_list[
-                    count
-                ] += f"{user_key_col.front_pad(user)}:{user_val_col.pad(str(level))} | "
+                complex_buffer_lines_list[count] += f"{user_key_col.front_pad(user)}:{user_val_col.pad(str(level))} | "
                 count = count + 1
             while count < max_entries_to_display:
-                complex_buffer_lines_list[
-                    count
-                ] += f"{user_key_col.front_pad('')} {user_val_col.pad('')} | "
+                complex_buffer_lines_list[count] += f"{user_key_col.front_pad('')} {user_val_col.pad('')} | "
                 count = count + 1
 
         if self.events:
@@ -1455,23 +1405,17 @@ class PowerLevelStateEvent(GenericStateEvent):
                 ] += f"{events_key_col.front_pad(user)}:{events_val_col.pad(str(level))} | "
                 count = count + 1
             while count < max_entries_to_display:
-                complex_buffer_lines_list[
-                    count
-                ] += f"{events_key_col.front_pad('')} {events_val_col.pad('')} | "
+                complex_buffer_lines_list[count] += f"{events_key_col.front_pad('')} {events_val_col.pad('')} | "
                 count = count + 1
 
         if self.notifications:
             summary += f"{notif_key_col.front_pad()}:{notif_val_col.pad()}"
             count = 0
             for user, level in self.notifications.items():
-                complex_buffer_lines_list[
-                    count
-                ] += f"{notif_key_col.front_pad(user)}:{notif_val_col.pad(str(level))}"
+                complex_buffer_lines_list[count] += f"{notif_key_col.front_pad(user)}:{notif_val_col.pad(str(level))}"
                 count = count + 1
             while count < max_entries_to_display:
-                complex_buffer_lines_list[
-                    count
-                ] += f"{notif_key_col.front_pad('')} {notif_val_col.pad('')} "
+                complex_buffer_lines_list[count] += f"{notif_key_col.front_pad('')} {notif_val_col.pad('')} "
                 count = count + 1
 
         # In case one of the above wasn't the end, make it so
@@ -1493,9 +1437,7 @@ class RedactionStateEvent(GenericStateEvent):
     def __init__(self, event_id: EventID, raw_data: Dict[str, Any]) -> None:
         super().__init__(event_id, raw_data)
         self.reason = self.content.pop("reason", "")
-        self.redacts = self.content.pop(
-            "redacts", "Not Found(Is this a version 11 room?"
-        )
+        self.redacts = self.content.pop("redacts", "Not Found(Is this a version 11 room?")
 
     def to_pretty_summary(
         self,
@@ -1824,9 +1766,7 @@ def determine_what_kind_of_event(
     if not event_id:
         if room_version and room_version > 3:
             # For the moment, we can only discover Event ID's from room version's before 4
-            event_id = EventID(
-                construct_event_id_from_event_v3(room_version, data_to_use)
-            )
+            event_id = EventID(construct_event_id_from_event_v3(room_version, data_to_use))
         else:
             event_id = EventID("")
 
@@ -2157,9 +2097,7 @@ def _redact_with(
                 redacted_data_result[key] = value
             else:
                 assert isinstance(event_type, str)
-                content_list_to_keep = map_of_keys_from_content_to_keep.get(
-                    event_type, []
-                )
+                content_list_to_keep = map_of_keys_from_content_to_keep.get(event_type, [])
                 # Because of the else clause above, we know a 'content' key did exist.
                 # Create an empty one, then check if something is supposed to be copied
                 # over to it.
@@ -2169,10 +2107,7 @@ def _redact_with(
                     # have the magic constant 'ALL_KEYS' in the 'list' and only for
                     # an event type of 'm.room.create'. FTR, I'm not a fan of magic
                     # constants.
-                    if (
-                        content_key in content_list_to_keep
-                        or ALL_KEYS in content_list_to_keep
-                    ):
+                    if content_key in content_list_to_keep or ALL_KEYS in content_list_to_keep:
                         redacted_data_result["content"][content_key] = content_value
 
     return redacted_data_result
@@ -2192,9 +2127,7 @@ def redact_event(room_version: int, data_to_use: Dict[str, Any]) -> Dict[str, An
             v6_to_v7_map_of_keys_from_content_to_keep,
         )
     if room_version == 8:
-        return _redact_with(
-            data_to_use, v8_list_of_keys_to_keep, v8_map_of_keys_from_content_to_keep
-        )
+        return _redact_with(data_to_use, v8_list_of_keys_to_keep, v8_map_of_keys_from_content_to_keep)
     if 8 < room_version <= 10:
         return _redact_with(
             data_to_use,
@@ -2203,6 +2136,4 @@ def redact_event(room_version: int, data_to_use: Dict[str, Any]) -> Dict[str, An
         )
 
     # Greater than room version 10
-    return _redact_with(
-        data_to_use, v11_list_of_keys_to_keep, v11_map_of_keys_from_content_to_keep
-    )
+    return _redact_with(data_to_use, v11_list_of_keys_to_keep, v11_map_of_keys_from_content_to_keep)

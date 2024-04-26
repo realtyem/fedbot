@@ -20,18 +20,8 @@ from federationbot.events import (
     determine_what_kind_of_event,
     redact_event,
 )
-from federationbot.responses import (
-    MakeJoinResponse,
-    MatrixError,
-    MatrixFederationResponse,
-    MatrixResponse,
-)
-from federationbot.types import (
-    KeyContainer,
-    KeyID,
-    ServerVerifyKeys,
-    SignatureVerifyResult,
-)
+from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
+from federationbot.types import KeyContainer, KeyID, ServerVerifyKeys, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
 fed_handler_logger = logging.getLogger("federation_handler")
@@ -65,12 +55,8 @@ class FederationHandler:
         await self.room_version_cache.stop()
         await self.api.shutdown()
 
-    async def get_server_keys(
-        self, server_name: str, timeout: float = 10.0
-    ) -> ServerVerifyKeys:
-        response = await self.api.get_server_keys(
-            server_name=server_name, timeout=timeout
-        )
+    async def get_server_keys(self, server_name: str, timeout: float = 10.0) -> ServerVerifyKeys:
+        response = await self.api.get_server_keys(server_name=server_name, timeout=timeout)
 
         json_response = response.json_response
         return ServerVerifyKeys(json_response)
@@ -78,9 +64,7 @@ class FederationHandler:
     async def get_server_keys_from_notary(
         self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
     ) -> ServerVerifyKeys:
-        minimum_valid_until_ts = int(time.time() * 1000) + (
-            30 * 60 * 1000
-        )  # Add 30 minutes
+        minimum_valid_until_ts = int(time.time() * 1000) + (30 * 60 * 1000)  # Add 30 minutes
 
         response = await self.api.get_server_notary_keys(
             fetch_server_name=fetch_server_name,
@@ -108,9 +92,7 @@ class FederationHandler:
         server_verify_keys = await self.get_server_keys(for_server_name, timeout)
 
         if key_id_formatted not in server_verify_keys.verify_keys:
-            server_verify_keys = await self.get_server_keys_from_notary(
-                for_server_name, self.hosting_server, timeout
-            )
+            server_verify_keys = await self.get_server_keys_from_notary(for_server_name, self.hosting_server, timeout)
 
         # TODO: verify can remove this, as it can never be None but can be empty
         # if server_verify_keys is None:
@@ -184,25 +166,17 @@ class FederationHandler:
         redacted_base_event = redact_event(room_version, base_event)
         for server_name, server_key_set in signatures.items():
             for server_key_id in server_key_set.keys():
-                remote_server_keys = await self.get_server_key_by_id(
-                    server_name, server_key_id
-                )
+                remote_server_keys = await self.get_server_key_by_id(server_name, server_key_id)
 
                 remote_server_key = remote_server_keys.get(KeyID(server_key_id), None)
                 if remote_server_key is not None:
-                    verify_key = decode_verify_key_bytes(
-                        server_key_id, remote_server_key.key.decoded_key
-                    )
+                    verify_key = decode_verify_key_bytes(server_key_id, remote_server_key.key.decoded_key)
                     try:
                         verify_signed_json(redacted_base_event, server_name, verify_key)
                     except SignatureVerifyException:
-                        event.signatures_verified[
-                            server_name
-                        ] = SignatureVerifyResult.FAIL
+                        event.signatures_verified[server_name] = SignatureVerifyResult.FAIL
                     else:
-                        event.signatures_verified[
-                            server_name
-                        ] = SignatureVerifyResult.SUCCESS
+                        event.signatures_verified[server_name] = SignatureVerifyResult.SUCCESS
 
     async def get_event_from_server(
         self,
@@ -462,13 +436,9 @@ class FederationHandler:
             assert room_alias.startswith("#")
             _, destination_server = room_alias.split(":", maxsplit=1)
         except ValueError as e:
-            raise MalformedRoomAliasError(
-                summary_exception="Room Alias did not have ':'"
-            ) from e
+            raise MalformedRoomAliasError(summary_exception="Room Alias did not have ':'") from e
         except AssertionError as e:
-            raise MalformedRoomAliasError(
-                summary_exception="Room Alias did not start with '#'"
-            ) from e
+            raise MalformedRoomAliasError(summary_exception="Room Alias did not start with '#'") from e
 
         # look up the room alias. The server is extracted from the alias itself.
         alias_result = await self.api.get_room_alias_from_directory(
@@ -639,14 +609,10 @@ class FederationHandler:
         assert room_version > 0
         prev_events = response.json_response.get("event", {}).get("prev_events", [])
         auth_events = response.json_response.get("event", {}).get("auth_events", [])
-        return MakeJoinResponse(
-            room_version=room_version, prev_events=prev_events, auth_events=auth_events
-        )
+        return MakeJoinResponse(room_version=room_version, prev_events=prev_events, auth_events=auth_events)
 
 
-def filter_events_based_on_type(
-    events: List[EventBase], filter_by: str
-) -> List[EventBase]:
+def filter_events_based_on_type(events: List[EventBase], filter_by: str) -> List[EventBase]:
     events_to_return = []
     for event in events:
         if event.event_type == filter_by:
@@ -677,9 +643,7 @@ def parse_list_response_into_list_of_event_bases(
     list_of_event_bases = []
     for event_dict in list_from_response:
         list_of_event_bases.append(
-            determine_what_kind_of_event(
-                event_id=None, room_version=room_version, data_to_use=event_dict
-            )
+            determine_what_kind_of_event(event_id=None, room_version=room_version, data_to_use=event_dict)
         )
 
     return list_of_event_bases

@@ -50,9 +50,7 @@ class DiagnosticInfo:
     def append_from(self, other_info: List[str]):
         self.list_of_results.extend(other_info)
 
-    def mark_step_num(
-        self, step_num: str, comment: str = "", front_pad: str = ""
-    ) -> None:
+    def mark_step_num(self, step_num: str, comment: str = "", front_pad: str = "") -> None:
         self.add(
             f"Checking {step_num}: {comment}",
             front_pad=front_pad,

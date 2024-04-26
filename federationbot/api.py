@@ -3,14 +3,7 @@ import json
 import logging
 import time
 
-from aiohttp import (
-    ClientResponse,
-    ClientSession,
-    ClientTimeout,
-    TCPConnector,
-    TraceConfig,
-    client_exceptions,
-)
+from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, TraceConfig, client_exceptions
 from backoff._typing import Details
 from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
@@ -20,17 +13,8 @@ import backoff
 from federationbot.cache import LRUCache
 from federationbot.controllers import ReactionTaskController
 from federationbot.delegation import DelegationHandler
-from federationbot.errors import (
-    FedBotException,
-    PluginTimeout,
-    ServerSSLException,
-    ServerUnreachable,
-)
-from federationbot.responses import (
-    MatrixError,
-    MatrixFederationResponse,
-    MatrixResponse,
-)
+from federationbot.errors import FedBotException, PluginTimeout, ServerSSLException, ServerUnreachable
+from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 from federationbot.tracing import (
     on_connection_create_end,
@@ -65,15 +49,15 @@ def backoff_logging_handler(details: Details) -> None:
     tries = details.get("tries", 0)
     host = details.get("args", (None, "arg not found"))[1]
     backoff_logger.debug(
-        "Backing off {wait:0.2f} seconds after {tries} tries on "
-        "host {host}".format(wait=wait, tries=tries, host=host)
+        "Backing off %.2f seconds after %d tries on host %s",
+        wait,
+        tries,
+        host,
     )
 
 
 def backoff_update_retries_handler(details: Details) -> None:
-    server_result: Optional[ServerResult] = details.get("kwargs", {}).get(
-        "server_result", None
-    )
+    server_result: Optional[ServerResult] = details.get("kwargs", {}).get("server_result", None)
     if server_result and server_result.diag_info:
         server_result.diag_info.retries += 1
 
@@ -88,9 +72,7 @@ class FederationApi:
         self.task_controller = task_controller
         self.json_decoder = json.JSONDecoder()
         # Map this cache to server_name -> ServerResult
-        self.server_discovery_cache: LRUCache[str, ServerResult] = LRUCache(
-            expire_after_seconds=60 * 30
-        )
+        self.server_discovery_cache: LRUCache[str, ServerResult] = LRUCache(expire_after_seconds=60 * 30)
 
         trace_config = TraceConfig()
         trace_config.on_request_start.append(on_request_start)
@@ -183,9 +165,7 @@ class FederationApi:
                 )
             destination_port = int(server_result.port)
             resolved_destination_server = server_result.get_host()
-            server_hostname_sni = (
-                server_result.sni_server_name if server_result.use_sni else None
-            )
+            server_hostname_sni = server_result.sni_server_name if server_result.use_sni else None
             request_headers.update({"Host": server_result.host_header})
 
         else:
@@ -264,9 +244,7 @@ class FederationApi:
         ) as e:
             if getattr(e, "os_error"):
                 # This gets type ignored, as it is defined but for some reason mypy can't figure that out
-                raise FedBotException(
-                    e.__class__.__name__, e.os_error.strerror  # type: ignore[attr-defined]
-                ) from e
+                raise FedBotException(e.__class__.__name__, e.os_error.strerror) from e  # type: ignore[attr-defined]
 
             raise FedBotException(e.__class__.__name__, e.strerror) from e
 
@@ -356,11 +334,7 @@ class FederationApi:
         # forcing rediscovery, OR
         # had a ServerResult, but it was unhealthy and requested retry time has passed
         # then try and reload the ServerResult
-        if (
-            not server_result
-            or force_rediscover
-            or (server_result.unhealthy and server_result.retry_time_s < now)
-        ):
+        if not server_result or force_rediscover or (server_result.unhealthy and server_result.retry_time_s < now):
             # If this server was attempted at some point and failed, there is no
             # point trying again until the cache entry is replaced.
 
@@ -390,9 +364,7 @@ class FederationApi:
             timeout_seconds=timeout_seconds,
         )
         try:
-            response_tuple = await self.task_controller.get_task_results(
-                reference_key, threaded=True
-            )
+            response_tuple = await self.task_controller.get_task_results(reference_key, threaded=True)
             response = response_tuple[0]
             if isinstance(response, BaseException):
 
@@ -473,9 +445,7 @@ class FederationApi:
             diag_info.error(f"Request to {path} failed")
             if code == 200:
                 # Going to log this for now, see how prevalent it is
-                fedapi_logger.debug(
-                    "fedreq: HIT possible Caddy condition: %s", destination_server_name
-                )
+                fedapi_logger.debug("fedreq: HIT possible Caddy condition: %s", destination_server_name)
 
             return MatrixError(
                 http_code=code,
@@ -532,9 +502,7 @@ class FederationApi:
 
         return response
 
-    async def get_server_keys(
-        self, server_name: str, timeout: float = 10.0
-    ) -> MatrixResponse:
+    async def get_server_keys(self, server_name: str, timeout: float = 10.0) -> MatrixResponse:
         response = await self.federation_request(
             destination_server_name=server_name,
             path="/_matrix/key/v2/server",
@@ -955,6 +923,8 @@ def authorization_headers(
         # 'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
         #
         # authorization_header = f'X-Matrix origin=\"{origin_name}\",key=\"{key}\",sig=\"{sig}\",destination=\"{destination_name}\"'
-        authorization_header = f'X-Matrix origin="{origin_name}",key="{key}",sig="{sig}",destination="{destination_name}"'
+        authorization_header = (
+            f'X-Matrix origin="{origin_name}",key="{key}",sig="{sig}",destination="{destination_name}"'
+        )
 
     return authorization_header

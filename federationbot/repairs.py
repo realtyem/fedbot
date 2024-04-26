@@ -5,9 +5,7 @@ from federationbot.errors import EventKeyMissing
 from federationbot.utils import full_dict_copy
 
 
-def repair_missing_origin_from_redacted_event(
-    jsondict_to_check: Dict[str, Any]
-) -> Dict[str, Any]:
+def repair_missing_origin_from_redacted_event(jsondict_to_check: Dict[str, Any]) -> Dict[str, Any]:
     """
     Attempt a repair on an Event that has a missing 'origin' key. Just attempt the repair, validation is done elsewhere.
 

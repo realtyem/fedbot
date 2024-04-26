@@ -1,16 +1,4 @@
-from typing import (
-    Any,
-    Collection,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Type,
-    Union,
-    cast,
-)
+from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, cast
 from asyncio import QueueEmpty
 from datetime import datetime
 from enum import Enum
@@ -97,9 +85,7 @@ SERVER_SOFTWARE = "Software"
 SERVER_VERSION = "Version"
 CODE = "Code"
 
-NOT_IN_ROOM_ERROR = (
-    "Cannot process for a room I'm not in. Invite this bot to that room and try again."
-)
+NOT_IN_ROOM_ERROR = "Cannot process for a room I'm not in. Invite this bot to that room and try again."
 
 
 class Config(BaseProxyConfig):
@@ -207,9 +193,7 @@ class FederationBot(Plugin):
         )
 
     async def pre_stop(self) -> None:
-        self.client.remove_event_handler(
-            EventType.REACTION, self.reaction_task_controller.react_control_handler
-        )
+        self.client.remove_event_handler(EventType.REACTION, self.reaction_task_controller.react_control_handler)
         await self.reaction_task_controller.shutdown()
         # To stop any caching cleanup tasks
         await self.federation_handler.stop()
@@ -223,12 +207,8 @@ class FederationBot(Plugin):
         self,
         command_event: MessageEvent,
     ) -> None:
-        pinned_message = await command_event.respond(
-            f"Received Status Command on: {self.client.mxid}"
-        )
-        await self.reaction_task_controller.setup_control_reactions(
-            pinned_message, command_event
-        )
+        pinned_message = await command_event.respond(f"Received Status Command on: {self.client.mxid}")
+        await self.reaction_task_controller.setup_control_reactions(pinned_message, command_event)
 
         finish_on_this_round = False
         while True:
@@ -299,15 +279,9 @@ class FederationBot(Plugin):
             allow_html=True,
         )
         test_message_list = []
-        test_message_list.extend(
-            [add_color(bold("OKAY"), foreground=Colors.WHITE, background=Colors.GREEN)]
-        )
-        test_message_list.extend(
-            [add_color(bold("WARN"), foreground=Colors.BLACK, background=Colors.YELLOW)]
-        )
-        test_message_list.extend(
-            [add_color(bold("ERROR"), foreground=Colors.WHITE, background=Colors.RED)]
-        )
+        test_message_list.extend([add_color(bold("OKAY"), foreground=Colors.WHITE, background=Colors.GREEN)])
+        test_message_list.extend([add_color(bold("WARN"), foreground=Colors.BLACK, background=Colors.YELLOW)])
+        test_message_list.extend([add_color(bold("ERROR"), foreground=Colors.WHITE, background=Colors.RED)])
 
         await command_event.respond(
             make_into_text_event(
@@ -353,9 +327,7 @@ class FederationBot(Plugin):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        if get_domain_from_id(command_event.sender) != get_domain_from_id(
-            self.client.mxid
-        ):
+        if get_domain_from_id(command_event.sender) != get_domain_from_id(self.client.mxid):
             await command_event.reply(
                 "I'm sorry, running this command from a user not on the same server as the bot will not help"
             )
@@ -374,9 +346,7 @@ class FederationBot(Plugin):
 
         # Sort out the room id
         if room_id_or_alias:
-            room_to_check, _ = await self.resolve_room_id_or_alias(
-                room_id_or_alias, command_event, origin_server
-            )
+            room_to_check, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
             if not room_to_check:
                 # Don't need to actually display an error, that's handled in the above
                 # function
@@ -433,9 +403,7 @@ class FederationBot(Plugin):
 
         event_id = ts_response.json_response.get("event_id", None)
         assert isinstance(event_id, str)
-        event_result = await self.federation_handler.get_event_from_server(
-            origin_server, origin_server, event_id
-        )
+        event_result = await self.federation_handler.get_event_from_server(origin_server, origin_server, event_id)
         event = event_result.get(event_id, None)
         assert event is not None
         room_depth = event.depth
@@ -465,9 +433,7 @@ class FederationBot(Plugin):
             return combined_lines
 
         pinned_message = await command_event.respond(
-            make_into_text_event(
-                wrap_in_code_block_markdown(_combine_lines_for_backwalk())
-            )
+            make_into_text_event(wrap_in_code_block_markdown(_combine_lines_for_backwalk()))
         )
 
         async def _inner_walking_fetcher(
@@ -514,13 +480,9 @@ class FederationBot(Plugin):
         discovery_cumulative_iter_time = 0.0
         discovery_collection_of_event_ids = set()
         response_list: List[Tuple[float, PaginatedMessages]] = []
-        discovery_fetch_queue: asyncio.Queue[
-            Tuple[float, Optional[SyncToken]]
-        ] = asyncio.Queue()
+        discovery_fetch_queue: asyncio.Queue[Tuple[float, Optional[SyncToken]]] = asyncio.Queue()
 
-        task = asyncio.create_task(
-            _inner_walking_fetcher(PaginationDirection.FORWARD, discovery_fetch_queue)
-        )
+        task = asyncio.create_task(_inner_walking_fetcher(PaginationDirection.FORWARD, discovery_fetch_queue))
         discovery_fetch_queue.put_nowait((0.0, None))
         finish = False
 
@@ -550,13 +512,9 @@ class FederationBot(Plugin):
             # give a status update
             discovery_total_events_received = len(discovery_collection_of_event_ids)
             discovery_lines = []
+            discovery_lines.extend([f"Events found during discovery: {discovery_total_events_received}"])
             discovery_lines.extend(
-                [f"Events found during discovery: {discovery_total_events_received}"]
-            )
-            discovery_lines.extend(
-                [
-                    f"  Time taken: {discovery_cumulative_iter_time:.3f} seconds (iter# {discovery_iterations})"
-                ]
+                [f"  Time taken: {discovery_cumulative_iter_time:.3f} seconds (iter# {discovery_iterations})"]
             )
 
             # for event_type, count in discovery_event_types_count.items():
@@ -581,15 +539,11 @@ class FederationBot(Plugin):
         await asyncio.gather(task, return_exceptions=True)
 
         backwalk_iterations = 0
-        backwalk_fetch_queue: asyncio.Queue[
-            Tuple[float, Optional[SyncToken]]
-        ] = asyncio.Queue()
+        backwalk_fetch_queue: asyncio.Queue[Tuple[float, Optional[SyncToken]]] = asyncio.Queue()
         # List of tuples, (time_spent float, NamedTuple of data)
         response_list = []
 
-        task = asyncio.create_task(
-            _inner_walking_fetcher(PaginationDirection.BACKWARD, backwalk_fetch_queue)
-        )
+        task = asyncio.create_task(_inner_walking_fetcher(PaginationDirection.BACKWARD, backwalk_fetch_queue))
 
         backwalk_collection_of_event_ids: Set[EventID] = set()
         backwalk_count_of_new_event_ids = 0
@@ -624,16 +578,10 @@ class FederationBot(Plugin):
                     new_event_ids.add(event.event_id)
 
             # collect stats
-            difference_of_b_and_a = new_event_ids.difference(
-                backwalk_collection_of_event_ids
-            )
+            difference_of_b_and_a = new_event_ids.difference(backwalk_collection_of_event_ids)
 
-            difference_of_bw_to_discovery = new_event_ids.difference(
-                discovery_collection_of_event_ids
-            )
-            backwalk_count_of_new_event_ids = backwalk_count_of_new_event_ids + len(
-                difference_of_bw_to_discovery
-            )
+            difference_of_bw_to_discovery = new_event_ids.difference(discovery_collection_of_event_ids)
+            backwalk_count_of_new_event_ids = backwalk_count_of_new_event_ids + len(difference_of_bw_to_discovery)
 
             backwalk_collection_of_event_ids.update(new_event_ids)
 
@@ -642,22 +590,12 @@ class FederationBot(Plugin):
             #   Time taken: 120 seconds
             backwalk_lines = []
             progress_line = f"{len(backwalk_collection_of_event_ids)} of {room_depth}"
+            backwalk_lines.extend([f"Received Events during backwalk: {len(backwalk_collection_of_event_ids)}"])
+            backwalk_lines.extend([f"New Events found during backwalk: {backwalk_count_of_new_event_ids}"])
             backwalk_lines.extend(
-                [
-                    f"Received Events during backwalk: {len(backwalk_collection_of_event_ids)}"
-                ]
+                [f"  Time taken: {backwalk_cumulative_iter_time:.3f} seconds (iter# {backwalk_iterations})"]
             )
-            backwalk_lines.extend(
-                [f"New Events found during backwalk: {backwalk_count_of_new_event_ids}"]
-            )
-            backwalk_lines.extend(
-                [
-                    f"  Time taken: {backwalk_cumulative_iter_time:.3f} seconds (iter# {backwalk_iterations})"
-                ]
-            )
-            backwalk_lines.extend(
-                [f"  Events found this iter: ({len(difference_of_b_and_a)})"]
-            )
+            backwalk_lines.extend([f"  Events found this iter: ({len(difference_of_b_and_a)})"])
 
             if new_responses_to_work_on or finish:
                 # Only print something if there is something to say
@@ -689,12 +627,9 @@ class FederationBot(Plugin):
 
     @test_command.subcommand(
         name="room_walk2",
-        help="Use the federation api to try and selectively download events that are "
-        "missing(beta).",
+        help="Use the federation api to try and selectively download events that are " "missing(beta).",
     )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
-    )
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="server_to_fix", required=False)
     async def room_walk_2_command(
         self,
@@ -705,12 +640,9 @@ class FederationBot(Plugin):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        if get_domain_from_id(command_event.sender) != get_domain_from_id(
-            self.client.mxid
-        ):
+        if get_domain_from_id(command_event.sender) != get_domain_from_id(self.client.mxid):
             await command_event.reply(
-                "I'm sorry, running this command from a user not on the same "
-                "server as the bot will not help"
+                "I'm sorry, running this command from a user not on the same server as the bot will not help"
             )
             return
 
@@ -732,9 +664,7 @@ class FederationBot(Plugin):
 
         # Sort out the room id
         if room_id_or_alias:
-            room_id, _ = await self.resolve_room_id_or_alias(
-                room_id_or_alias, command_event, origin_server
-            )
+            room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
             if not room_id:
                 # Don't need to actually display an error, that's handled in the above
                 # function
@@ -834,24 +764,17 @@ class FederationBot(Plugin):
         )
         if ts_response.http_code != 200:
             await command_event.respond(
-                "Something went wrong while getting last event in room\n"
-                f"* {ts_response.reason}"
+                "Something went wrong while getting last event in room\n" f"* {ts_response.reason}"
             )
             return
 
         pinned_message = await command_event.respond(
-            make_into_text_event(
-                wrap_in_code_block_markdown(
-                    "Just a moment while I prepare a few things\n"
-                )
-            )
+            make_into_text_event(wrap_in_code_block_markdown("Just a moment while I prepare a few things\n"))
         )
         # The initial starting point for the room walk
         event_id = ts_response.json_response.get("event_id", None)
         assert isinstance(event_id, str)
-        event_result = await self.federation_handler.get_event_from_server(
-            origin_server, origin_server, event_id
-        )
+        event_result = await self.federation_handler.get_event_from_server(origin_server, origin_server, event_id)
         event = event_result.get(event_id, None)
         assert event is not None
         room_depth = event.depth
@@ -872,9 +795,7 @@ class FederationBot(Plugin):
         _ = await self._get_versions_from_servers(host_list)
 
         for host in host_list:
-            server_check = self.federation_handler.api.server_discovery_cache.get(
-                host, None
-            )
+            server_check = self.federation_handler.api.server_discovery_cache.get(host, None)
             if server_check and server_check.unhealthy is None:
                 good_host_list.extend((host,))
             else:
@@ -909,15 +830,11 @@ class FederationBot(Plugin):
 
         # Begin the render, replace the original message
         await command_event.respond(
-            make_into_text_event(
-                wrap_in_code_block_markdown(_combine_lines_for_backwalk())
-            ),
+            make_into_text_event(wrap_in_code_block_markdown(_combine_lines_for_backwalk())),
             edits=pinned_message,
         )
 
-        await self.reaction_task_controller.setup_control_reactions(
-            pinned_message, command_event
-        )
+        await self.reaction_task_controller.setup_control_reactions(pinned_message, command_event)
 
         bot_working: Dict[str, bool] = {}
 
@@ -958,12 +875,10 @@ class FederationBot(Plugin):
 
                 iter_start_time = time.time()
                 if next_event_ids:
-                    pulled_event_map = (
-                        await self.federation_handler.get_events_from_server(
-                            origin_server=origin_server,
-                            destination_server=destination_server,
-                            events_list=next_event_ids,
-                        )
+                    pulled_event_map = await self.federation_handler.get_events_from_server(
+                        origin_server=origin_server,
+                        destination_server=destination_server,
+                        events_list=next_event_ids,
                     )
                 else:
                     # This way, if there was nothing to do after being filtered out, it
@@ -975,16 +890,11 @@ class FederationBot(Plugin):
                     pulled_event = pulled_event_map.get(next_event_id, None)
 
                     # pulled_event should never be None, but mypy doesn't know that
-                    if pulled_event is not None and not isinstance(
-                        pulled_event, EventError
-                    ):
+                    if pulled_event is not None and not isinstance(pulled_event, EventError):
                         if is_this_a_retry:
                             # This should only be hit after a backfill attempt, and
                             # means the second try succeeded.
-                            self.log.info(
-                                f"{worker_name}: "
-                                f"Hit a Resolved Error on {next_event_id}"
-                            )
+                            self.log.info(f"{worker_name}: " f"Hit a Resolved Error on {next_event_id}")
                             event_id_resolved_error_list.add(next_event_id)
 
                         seen_depths_for_progress.add(pulled_event.depth)
@@ -992,10 +902,7 @@ class FederationBot(Plugin):
                         auth_events = pulled_event.auth_events
                         event_id_ok_list.add(next_event_id)
 
-                        (
-                            prev_good_events,
-                            prev_bad_events,
-                        ) = await _parse_ancestor_events(
+                        (prev_good_events, prev_bad_events,) = await _parse_ancestor_events(
                             worker_name,
                             prev_events,
                         )
@@ -1003,10 +910,7 @@ class FederationBot(Plugin):
                         # We don't iterate the walk based on auth_events themselves,
                         # eventually we'll find them in prev_events. At worst, this is a
                         # prefetch for the cache.
-                        (
-                            auth_good_events,
-                            auth_bad_events,
-                        ) = await _parse_ancestor_events(
+                        (auth_good_events, auth_bad_events,) = await _parse_ancestor_events(
                             worker_name,
                             auth_events,
                         )
@@ -1032,9 +936,7 @@ class FederationBot(Plugin):
                         # All other opportunities to hit this will have been handled in the
                         # above filter function.
                         # TODO: not any more they aren't
-                        self.log.warning(
-                            f"hit an EventError when shouldn't have: {next_event_id}"
-                        )
+                        self.log.warning(f"hit an EventError when shouldn't have: {next_event_id}")
 
                 _time_spent = time.time() - iter_start_time
                 total_time_spent += _time_spent
@@ -1122,10 +1024,8 @@ class FederationBot(Plugin):
                     # self.log.info(f"{worker_name}: looking at {popped_event_id}")
                     # 4. Check the found Event for ancestor Events that are not on the
                     #    target server
-                    server_to_event_result_map = (
-                        await self.federation_handler.find_event_on_servers(
-                            origin_server, popped_event_id, good_host_list
-                        )
+                    server_to_event_result_map = await self.federation_handler.find_event_on_servers(
+                        origin_server, popped_event_id, good_host_list
                     )
 
                     for server_name, event_base in server_to_event_result_map.items():
@@ -1138,9 +1038,7 @@ class FederationBot(Plugin):
                                     )
                                 except MatrixError:
                                     pass  # until find something better. Should move this up anyways
-                            await self.federation_handler.verify_signatures_and_annotate_event(
-                                event_base, room_version
-                            )
+                            await self.federation_handler.verify_signatures_and_annotate_event(event_base, room_version)
 
                     count_of_how_many_servers_tried = 0
                     for server_name in good_host_list:
@@ -1151,9 +1049,7 @@ class FederationBot(Plugin):
                             if _event_base.signatures_verified:
                                 # 5. Add to a List, so we can clearly walk backwards
                                 # (filling them in order)
-                                list_of_server_and_event_id_to_send.append(
-                                    (_event_base,)
-                                )
+                                list_of_server_and_event_id_to_send.append((_event_base,))
                                 self.log.info(
                                     f"{worker_name}: found {popped_event_id} on "
                                     f"{server_name} after "
@@ -1164,46 +1060,32 @@ class FederationBot(Plugin):
                                 (
                                     prev_good_events,
                                     prev_bad_events,
-                                ) = await _parse_ancestor_events(
-                                    worker_name, _event_base.prev_events
-                                )
+                                ) = await _parse_ancestor_events(worker_name, _event_base.prev_events)
                                 (
                                     auth_good_events,
                                     auth_bad_events,
-                                ) = await _parse_ancestor_events(
-                                    worker_name, _event_base.auth_events
-                                )
+                                ) = await _parse_ancestor_events(worker_name, _event_base.auth_events)
                                 for _ancestor_event_id in prev_bad_events:
-                                    if (
-                                        _ancestor_event_id
-                                        in already_searching_for_event_id
-                                    ):
+                                    if _ancestor_event_id in already_searching_for_event_id:
                                         # Already tried searching for this
                                         continue
                                     self.log.warning(
                                         f"{worker_name}: for: "
                                         f"{_event_base.event_id}, need prev_event: {_ancestor_event_id}"
                                     )
-                                    already_searching_for_event_id.add(
-                                        _ancestor_event_id
-                                    )
+                                    already_searching_for_event_id.add(_ancestor_event_id)
 
                                     event_ids_to_try_next.put_nowait(_ancestor_event_id)
 
                                 for _ancestor_event_id in auth_bad_events:
-                                    if (
-                                        _ancestor_event_id
-                                        in already_searching_for_event_id
-                                    ):
+                                    if _ancestor_event_id in already_searching_for_event_id:
                                         # Already tried searching for this
                                         continue
                                     self.log.warning(
                                         f"{worker_name}: for: "
                                         f"{_event_base.event_id}, need auth_event: {_ancestor_event_id}"
                                     )
-                                    already_searching_for_event_id.add(
-                                        _ancestor_event_id
-                                    )
+                                    already_searching_for_event_id.add(_ancestor_event_id)
 
                                     event_ids_to_try_next.put_nowait(_ancestor_event_id)
 
@@ -1243,9 +1125,7 @@ class FederationBot(Plugin):
                 while list_of_pdus_to_send:
                     limited_list_of_pdus = list_of_pdus_to_send[:50]
                     list_of_pdus_to_send = list_of_pdus_to_send[50:]
-                    self.log.info(
-                        f"Size of PDU list about to send: {len(limited_list_of_pdus)}"
-                    )
+                    self.log.info(f"Size of PDU list about to send: {len(limited_list_of_pdus)}")
                     response = await self.federation_handler.send_events_to_server(
                         origin_server,
                         destination_server,
@@ -1273,9 +1153,7 @@ class FederationBot(Plugin):
 
                 # Set up the retry task, but only if an event was actually sent
                 if event_sent:
-                    new_worker_id = len(
-                        self.reaction_task_controller.tasks_sets[pinned_message].tasks
-                    )
+                    new_worker_id = len(self.reaction_task_controller.tasks_sets[pinned_message].tasks)
                     self.reaction_task_controller.add_tasks(
                         pinned_message,
                         _waiting_retry_worker,
@@ -1287,9 +1165,7 @@ class FederationBot(Plugin):
                     )
 
                 else:
-                    self.log.warning(
-                        f"{worker_name}: Nothing to do, as no events were sent out for {next_event_id}"
-                    )
+                    self.log.warning(f"{worker_name}: Nothing to do, as no events were sent out for {next_event_id}")
 
                 bot_working[worker_name] = False
 
@@ -1334,12 +1210,10 @@ class FederationBot(Plugin):
 
                 await asyncio.sleep(sleep_time)
 
-                retry_check_on_event = (
-                    await self.federation_handler.get_event_from_server(
-                        origin_server,
-                        destination_server,
-                        event_id_to_check,
-                    )
+                retry_check_on_event = await self.federation_handler.get_event_from_server(
+                    origin_server,
+                    destination_server,
+                    event_id_to_check,
                 )
                 retry_counter += 1
 
@@ -1366,9 +1240,7 @@ class FederationBot(Plugin):
             _bot_working_status_counter[worker_name] = False
 
         # Tuple[suggested_backoff, is_this_a_retry, event_ids_to_fetch]
-        roomwalk_fetch_queue: asyncio.Queue[
-            Tuple[float, bool, Set[str]]
-        ] = asyncio.Queue()
+        roomwalk_fetch_queue: asyncio.Queue[Tuple[float, bool, Set[str]]] = asyncio.Queue()
         # The Queue of errors, matches with _event_error_queue on workers
         # Tuple[suggested_backoff, event_id_to_fetch]
         roomwalk_error_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -1432,9 +1304,7 @@ class FederationBot(Plugin):
             if roomwalk_fetch_queue.qsize() == 0 and roomwalk_error_queue.qsize() == 0:
                 if all({not x for x in bot_working.values()}):
                     retry_for_finish += 1
-                    self.log.warning(
-                        f"Unexpectedly found no work being processed. Retry count: {retry_for_finish}"
-                    )
+                    self.log.warning(f"Unexpectedly found no work being processed. Retry count: {retry_for_finish}")
                     if retry_for_finish > 5:
                         finish_on_this_round = True
                 else:
@@ -1452,9 +1322,7 @@ class FederationBot(Plugin):
                     finish_on_this_round = True
                 roomwalk_cumulative_iter_time += time_spent
             roomwalk_iterations = roomwalk_iterations + 1
-            current_count_of_events_processed = len(
-                event_id_ok_list.union(event_id_error_list)
-            )
+            current_count_of_events_processed = len(event_id_ok_list.union(event_id_error_list))
             # Want it to look like:
             #
             # Room depth reported as: 45867
@@ -1468,9 +1336,7 @@ class FederationBot(Plugin):
             # TODO: Fix this too
             # if new_items_to_render or finish_on_this_round:
 
-            self.log.info(
-                f"mid-render, room_depth difference: {len(seen_depths_for_progress)} / {room_depth}"
-            )
+            self.log.info(f"mid-render, room_depth difference: {len(seen_depths_for_progress)} / {room_depth}")
             progress_bar.update(seen_depths_for_progress)
             progress_line = progress_bar.render_bitmap_bar()
 
@@ -1485,9 +1351,7 @@ class FederationBot(Plugin):
                 f"Total number of workers: {len(self.reaction_task_controller.tasks_sets[pinned_message].tasks)}",
             ]
             if retry_for_finish:
-                roomwalk_lines.extend(
-                    [f"Might be out of work, retry count:{retry_for_finish}"]
-                )
+                roomwalk_lines.extend([f"Might be out of work, retry count:{retry_for_finish}"])
 
             # Only print something if there is something to say
             await command_event.respond(
@@ -1529,9 +1393,7 @@ class FederationBot(Plugin):
         name="repair_event",
         help="Find a given Event ID in a room and inject any necessary ancestors into the server_to_fix",
     )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
-    )
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
     @command.argument(name="event_id", parser=is_event_id, required=True)
     @command.argument(name="server_to_fix", required=False)
     async def repair_event_command(
@@ -1574,9 +1436,7 @@ class FederationBot(Plugin):
 
         # 1. The event ID that was provided, prove it's not already on the target server
         if not event_id:
-            await command_event.reply(
-                f"I need you to provide me with an event_id, got {event_id}"
-            )
+            await command_event.reply(f"I need you to provide me with an event_id, got {event_id}")
             return
 
         await command_event.respond("Making sure event is not already in room")
@@ -1608,9 +1468,7 @@ class FederationBot(Plugin):
         # Try to use a server from the room alias response, but if there was none use something else
         head_data = await self.federation_handler.make_join_to_server(
             origin_server,
-            list_of_room_alias_servers[0]
-            if list_of_room_alias_servers
-            else destination_server,
+            list_of_room_alias_servers[0] if list_of_room_alias_servers else destination_server,
             room_id,
             str(self.client.mxid),
         )
@@ -1629,9 +1487,7 @@ class FederationBot(Plugin):
         await command_event.respond("Filtering out dead/unresponsive hosts")
         await self._get_versions_from_servers(host_list)
         for host in host_list:
-            server_result = self.federation_handler.api.server_discovery_cache.get(
-                host, None
-            )
+            server_result = self.federation_handler.api.server_discovery_cache.get(host, None)
             if server_result and not server_result.unhealthy:
                 good_host_list.extend((host,))
                 # TODO: do we want to track the bad host list too?
@@ -1643,9 +1499,7 @@ class FederationBot(Plugin):
         room_version_of_found_event = head_data.room_version
         if not room_version_of_found_event:
             room_version_of_found_event = int(
-                await self.federation_handler.discover_room_version(
-                    origin_server, destination_server, room_id
-                )
+                await self.federation_handler.discover_room_version(origin_server, destination_server, room_id)
             )
 
         list_of_server_and_event_id_to_send = []
@@ -1655,15 +1509,11 @@ class FederationBot(Plugin):
         while not_done:
             popped_event_id = await event_ids_to_try_next.get()
             # 4. Check the found Event for ancestor Events that are not on the target server
-            server_to_event_result_map = (
-                await self.federation_handler.find_event_on_servers(
-                    origin_server, popped_event_id, good_host_list
-                )
+            server_to_event_result_map = await self.federation_handler.find_event_on_servers(
+                origin_server, popped_event_id, good_host_list
             )
 
-            await command_event.respond(
-                f"Found event {popped_event_id} on {len(server_to_event_result_map)} servers"
-            )
+            await command_event.respond(f"Found event {popped_event_id} on {len(server_to_event_result_map)} servers")
             for event_base in server_to_event_result_map.values():
                 # But first, verify the events are valid
                 if isinstance(event_base, Event):
@@ -1679,24 +1529,16 @@ class FederationBot(Plugin):
                         list_of_server_and_event_id_to_send.append((event_base,))
                         # But, do we need more
                         for _prev_event_id in event_base.prev_events:
-                            response_check_for_this_event = (
-                                await self.federation_handler.get_event_from_server(
-                                    origin_server, destination_server, _prev_event_id
-                                )
+                            response_check_for_this_event = await self.federation_handler.get_event_from_server(
+                                origin_server, destination_server, _prev_event_id
                             )
-                            _inner_event_base_check = response_check_for_this_event.get(
-                                _prev_event_id
-                            )
+                            _inner_event_base_check = response_check_for_this_event.get(_prev_event_id)
                             if isinstance(_inner_event_base_check, EventError):
                                 # We hit an error, that's what we want to keep looking
-                                self.log.warning(
-                                    f"event retrieved during inner check: {_inner_event_base_check.error}"
-                                )
+                                self.log.warning(f"event retrieved during inner check: {_inner_event_base_check.error}")
 
                                 event_ids_to_try_next.put_nowait(_prev_event_id)
-                                self.log.info(
-                                    f"repair_event: adding event_id to next to try: {_prev_event_id}"
-                                )
+                                self.log.info(f"repair_event: adding event_id to next to try: {_prev_event_id}")
                             elif isinstance(_inner_event_base_check, Event):
                                 self.log.warning(
                                     f"event retrieved during inner check: {_inner_event_base_check.raw_data}"
@@ -1731,9 +1573,7 @@ class FederationBot(Plugin):
                 )
                 self.log.info(f"SENT, got response of {response.json_response}")
                 list_of_buffer_lines.extend(
-                    [
-                        f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}"
-                    ]
+                    [f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}"]
                 )
             else:
                 self.log.info(f"Unexpectedly not sent {event_base}")
@@ -1759,23 +1599,15 @@ class FederationBot(Plugin):
         #         list_of_buffer_lines.extend([f"['{host}']\n"])
 
         # Chunk the data as there may be a few 'pages' of it
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_buffer_lines, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
 
         for chunk in final_list_of_data:
             await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
 
-    @test_command.subcommand(
-        name="room_hosts", help="List all hosts in a room, in order from earliest"
-    )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
-    )
+    @test_command.subcommand(name="room_hosts", help="List all hosts in a room, in order from earliest")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="limit", parser=is_int, required=False)
     @command.argument(name="server_to_request_from", required=False)
@@ -1818,8 +1650,7 @@ class FederationBot(Plugin):
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                "\n  * which took place at: "
-                f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
+                "\n  * which took place at: " f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
             special_time_formatting = ""
@@ -1855,29 +1686,21 @@ class FederationBot(Plugin):
             # if limit is more than the number of hosts, fix it
             limit = min(limit, len(host_list))
             for host_number in range(0, limit):
-                list_of_buffer_lines.extend(
-                    [f"{host_list[host_number:host_number+1]}\n"]
-                )
+                list_of_buffer_lines.extend([f"{host_list[host_number:host_number+1]}\n"])
         else:
             for host in host_list:
                 list_of_buffer_lines.extend([f"['{host}']\n"])
 
         # Chunk the data as there may be a few 'pages' of it
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_buffer_lines, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @test_command.subcommand(
         name="demo_bar",
@@ -1933,8 +1756,7 @@ class FederationBot(Plugin):
                 range_list.extend([i * how_many_to_pull])
         pinned_message = await command_event.respond(
             wrap_in_code_block_markdown(
-                progress_bar.render_bitmap_bar()
-                + f"\n size of range_list: {len(range_list)}\n"
+                progress_bar.render_bitmap_bar() + f"\n size of range_list: {len(range_list)}\n"
                 f" how many to pull: {how_many_to_pull}\n"
             )
         )
@@ -1971,19 +1793,11 @@ class FederationBot(Plugin):
             await asyncio.sleep(interval_float)
 
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @test_command.subcommand(
-        name="room_version", help="experiment to get room version from room id"
-    )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
-    )
-    async def room_version_command(
-        self, command_event: MessageEvent, room_id_or_alias: Optional[str]
-    ) -> None:
+    @test_command.subcommand(name="room_version", help="experiment to get room version from room id")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
+    async def room_version_command(self, command_event: MessageEvent, room_id_or_alias: Optional[str]) -> None:
         await command_event.mark_read()
 
         # The only way to request from a different server than what the bot is on is to
@@ -2007,25 +1821,17 @@ class FederationBot(Plugin):
 
         room_version = await self.federation_handler.discover_room_version(
             origin_server=origin_server,
-            destination_server=list_of_room_alias_servers[0]
-            if list_of_room_alias_servers
-            else origin_server,
+            destination_server=list_of_room_alias_servers[0] if list_of_room_alias_servers else origin_server,
             room_id=room_id,
         )
         if not room_version:
             await command_event.reply(f"Error getting room version from room {room_id}")
             return
 
-        pinned_message = await command_event.reply(
-            f"{room_id} version is {room_version}"
-        )
-        await self.reaction_task_controller.add_cleanup_control(
-            pinned_message, command_event.room_id
-        )
+        pinned_message = await command_event.reply(f"{room_id} version is {room_version}")
+        await self.reaction_task_controller.add_cleanup_control(pinned_message, command_event.room_id)
 
-    @test_command.subcommand(
-        name="discover_event_id", help="experiment to get event id from PDU event"
-    )
+    @test_command.subcommand(name="discover_event_id", help="experiment to get event id from PDU event")
     @command.argument(name="event_id", parser=is_event_id, required=True)
     @command.argument(name="from_server", required=False)
     @command.argument(name="room_version", required=False)
@@ -2102,17 +1908,13 @@ class FederationBot(Plugin):
                     )
                 )
             except ValueError as e:
-                await command_event.reply(
-                    f"Error getting room version from room {room_id}: {str(e)}"
-                )
+                await command_event.reply(f"Error getting room version from room {room_id}: {str(e)}")
                 return
 
         assert room_version_int is not None
 
         list_of_message_ids = []
-        current_message = await command_event.respond(
-            f"Original:\n{wrap_in_code_block_markdown(event.to_json())}"
-        )
+        current_message = await command_event.respond(f"Original:\n{wrap_in_code_block_markdown(event.to_json())}")
         list_of_message_ids.extend([current_message])
 
         redacted_data = redact_event(room_version_int, event.raw_data)
@@ -2127,24 +1929,14 @@ class FederationBot(Plugin):
         reference_content = hashlib.sha256(encoded_redacted_event_bytes)
         reference_hash = encode_base64(reference_content.digest(), True)
 
-        current_message = await command_event.respond(
-            f"Supplied: {event_id}\n\nResolved: {'$' + reference_hash}"
-        )
+        current_message = await command_event.respond(f"Supplied: {event_id}\n\nResolved: {'$' + reference_hash}")
         list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @fed_command.subcommand(
-        name="head", help="experiment for retrieving information about a room"
-    )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
-    )
-    async def head_command(
-        self, command_event: MessageEvent, room_id_or_alias: str
-    ) -> None:
+    @fed_command.subcommand(name="head", help="experiment for retrieving information about a room")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
+    async def head_command(self, command_event: MessageEvent, room_id_or_alias: str) -> None:
         await command_event.mark_read()
         origin_server = get_domain_from_id(self.client.mxid)
         room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
@@ -2167,9 +1959,7 @@ class FederationBot(Plugin):
             message_id = await command_event.reply(
                 f"Could not get latest event in room for pulling state to get members: {e}"
             )
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
             return
 
         # room_version = head_response.room_version
@@ -2182,8 +1972,7 @@ class FederationBot(Plugin):
             # occurred. Fall back to the client api with current state. Obviously there
             # are problems with this, but it will allow forward progress.
             current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, "
-                "falling back to client API"
+                "Failed getting hosts from State over federation, falling back to client API"
             )
             list_of_message_ids.extend([current_message])
             try:
@@ -2230,13 +2019,9 @@ class FederationBot(Plugin):
             limit=len(host_list),
         )
 
-        results: Sequence[
-            Tuple[str, MakeJoinResponse | MatrixError] | BaseException
-        ] = cast(
+        results: Sequence[Tuple[str, MakeJoinResponse | MatrixError] | BaseException] = cast(
             Sequence[Tuple[str, MakeJoinResponse | MatrixError] | BaseException],
-            await self.reaction_task_controller.tasks_sets[
-                reference_task_key
-            ].gather_results(),
+            await self.reaction_task_controller.tasks_sets[reference_task_key].gather_results(),
         )
 
         list_of_buffered_messages: List[str] = []
@@ -2253,12 +2038,10 @@ class FederationBot(Plugin):
             server_name_dc.maybe_update_column_width(host)
             if isinstance(fed_response, MakeJoinResponse):
                 prev_events = fed_response.prev_events
-                retrieved_prev_events = (
-                    await self.federation_handler.get_events_from_server(
-                        origin_server=origin_server,
-                        destination_server=host,
-                        events_list=prev_events,
-                    )
+                retrieved_prev_events = await self.federation_handler.get_events_from_server(
+                    origin_server=origin_server,
+                    destination_server=host,
+                    events_list=prev_events,
                 )
 
                 for (
@@ -2267,9 +2050,7 @@ class FederationBot(Plugin):
                 ) in retrieved_prev_events.items():
                     # Save the initial map entry
                     if isinstance(retrieved_event, Event):
-                        last_event_map.setdefault(
-                            host, (retrieved_event_id, retrieved_event)
-                        )
+                        last_event_map.setdefault(host, (retrieved_event_id, retrieved_event))
                         last_event_entry_id, _ = last_event_map[host]
                         if (
                             retrieved_event.origin_server_ts
@@ -2285,18 +2066,12 @@ class FederationBot(Plugin):
             host, fed_response = result
             if isinstance(fed_response, MatrixError):
                 list_of_buffered_messages.extend(
-                    (
-                        f"{server_name_dc.pad(host)}: {fed_response.http_code}, {fed_response.reason}",
-                    )
+                    (f"{server_name_dc.pad(host)}: {fed_response.http_code}, {fed_response.reason}",)
                 )
             else:
                 le_id, le_event = last_event_map.get(host, ("eventid missing", None))
-                glyph_auth_events = "".join(
-                    ["A" for _ in range(0, len(fed_response.auth_events))]
-                )
-                glyph_prev_events = "".join(
-                    ["P" for _ in range(0, len(fed_response.prev_events))]
-                )
+                glyph_auth_events = "".join(["A" for _ in range(0, len(fed_response.auth_events))])
+                glyph_prev_events = "".join(["P" for _ in range(0, len(fed_response.prev_events))])
                 if le_event and isinstance(le_event, Event):
 
                     list_of_buffered_messages.extend(
@@ -2306,18 +2081,12 @@ class FederationBot(Plugin):
                     )
         await self.reaction_task_controller.cancel(reference_task_key)
 
-        final_buffer_messages = combine_lines_to_fit_event(
-            list_of_buffered_messages, None, True
-        )
+        final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
         for message in final_buffer_messages:
-            current_message = await command_event.respond(
-                make_into_text_event(wrap_in_code_block_markdown(message))
-            )
+            current_message = await command_event.respond(make_into_text_event(wrap_in_code_block_markdown(message)))
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     # I think the command map should look a little like this:
     # (defaults will be marked with * )
@@ -2333,9 +2102,7 @@ class FederationBot(Plugin):
     #   - events  [room_id][how_many]   - retrieve the last how_many(or 10) events from
     #                                       room_id(or current room)
 
-    @fed_command.subcommand(
-        name="summary", help="Print summary of the delegation portion of the spec"
-    )
+    @fed_command.subcommand(name="summary", help="Print summary of the delegation portion of the spec")
     async def summary(self, command_event: MessageEvent) -> None:
         await command_event.mark_read()
 
@@ -2371,24 +2138,19 @@ class FederationBot(Plugin):
                 "6. Use the supplied server_name and try port 8448\n"
             )
         )
-        await self.reaction_task_controller.add_cleanup_control(
-            current_message, command_event.room_id
-        )
+        await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
 
     @command.new(
         name="delegation",
         help="Some simple diagnostics around federation server discovery",
     )
     @command.argument(name="server_to_check", label="Server To Check", required=True)
-    async def delegation_command(
-        self, command_event: MessageEvent, server_to_check: Optional[str]
-    ) -> None:
+    async def delegation_command(self, command_event: MessageEvent, server_to_check: Optional[str]) -> None:
         if not server_to_check:
             # Only sub commands display the 'help' text field(for now at least). Tell
             # them how it works.
             await command_event.reply(
-                "**Usage**: !delegation <server_name>\n - Some simple diagnostics "
-                "around federation server discovery"
+                "**Usage**: !delegation <server_name>\n - Some simple diagnostics around federation server discovery"
             )
             return
 
@@ -2413,9 +2175,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(
-                maybe_room_id, command_event, origin_server
-            )
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
             # Need to cancel server_to_check, but can't use None
             server_to_check = ""
             if not room_to_check:
@@ -2437,9 +2197,7 @@ class FederationBot(Plugin):
         if not list_of_servers_to_check:
             try:
                 assert room_to_check is not None
-                joined_members = await self.client.get_joined_members(
-                    RoomID(room_to_check)
-                )
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -2476,9 +2234,7 @@ class FederationBot(Plugin):
 
                 # The 'get_server_version' function was written with the capability of
                 # collecting diagnostic data.
-                server_to_server_data[
-                    worker_server_name
-                ] = await self.federation_handler.api.get_server_version(
+                server_to_server_data[worker_server_name] = await self.federation_handler.api.get_server_version(
                     worker_server_name,
                     force_rediscover=True,
                     diagnostics=True,
@@ -2491,9 +2247,7 @@ class FederationBot(Plugin):
         for server_name in list_of_servers_to_check:
             await delegation_queue.put(server_name)
 
-        reference_key = self.reaction_task_controller.setup_task_set(
-            command_event.event_id
-        )
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
 
         self.reaction_task_controller.add_tasks(
             reference_key,
@@ -2583,31 +2337,20 @@ class FederationBot(Plugin):
                 # The server name column
                 buffered_message = f"{server_name_col.front_pad(server_name)} | "
                 # The well-known status column
-                buffered_message += (
-                    f"{well_known_status_col.pad(diag_info.get_well_known_status())} | "
-                )
+                buffered_message += f"{well_known_status_col.pad(diag_info.get_well_known_status())} | "
 
                 # the SRV record status column
-                buffered_message += (
-                    f"{srv_status_col.pad(diag_info.get_srv_record_status())} | "
-                )
+                buffered_message += f"{srv_status_col.pad(diag_info.get_srv_record_status())} | "
 
                 # the DNS record status column
-                buffered_message += (
-                    f"{dns_status_col.pad(diag_info.get_dns_record_status())} | "
-                )
+                buffered_message += f"{dns_status_col.pad(diag_info.get_dns_record_status())} | "
 
                 # The connectivity status column
                 connectivity_status = diag_info.get_connectivity_test_status()
-                buffered_message += (
-                    f"{connective_test_status_col.pad(connectivity_status)} | "
-                )
+                buffered_message += f"{connective_test_status_col.pad(connectivity_status)} | "
                 maybe_tls_server = diag_info.tls_handled_by
 
-                buffered_message += (
-                    f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')}"
-                    " | "
-                )
+                buffered_message += f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')}" " | "
 
                 num_of_retries = diag_info.retries
                 buffered_message += f"{retries_col.pad(num_of_retries)} | "
@@ -2634,22 +2377,16 @@ class FederationBot(Plugin):
         # For a single server test, the response will fit into a single message block.
         # However, for a roomful it could be several pages long. Chunk those responses
         # to fit into the size limit of an Event.
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_result_data, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
 
         for current_message in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                current_message, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
 
     @fed_command.subcommand(name="event_raw")
     @command.argument(name="event_id", parser=is_event_id, required=False)
@@ -2687,8 +2424,7 @@ class FederationBot(Plugin):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving{extra_info}: {event_id} from "
-            f"{destination_server} using {origin_server}"
+            f"Retrieving{extra_info}: {event_id} from " f"{destination_server} using {origin_server}"
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2703,9 +2439,7 @@ class FederationBot(Plugin):
         buffered_message = ""
         returned_event = returned_events.get(event_id)
         if isinstance(returned_event, EventError):
-            buffered_message += (
-                f"received an error\n{returned_event.errcode}:{returned_event.error}"
-            )
+            buffered_message += f"received an error\n{returned_event.errcode}:{returned_event.error}"
 
         else:
             assert isinstance(returned_event, EventBase)
@@ -2716,25 +2450,17 @@ class FederationBot(Plugin):
         # It is extremely unlikely that an Event will be larger than can be displayed.
         # Don't bother chunking the response.
         try:
-            current_message = await command_event.respond(
-                wrap_in_code_block_markdown(buffered_message)
-            )
+            current_message = await command_event.respond(wrap_in_code_block_markdown(buffered_message))
         except MTooLarge:
-            current_message = await command_event.respond(
-                "Somehow, Event is to large to display"
-            )
+            current_message = await command_event.respond("Somehow, Event is to large to display")
         list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @fed_command.subcommand(name="event")
     @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="server_to_request_from", required=False)
-    @command.argument(
-        name="test_json_to_inject_or_keys_to_pop", required=False, pass_raw=True
-    )
+    @command.argument(name="test_json_to_inject_or_keys_to_pop", required=False, pass_raw=True)
     async def event_command_pretty(
         self,
         command_event: MessageEvent,
@@ -2774,8 +2500,7 @@ class FederationBot(Plugin):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving{extra_info}: {event_id} from "
-            f"{destination_server} using {origin_server}"
+            f"Retrieving{extra_info}: {event_id} from " f"{destination_server} using {origin_server}"
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2790,9 +2515,7 @@ class FederationBot(Plugin):
             and "{" in test_json_to_inject_or_keys_to_pop
             and "}" in test_json_to_inject_or_keys_to_pop
         ):
-            self.log.info(
-                f"test_json_to_inject_or_keys_to_pop: {test_json_to_inject_or_keys_to_pop}"
-            )
+            self.log.info(f"test_json_to_inject_or_keys_to_pop: {test_json_to_inject_or_keys_to_pop}")
             right_most_bracket = test_json_to_inject_or_keys_to_pop.rindex("}")
             json_bit = test_json_to_inject_or_keys_to_pop[: right_most_bracket + 1]
             self.log.info(f"incoming inject: {json_bit}")
@@ -2815,9 +2538,7 @@ class FederationBot(Plugin):
         buffered_message = ""
         returned_event = returned_event_dict.get(event_id)
         if isinstance(returned_event, EventError):
-            buffered_message += (
-                f"received an error\n{returned_event.errcode}:{returned_event.error}\n"
-            )
+            buffered_message += f"received an error\n{returned_event.errcode}:{returned_event.error}\n"
 
         else:
             assert isinstance(returned_event, Event)
@@ -2849,38 +2570,24 @@ class FederationBot(Plugin):
                         found_room_version = a_event_base.room_version
 
             # Begin rendering
-            await self.federation_handler.verify_signatures_and_annotate_event(
-                returned_event, found_room_version
-            )
+            await self.federation_handler.verify_signatures_and_annotate_event(returned_event, found_room_version)
 
             # It may be, but is unlikely outside of connection errors, that room_version
             # was not found. This is handled gracefully inside of to_pretty_summary()
-            buffered_message += returned_event.to_pretty_summary(
-                room_version=found_room_version
-            )
+            buffered_message += returned_event.to_pretty_summary(room_version=found_room_version)
             # Add a little gap at the bottom of the previous for better separation
             buffered_message += "\n"
             buffered_message += returned_event.to_pretty_summary_content()
             buffered_message += returned_event.to_pretty_summary_unrecognized()
-            buffered_message += returned_event.to_pretty_summary_footer(
-                event_data_map=a_event_data_map
-            )
+            buffered_message += returned_event.to_pretty_summary_footer(event_data_map=a_event_data_map)
 
-        current_message = await command_event.respond(
-            wrap_in_code_block_markdown(buffered_message)
-        )
+        current_message = await command_event.respond(wrap_in_code_block_markdown(buffered_message))
         list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @fed_command.subcommand(
-        name="state", help="Request state over federation for a room."
-    )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
-    )
+    @fed_command.subcommand(name="state", help="Request state over federation for a room.")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="server_to_request_from", required=False)
     async def state_command(
@@ -2921,8 +2628,7 @@ class FederationBot(Plugin):
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                "\n  * which took place at: "
-                f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
+                "\n  * which took place at: " f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
             special_time_formatting = ""
@@ -3014,33 +2720,23 @@ class FederationBot(Plugin):
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_buffer_lines.extend([footer_message])
         # Chunk the data as there may be a few 'pages' of it
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_buffer_lines, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
 
         for current_message in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                current_message, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
 
     @fed_command.subcommand(
         name="ping",
         help="Check a server(or room) for application response time",
     )
-    @command.argument(
-        name="thing_to_test", label="Server or Room to test", required=False
-    )
-    async def ping_command(
-        self, command_event: MessageEvent, thing_to_test: Optional[str]
-    ) -> None:
+    @command.argument(name="thing_to_test", label="Server or Room to test", required=False)
+    async def ping_command(self, command_event: MessageEvent, thing_to_test: Optional[str]) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -3055,9 +2751,7 @@ class FederationBot(Plugin):
             if thing_to_test.startswith("#") or thing_to_test.startswith("!"):
                 if bool(is_room_id_or_alias(thing_to_test)):
                     origin_server = get_domain_from_id(self.client.mxid)
-                    room_to_check, _ = await self.resolve_room_id_or_alias(
-                        thing_to_test, command_event, origin_server
-                    )
+                    room_to_check, _ = await self.resolve_room_id_or_alias(thing_to_test, command_event, origin_server)
 
                     if room_to_check is None:
                         # This means they started with a room sigil, but it's not actually a room
@@ -3076,9 +2770,7 @@ class FederationBot(Plugin):
             # TODO: try and find a way to not use the client API for this
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(
-                    RoomID(room_to_check)
-                )
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -3098,18 +2790,12 @@ class FederationBot(Plugin):
         list_of_message_ids.extend([current_message_id])
 
         started_at = time.monotonic()
-        server_to_version_data = await self._get_versions_from_servers(
-            list_of_servers_to_check
-        )
+        server_to_version_data = await self._get_versions_from_servers(list_of_servers_to_check)
         total_time = time.monotonic() - started_at
 
         # Establish the initial size of the padding for each row
-        server_name_col = DisplayLineColumnConfig(
-            "Server Name", horizontal_separator=" | "
-        )
-        ok_or_fail_col = DisplayLineColumnConfig(
-            "Result", justify=Justify.RIGHT, horizontal_separator=" | "
-        )
+        server_name_col = DisplayLineColumnConfig("Server Name", horizontal_separator=" | ")
+        ok_or_fail_col = DisplayLineColumnConfig("Result", justify=Justify.RIGHT, horizontal_separator=" | ")
         response_time_col = DisplayLineColumnConfig("Response time")
 
         # Iterate over all the data to collect the column sizes
@@ -3126,11 +2812,7 @@ class FederationBot(Plugin):
         # dendrite.matrix.org |   Pass | 0.13.5+13c5173
 
         # Create the header lines
-        header_messages = [
-            f"{server_name_col.pad()} | "
-            f"{ok_or_fail_col.pad()} | "
-            f"{response_time_col.pad()}"
-        ]
+        header_messages = [f"{server_name_col.pad()} | " f"{ok_or_fail_col.pad()} | " f"{response_time_col.pad()}"]
 
         # Create the delimiter line
         header_message_line_size = len(header_messages[0])
@@ -3189,9 +2871,7 @@ class FederationBot(Plugin):
             )
             list_of_message_ids.extend([current_message_id])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @fed_command.subcommand(
         name="version",
@@ -3199,13 +2879,10 @@ class FederationBot(Plugin):
         help="Check a server in the room for version info",
     )
     @command.argument(name="server_to_check", label="Server to check", required=True)
-    async def version_command(
-        self, command_event: MessageEvent, server_to_check: Optional[str]
-    ) -> None:
+    async def version_command(self, command_event: MessageEvent, server_to_check: Optional[str]) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed version <server_name>\n - Check a server in the room "
-                "for version info"
+                "**Usage**: !fed version <server_name>\n - Check a server in the room for version info"
             )
             return
 
@@ -3225,9 +2902,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(
-                maybe_room_id, command_event, origin_server
-            )
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
             # Need to cancel server_to_check, but can't use None
             server_to_check = ""
             if not room_to_check:
@@ -3243,9 +2918,7 @@ class FederationBot(Plugin):
             # TODO: try and find a way to not use the client API for this
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(
-                    RoomID(room_to_check)
-                )
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -3268,15 +2941,12 @@ class FederationBot(Plugin):
             return
 
         current_message_id = await command_event.respond(
-            f"Retrieving data from federation for {number_of_servers} server"
-            f"{'s' if number_of_servers > 1 else ''}"
+            f"Retrieving data from federation for {number_of_servers} server" f"{'s' if number_of_servers > 1 else ''}"
         )
         list_of_message_ids.extend([current_message_id])
 
         started_at = time.monotonic()
-        server_to_version_data = await self._get_versions_from_servers(
-            list_of_servers_to_check
-        )
+        server_to_version_data = await self._get_versions_from_servers(list_of_servers_to_check)
         total_time = time.monotonic() - started_at
 
         # Establish the initial size of the padding for each row
@@ -3308,9 +2978,7 @@ class FederationBot(Plugin):
 
         # Create the header line
         header_message = (
-            f"{server_name_col.front_pad()} | "
-            f"{server_software_col.pad()} | "
-            f"{server_version_col.pad()}\n"
+            f"{server_name_col.front_pad()} | " f"{server_software_col.pad()} | " f"{server_version_col.pad()}\n"
         )
 
         # Create the delimiter line
@@ -3350,22 +3018,16 @@ class FederationBot(Plugin):
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])
 
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_result_data, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
         # Wrap in code block markdown before sending
         for chunk in final_list_of_data:
             current_message_id = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message_id])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     async def _get_versions_from_servers(
         self,
@@ -3404,64 +3066,22 @@ class FederationBot(Plugin):
 
         return server_to_version_data
 
-    async def _get_versions_from_servers_v2(
-        self,
-        servers_to_check: Collection[str],
-    ) -> Dict[str, MatrixResponse]:
-
-        # map of server name -> json of /version response: (server brand, server version)
-        # Return this at the end
-        server_to_version_data: Dict[str, MatrixResponse] = {}
-
-        async def _version_worker(_host: str) -> Tuple[str, MatrixResponse]:
-            _result = await self.federation_handler.api.get_server_version(
-                _host,
-                diagnostics=True,
-            )
-            return _host, _result
-
-        reference_key = self.reaction_task_controller.setup_task_set()
-        for host in servers_to_check:
-            await self.reaction_task_controller.add_threaded_tasks(
-                reference_key, _version_worker, host
-            )
-
-        results_tuple = await self.reaction_task_controller.get_task_results(
-            reference_key, threaded=True
-        )
-
-        for result in results_tuple:
-            if isinstance(result, BaseException):
-                self.log.warning(f"Got an Exception somehow: {result}")
-                continue
-
-            host, unfinished_result = result
-            server_to_version_data[host] = unfinished_result
-
-        return server_to_version_data
-
     @fed_command.subcommand(name="server_keys")
     @command.argument(name="server_to_check", required=True)
-    async def server_keys_command(
-        self, command_event: MessageEvent, server_to_check: Optional[str]
-    ) -> None:
+    async def server_keys_command(self, command_event: MessageEvent, server_to_check: Optional[str]) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed server_keys <server_name>\n - Check a server in the "
-                "room for version info"
+                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info"
             )
             return
         await self._server_keys(command_event, server_to_check)
 
     @fed_command.subcommand(name="server_keys_raw")
     @command.argument(name="server_to_check", required=True)
-    async def server_keys_raw_command(
-        self, command_event: MessageEvent, server_to_check: Optional[str]
-    ) -> None:
+    async def server_keys_raw_command(self, command_event: MessageEvent, server_to_check: Optional[str]) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed server_keys <server_name>\n - Check a server in the "
-                "room for version info"
+                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info"
             )
             return
         await self._server_keys(command_event, server_to_check, display_raw=True)
@@ -3485,9 +3105,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(
-                maybe_room_id, command_event, origin_server
-            )
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
             # Need to cancel server_to_check, but can't use None
             server_to_check = ""
             if not room_to_check:
@@ -3502,9 +3120,7 @@ class FederationBot(Plugin):
         if not server_to_check:
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(
-                    RoomID(room_to_check)
-                )
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -3519,8 +3135,7 @@ class FederationBot(Plugin):
         number_of_servers = len(list_of_servers_to_check)
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the "
-                "response would be super spammy)."
+                "Only can see raw JSON data if a single server is selected(as the " "response would be super spammy)."
             )
             return
 
@@ -3536,8 +3151,7 @@ class FederationBot(Plugin):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving data from federation for {number_of_servers} server"
-            f"{'s' if number_of_servers > 1 else ''}"
+            f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}"
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -3545,9 +3159,7 @@ class FederationBot(Plugin):
             while True:
                 worker_server_name = await queue.get()
 
-                server_to_server_data[
-                    worker_server_name
-                ] = await self.federation_handler.api.get_server_keys(
+                server_to_server_data[worker_server_name] = await self.federation_handler.api.get_server_keys(
                     worker_server_name,
                     timeout=10.0,
                 )
@@ -3558,9 +3170,7 @@ class FederationBot(Plugin):
         for server_name in list_of_servers_to_check:
             await keys_queue.put(server_name)
 
-        reference_key = self.reaction_task_controller.setup_task_set(
-            command_event.event_id
-        )
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
         self.reaction_task_controller.add_tasks(
             reference_key,
             _server_keys_worker,
@@ -3602,9 +3212,7 @@ class FederationBot(Plugin):
 
         # Build the header line
         header_message = (
-            f"{server_name_col.pad()} | "
-            f"{server_key_col.pad()} | "
-            f"{valid_until_ts_col.header_name}\n"
+            f"{server_name_col.pad()} | " f"{server_key_col.pad()} | " f"{valid_until_ts_col.header_name}\n"
         )
 
         # Need the total of the width for the code block table to make the delimiter
@@ -3629,9 +3237,7 @@ class FederationBot(Plugin):
                 keyid_block = server_results.json_response.get("verify_keys", {})
                 oldkeyid_block = server_results.json_response.get("old_verify_keys", {})
                 # Probably don't care much about this one, as it's the end of a line
-                valid_until_ts: int = server_results.json_response.get(
-                    "valid_until_ts", 0
-                )
+                valid_until_ts: int = server_results.json_response.get("valid_until_ts", 0)
 
                 # There will not be more than a single key.
                 for key_id in keyid_block:
@@ -3669,28 +3275,20 @@ class FederationBot(Plugin):
 
             # Only if there was a single server because of the above condition
             if display_raw:
-                list_of_result_data.extend(
-                    [f"{json.dumps(server_results.json_response, indent=4)}\n"]
-                )
+                list_of_result_data.extend([f"{json.dumps(server_results.json_response, indent=4)}\n"])
 
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])
 
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_result_data, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @fed_command.subcommand(name="notary_server_keys")
     @command.argument(name="server_to_check", required=True)
@@ -3707,9 +3305,7 @@ class FederationBot(Plugin):
                 " - Check a server in the room for version info"
             )
             return
-        await self._server_keys_from_notary(
-            command_event, server_to_check, notary_server_to_use=notary_server_to_use
-        )
+        await self._server_keys_from_notary(command_event, server_to_check, notary_server_to_use=notary_server_to_use)
 
     @fed_command.subcommand(name="notary_server_keys_raw")
     @command.argument(name="server_to_check", required=True)
@@ -3753,9 +3349,7 @@ class FederationBot(Plugin):
         maybe_room_id = is_room_id_or_alias(server_to_check)
         if maybe_room_id:
             origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(
-                maybe_room_id, command_event, origin_server
-            )
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
             # Need to cancel server_to_check, but can't use None
             server_to_check = ""
             if not room_to_check:
@@ -3770,9 +3364,7 @@ class FederationBot(Plugin):
         if not server_to_check:
             try:
                 assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(
-                    RoomID(room_to_check)
-                )
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
                 await command_event.respond(NOT_IN_ROOM_ERROR)
@@ -3787,8 +3379,7 @@ class FederationBot(Plugin):
         number_of_servers = len(list_of_servers_to_check)
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the "
-                "response would be super spammy)."
+                "Only can see raw JSON data if a single server is selected(as the response would be super spammy)."
             )
             return
 
@@ -3802,8 +3393,7 @@ class FederationBot(Plugin):
 
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the "
-                "response would be super spammy)."
+                "Only can see raw JSON data if a single server is selected(as the response would be super spammy)."
             )
             return
 
@@ -3823,9 +3413,7 @@ class FederationBot(Plugin):
         list_of_message_ids.extend([prerender_message])
 
         server_to_server_data: Dict[str, MatrixResponse] = {}
-        minimum_valid_until_ts = int(time.time() * 1000) + (
-            30 * 60 * 1000
-        )  # Add 30 minutes
+        minimum_valid_until_ts = int(time.time() * 1000) + (30 * 60 * 1000)  # Add 30 minutes
 
         async def _server_keys_from_notary_worker(
             _queue: asyncio.Queue[str],
@@ -3844,9 +3432,7 @@ class FederationBot(Plugin):
             await keys_queue.put(server_name)
 
         # Setup the task into the controller
-        reference_key = self.reaction_task_controller.setup_task_set(
-            command_event.event_id
-        )
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
 
         await self.reaction_task_controller.add_threaded_tasks(
             reference_key,
@@ -3857,14 +3443,10 @@ class FederationBot(Plugin):
 
         started_at = time.monotonic()
 
-        results = await self.reaction_task_controller.get_task_results(
-            reference_key, threaded=True
-        )
+        results = await self.reaction_task_controller.get_task_results(reference_key, threaded=True)
         for result in results:
             if isinstance(result, BaseException):
-                self.log.warning(
-                    f"_server_keys_from_notary: got an Exception: {result}"
-                )
+                self.log.warning(f"_server_keys_from_notary: got an Exception: {result}")
                 continue
 
             host, response = result
@@ -3893,14 +3475,10 @@ class FederationBot(Plugin):
 
             # Not worried about column size for errors
             if server_results.http_code == 200:
-                server_key_list: List[
-                    Dict[str, Any]
-                ] = server_results.json_response.get("server_keys", [])
+                server_key_list: List[Dict[str, Any]] = server_results.json_response.get("server_keys", [])
                 for server_key_entry in server_key_list:
                     key_ids: Dict[str, Any] = server_key_entry.get("verify_keys", {})
-                    old_verify_keys: Dict[str, Any] = server_key_entry.get(
-                        "old_verify_keys", {}
-                    )
+                    old_verify_keys: Dict[str, Any] = server_key_entry.get("old_verify_keys", {})
                     for key_id in chain(key_ids, old_verify_keys):
                         # cast this to a str explicitly, in case someone gets funny ideas
                         server_key_col.maybe_update_column_width(str(key_id))
@@ -3909,9 +3487,7 @@ class FederationBot(Plugin):
 
         # Build the header line
         header_message = (
-            f"{server_name_col.pad()} | "
-            f"{server_key_col.pad()} | "
-            f"{valid_until_ts_col.header_name}\n"
+            f"{server_name_col.pad()} | " f"{server_key_col.pad()} | " f"{valid_until_ts_col.header_name}\n"
         )
 
         # Need the total of the width for the code block table to make the delimiter
@@ -3928,9 +3504,7 @@ class FederationBot(Plugin):
             first_line = True
             buffered_message = f"{server_name_col.pad(server_name)} | "
             if server_results.http_code != 200:
-                buffered_message += (
-                    f"{server_results.http_code}: {server_results.reason}\n"
-                )
+                buffered_message += f"{server_results.http_code}: {server_results.reason}\n"
 
             else:
                 time_now = int(time.time() * 1000)
@@ -3946,9 +3520,7 @@ class FederationBot(Plugin):
                             buffered_message += f"{server_name_col.pad('')} | "
                         buffered_message += f"{server_key_col.pad(key_id)} | "
                         # Don't care about padding, as this is end of line
-                        buffered_message += (
-                            f"{pretty_expired_mark}{valid_until_pretty}\n"
-                        )
+                        buffered_message += f"{pretty_expired_mark}{valid_until_pretty}\n"
 
                         first_line = False
 
@@ -3967,36 +3539,24 @@ class FederationBot(Plugin):
 
             # Only if there was a single server because of the above condition
             if display_raw:
-                list_of_result_data.extend(
-                    [f"{json.dumps(server_results.json_response, indent=4)}\n"]
-                )
+                list_of_result_data.extend([f"{json.dumps(server_results.json_response, indent=4)}\n"])
 
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])
 
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_result_data, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
 
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @fed_command.subcommand(
-        name="backfill", help="Request backfill over federation for a room."
-    )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
-    )
+    @fed_command.subcommand(name="backfill", help="Request backfill over federation for a room.")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="limit", required=False)
     @command.argument(name="server_to_request_from", required=False)
@@ -4016,9 +3576,7 @@ class FederationBot(Plugin):
         try:
             limit_int = int(limit)
         except ValueError:
-            await command_event.reply(
-                f"I got a limit number that could not be converted into an integer: {limit}"
-            )
+            await command_event.reply(f"I got a limit number that could not be converted into an integer: {limit}")
             return
 
         # The only way to request from a different server than what the bot is on is to
@@ -4049,8 +3607,7 @@ class FederationBot(Plugin):
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                "\n  * which took place at: "
-                f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
+                "\n  * which took place at: " f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
             special_time_formatting = ""
@@ -4123,28 +3680,18 @@ class FederationBot(Plugin):
             list_of_buffer_lines.extend([buffered_message])
 
         # Chunk the data as there may be a few 'pages' of it
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_buffer_lines, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @fed_command.subcommand(
-        name="event_auth", help="Request the auth chain for an event over federation"
-    )
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=False
-    )
+    @fed_command.subcommand(name="event_auth", help="Request the auth chain for an event over federation")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="event_id", parser=is_event_id, required=True)
     @command.argument(name="server_to_request_from", required=False)
     async def event_auth_command(
@@ -4187,8 +3734,7 @@ class FederationBot(Plugin):
         if origin_server_ts:
             # A nice little addition for the status updated before the command runs
             special_time_formatting = (
-                "\n  * which took place at: "
-                f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
+                "\n  * which took place at: " f"{datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
             )
         else:
             special_time_formatting = ""
@@ -4215,16 +3761,12 @@ class FederationBot(Plugin):
         total_time = time.monotonic() - started_at
 
         if response.http_code != 200:
-            await command_event.respond(
-                f"Some kind of error\n{response.http_code}:{response.reason}"
-            )
+            await command_event.respond(f"Some kind of error\n{response.http_code}:{response.reason}")
             return
 
         # The response should contain all the pdu data inside 'pdus'
         list_from_response = response.json_response.get("auth_chain", [])
-        list_of_event_bases = parse_list_response_into_list_of_event_bases(
-            list_from_response
-        )
+        list_of_event_bases = parse_list_response_into_list_of_event_bases(list_from_response)
         # Time to start rendering. Build the header lines first
         header_message = ""
         dc_depth = DisplayLineColumnConfig("Depth")
@@ -4275,26 +3817,18 @@ class FederationBot(Plugin):
         list_of_buffer_lines.extend([footer_message])
 
         # Chunk the data as there may be a few 'pages' of it
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_buffer_lines, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
 
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @fed_command.subcommand(
-        name="user_devices", help="Request user devices over federation for a user."
-    )
+    @fed_command.subcommand(name="user_devices", help="Request user devices over federation for a user.")
     @command.argument(name="user_mxid", parser=is_mxid, required=True)
     async def user_devices_command(
         self,
@@ -4319,8 +3853,7 @@ class FederationBot(Plugin):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving user devices for {user_mxid}\n"
-            f"* From {destination_server} using {origin_server}"
+            f"Retrieving user devices for {user_mxid}\n" f"* From {destination_server} using {origin_server}"
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -4337,15 +3870,11 @@ class FederationBot(Plugin):
             )
             return
 
-        message_id = await command_event.respond(
-            f"```json\n{json.dumps(response.json_response, indent=4)}\n```\n"
-        )
+        message_id = await command_event.respond(f"```json\n{json.dumps(response.json_response, indent=4)}\n```\n")
         list_of_message_ids.extend([message_id])
 
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
         # # Chunk the data as there may be a few 'pages' of it
         # final_list_of_data = combine_lines_to_fit_event(
@@ -4359,13 +3888,9 @@ class FederationBot(Plugin):
         #         ),
         #     )
 
-    @fed_command.subcommand(
-        name="find_event", help="Search all hosts in a given room for a given Event"
-    )
+    @fed_command.subcommand(name="find_event", help="Search all hosts in a given room for a given Event")
     @command.argument(name="event_id", parser=is_event_id, required=True)
-    @command.argument(
-        name="room_id_or_alias", parser=is_room_id_or_alias, required=True
-    )
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
     async def find_event_command(
         self,
         command_event: MessageEvent,
@@ -4386,9 +3911,7 @@ class FederationBot(Plugin):
             )
             return
 
-        room_id, _ = await self.resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
-        )
+        room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
             # function
@@ -4416,13 +3939,9 @@ class FederationBot(Plugin):
         if ts_response.http_code != 200:
             host_list = []
         else:
-            event_id_from_room_right_now: Optional[str] = ts_response.json_response.get(
-                "event_id", None
-            )
+            event_id_from_room_right_now: Optional[str] = ts_response.json_response.get("event_id", None)
             assert event_id_from_room_right_now is not None
-            self.log.debug(
-                f"Timestamp to event responded with event_id: {event_id_from_room_right_now}"
-            )
+            self.log.debug(f"Timestamp to event responded with event_id: {event_id_from_room_right_now}")
             # Get all the hosts in the supplied room
             host_list = await self.get_hosts_in_room_ordered(
                 origin_server, origin_server, room_id, event_id_from_room_right_now
@@ -4435,8 +3954,7 @@ class FederationBot(Plugin):
             # occurred. Fall back to the client api with current state. Obviously there
             # are problems with this, but it will allow forward progress.
             current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, "
-                "falling back to client API"
+                "Failed getting hosts from State over federation, falling back to client API"
             )
             list_of_message_ids.extend([current_message])
             try:
@@ -4464,10 +3982,7 @@ class FederationBot(Plugin):
         for host in host_to_event_status_map:
             dc_host_config.maybe_update_column_width(len(host))
 
-        header_message = (
-            f"Hosts{'(in oldest order)' if use_ordered_list else ''} that found "
-            f"event '{event_id}'\n"
-        )
+        header_message = f"Hosts{'(in oldest order)' if use_ordered_list else ''} that found " f"event '{event_id}'\n"
         list_of_result_data = []
         servers_had = 0
         servers_not_had = 0
@@ -4481,15 +3996,9 @@ class FederationBot(Plugin):
                         try:
                             errcode = int(result.errcode)
                         except ValueError:
-                            errcode_result = (
-                                dc_host_config.horizontal_separator + result.errcode
-                            )
+                            errcode_result = dc_host_config.horizontal_separator + result.errcode
                         else:
-                            errcode_result = (
-                                dc_host_config.horizontal_separator + result.errcode
-                                if errcode > 0
-                                else ""
-                            )
+                            errcode_result = dc_host_config.horizontal_separator + result.errcode if errcode > 0 else ""
                     buffered_message += (
                         f"{dc_host_config.pad(host)}"
                         f"{dc_host_config.horizontal_separator}"
@@ -4531,23 +4040,17 @@ class FederationBot(Plugin):
         # For a single server test, the response will fit into a single message block.
         # However, for a roomful it could be several pages long. Chunk those responses
         # to fit into the size limit of an Event.
-        final_list_of_data = combine_lines_to_fit_event(
-            list_of_result_data, header_message
-        )
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
         list_of_message_ids = []
         for chunk in final_list_of_data:
             message_id = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(chunk), ignore_body=True
-                ),
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
             list_of_message_ids.extend([message_id])
 
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @fed_command.subcommand(name="publicrooms_raw")
     @command.argument(name="target_server", required=False)
@@ -4568,17 +4071,11 @@ class FederationBot(Plugin):
             target_server,
             since=since,
         )
-        await command_event.respond(
-            wrap_in_code_block_markdown(
-                json.dumps(public_room_result.json_response, indent=4)
-            )
-        )
+        await command_event.respond(wrap_in_code_block_markdown(json.dumps(public_room_result.json_response, indent=4)))
 
     @fed_command.subcommand(name="publicrooms")
     @command.argument(name="target_server", required=False)
-    async def publicrooms_subcommand(
-        self, command_event: MessageEvent, target_server: Optional[str]
-    ) -> None:
+    async def publicrooms_subcommand(self, command_event: MessageEvent, target_server: Optional[str]) -> None:
         await command_event.mark_read()
         if not target_server:
             await command_event.reply("I need a target server to look at")
@@ -4599,12 +4096,10 @@ class FederationBot(Plugin):
         collected_chunks_fragments = []
         retry_count = 0
         while not done:
-            public_room_result = (
-                await self.federation_handler.get_public_rooms_from_server(
-                    None,
-                    target_server,
-                    since=since,
-                )
+            public_room_result = await self.federation_handler.get_public_rooms_from_server(
+                None,
+                target_server,
+                since=since,
             )
             if public_room_result.http_code != 200:
                 self.log.warning(
@@ -4624,9 +4119,7 @@ class FederationBot(Plugin):
             if not since:
                 done = True
 
-            chunks: List[Dict[str, Any]] = public_room_result.json_response.get(
-                "chunk", []
-            )
+            chunks: List[Dict[str, Any]] = public_room_result.json_response.get("chunk", [])
             for entry in chunks:
                 # self.log.info(f"chunk: {entry}")
                 alias = entry.get("canonical_alias", None)
@@ -4685,21 +4178,15 @@ class FederationBot(Plugin):
             f"{world_readable_dc.pad()} "
             f"{avatar_url_dc.pad()}"
         )
-        final_lines = combine_lines_to_fit_event(
-            list_of_buffered_lines, header_message, insert_new_lines=True
-        )
+        final_lines = combine_lines_to_fit_event(list_of_buffered_lines, header_message, insert_new_lines=True)
         list_of_message_ids = []
         for line in final_lines:
             message_id = await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown(line), ignore_body=True
-                )
+                make_into_text_event(wrap_in_code_block_markdown(line), ignore_body=True)
             )
             list_of_message_ids.extend([message_id])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(
-                message_id, command_event.room_id
-            )
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     async def resolve_room_id_or_alias(
         self,
@@ -4729,29 +4216,20 @@ class FederationBot(Plugin):
             if room_id_or_alias.startswith("#"):
                 # look up the room alias. The server is extracted from the alias itself.
                 try:
-                    (
-                        room_id,
-                        list_of_servers,
-                    ) = await self.federation_handler.resolve_room_alias(
+                    (room_id, list_of_servers,) = await self.federation_handler.resolve_room_alias(
                         origin_server=origin_server,
                         room_alias=room_id_or_alias,
                     )
                 except MalformedRoomAliasError as e:
-                    message_id = await command_event.reply(
-                        f"{e.summary_exception}: '{room_id_or_alias}'"
-                    )
-                    await self.reaction_task_controller.add_cleanup_control(
-                        message_id, command_event.room_id
-                    )
+                    message_id = await command_event.reply(f"{e.summary_exception}: '{room_id_or_alias}'")
+                    await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
                     return None, None
                 except FedBotException as e:
                     message_id = await command_event.reply(
                         "Received an error while querying for room alias:\n\n"
                         f"{e.summary_exception}: '{room_id_or_alias}'"
                     )
-                    await self.reaction_task_controller.add_cleanup_control(
-                        message_id, command_event.room_id
-                    )
+                    await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
                     return None, None
 
             else:
@@ -4803,16 +4281,12 @@ class FederationBot(Plugin):
             room_id=room_id,
             event_id=event_id_in_timeline,
         )
-        self.log.debug(
-            f"get_hosts_in_room_ordered: got {len(state_events)} events from state"
-        )
+        self.log.debug(f"get_hosts_in_room_ordered: got {len(state_events)} events from state")
         converted_state_events = []
         for state_event in state_events:
             # Won't be able to retrieve the room_version for this, and the event ids are not available or necessary
             converted_state_events.append(
-                determine_what_kind_of_event(
-                    None, room_version=None, data_to_use=state_event
-                )
+                determine_what_kind_of_event(None, room_version=None, data_to_use=state_event)
             )
 
         filtered_room_member_events = cast(
@@ -4821,13 +4295,9 @@ class FederationBot(Plugin):
         )
         joined_member_events = cast(
             List[RoomMemberStateEvent],
-            filter_state_events_based_on_membership(
-                filtered_room_member_events, "join"
-            ),
+            filter_state_events_based_on_membership(filtered_room_member_events, "join"),
         )
-        self.log.debug(
-            f"get_hosts_in_room_ordered: got {len(joined_member_events)} joined member events"
-        )
+        self.log.debug(f"get_hosts_in_room_ordered: got {len(joined_member_events)} joined member events")
         joined_member_events.sort(key=lambda x: x.depth)
         hosts_ordered = []
         for member in joined_member_events:
@@ -4846,9 +4316,7 @@ class FederationBot(Plugin):
         room_id_or_alias: Optional[str],
         event_id: Optional[str],
     ) -> Optional[Tuple[str, str, int]]:
-        room_id, _ = await self.resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
-        )
+        room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
             # function.
@@ -4877,9 +4345,7 @@ class FederationBot(Plugin):
             event_id = ts_response.json_response.get("event_id", None)
 
         assert event_id is not None
-        event_result = await self.federation_handler.get_event_from_server(
-            origin_server, destination_server, event_id
-        )
+        event_result = await self.federation_handler.get_event_from_server(origin_server, destination_server, event_id)
         event = event_result.get(event_id, None)
         if event:
             if isinstance(event, EventError):
@@ -4920,9 +4386,7 @@ class FederationBot(Plugin):
 
         """
         room_version = int(
-            await self.federation_handler.discover_room_version(
-                origin_server, destination_server, room_id
-            )
+            await self.federation_handler.discover_room_version(origin_server, destination_server, room_id)
         )
         response = await self.federation_handler.api.get_backfill(
             origin_server,
@@ -4958,9 +4422,7 @@ def wrap_in_code_block_markdown(existing_buffer: str) -> str:
     return new_buffer
 
 
-def make_into_text_event(
-    message: str, allow_html: bool = False, ignore_body: bool = False
-) -> TextMessageEventContent:
+def make_into_text_event(message: str, allow_html: bool = False, ignore_body: bool = False) -> TextMessageEventContent:
     content = TextMessageEventContent(
         msgtype=MessageType.NOTICE,
         body=message if not ignore_body else "no alt text available",

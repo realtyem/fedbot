@@ -72,9 +72,7 @@ class DisplayLineColumnConfig:
         """
         return self.line_size
 
-    def pad(
-        self, data_piece: Optional[Union[str, int]] = None, additional_padding: int = 0
-    ) -> str:
+    def pad(self, data_piece: Optional[Union[str, int]] = None, additional_padding: int = 0) -> str:
         """
         Pad the data_piece string by the column size. No data_piece means use the
         header_name
@@ -105,9 +103,7 @@ class DisplayLineColumnConfig:
 
         return f"{pad(data_piece if data_piece is not None else self.header_name, self.size, front=True)}"
 
-    def render_pretty_line(
-        self, header: str, item_to_render: Any, force: bool = False
-    ) -> str:
+    def render_pretty_line(self, header: str, item_to_render: Any, force: bool = False) -> str:
         summary = ""
         if item_to_render is not None or force:
             summary += f"{self.front_pad(header)}"
@@ -118,18 +114,12 @@ class DisplayLineColumnConfig:
             summary += "\n"
         return summary
 
-    def render_pretty_list(
-        self, header: Optional[str], list_to_render: Sequence[Union[str, int, EventID]]
-    ) -> str:
+    def render_pretty_list(self, header: Optional[str], list_to_render: Sequence[Union[str, int, EventID]]) -> str:
         summary = ""
         first_line = True
         for i in list_to_render:
             h = self.front_pad(header) if first_line else self.front_pad("")
-            separator = (
-                self.horizontal_separator
-                if first_line
-                else pad("", pad_to=len(self.horizontal_separator))
-            )
+            separator = self.horizontal_separator if first_line else pad("", pad_to=len(self.horizontal_separator))
             summary += f"{h}{separator}{i}\n"
             first_line = False
         return summary
@@ -247,9 +237,7 @@ class DataSet:
             if first_line:
                 header_data = f"{self.dc.front_pad()}{self.horz_delimiter}"
             else:
-                header_data = (
-                    f"{self.dc.pad('', additional_padding=len(self.horz_delimiter))}"
-                )
+                header_data = f"{self.dc.pad('', additional_padding=len(self.horz_delimiter))}"
             final_data += header_data
             final_data += f"{line}\n"
             first_line = False

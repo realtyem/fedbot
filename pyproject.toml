@@ -3,10 +3,10 @@ profile = "black"
 force_to_top = "typing"
 from_first = true
 combine_as_imports = true
-line_length = 88
+line_length = 120
 
 [tool.black]
-line-length = 88
+line-length = 120
 target-version = ["py38"]
 
 [tool.pylint]
