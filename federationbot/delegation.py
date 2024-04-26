@@ -2,10 +2,10 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from asyncio import sleep
 import ipaddress
 import json
+import logging
 
 from aiohttp import client_exceptions
 from dns.asyncresolver import Resolver
-from mautrix.util.logging import TraceLogger
 import dns.resolver
 
 from federationbot.errors import FedBotException, WellKnownHasSchemeError
@@ -15,6 +15,8 @@ from federationbot.server_result import (
     ServerResult,
     ServerResultError,
 )
+
+server_discovery_logger = logging.getLogger("server_discovery")
 
 
 def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[str]]:
@@ -114,12 +116,11 @@ def _parse_and_check_well_known_response(
 
 
 class DelegationHandler:
-    def __init__(self, logger: TraceLogger) -> None:
+    def __init__(self) -> None:
         self.dns_resolver = Resolver()
         # DNS lifetime of requests default is 5 seconds
         self.dns_resolver.lifetime = 10.0
         # DNS timeout for a request default is 2 seconds
-        self.logger = logger
         self.json_decoder = json.JSONDecoder()
 
     async def check_dns_for_reg_records(
@@ -383,8 +384,8 @@ class DelegationHandler:
                         "work-around"
                     )
                 except json.decoder.JSONDecodeError:
-                    self.logger.warning(
-                        f"JSONDecodeError from well-known request on {host}"
+                    server_discovery_logger.warning(
+                        "JSONDecodeError from well-known request on %s", host
                     )
                     diag_info.error("JSONDecodeError")
                     diag_info.add(
@@ -408,7 +409,9 @@ class DelegationHandler:
             # spec and therefore is an error. This condition only holds water for well-known, as there are instances
             # where a 200 and an empty {} are legitimate responses(like for /send)
             if status == 200:
-                self.logger.debug(f"well-known: HIT possible caddy condition: {host}")
+                server_discovery_logger.debug(
+                    "well-known: HIT possible caddy condition: %s", host
+                )
             # For whatever reason(which should be in the errors/diag returned),
             # there was no usable well-known
             diag_info.mark_error_on_well_known()

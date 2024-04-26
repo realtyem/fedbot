@@ -1,10 +1,10 @@
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union
 import asyncio
 import json
+import logging
 import time
 
 from mautrix.types import EventID
-from mautrix.util.logging import TraceLogger
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
 
@@ -34,16 +34,16 @@ from federationbot.types import (
 )
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
+fed_handler_logger = logging.getLogger("federation_handler")
+
 
 class FederationHandler:
     def __init__(
         self,
-        logger: TraceLogger,
         bot_mxid: str,
         server_signing_keys: Dict[str, str],
         task_controller: ReactionTaskController,
     ):
-        self.logger = logger
         self.hosting_server = get_domain_from_id(bot_mxid)
         self.bot_mxid = bot_mxid
         self.server_signing_keys = server_signing_keys
@@ -56,9 +56,7 @@ class FederationHandler:
             expire_after_seconds=float(60 * 60 * 6),
             cleanup_task_sleep_time_seconds=float(60 * 60),
         )
-        self.api = FederationApi(
-            self.logger, self.server_signing_keys, self.task_controller
-        )
+        self.api = FederationApi(self.server_signing_keys, self.task_controller)
 
     async def stop(self) -> None:
         # For stopping the cleanup task on these caches
@@ -73,9 +71,6 @@ class FederationHandler:
         response = await self.api.get_server_keys(
             server_name=server_name, timeout=timeout
         )
-
-        if response.http_code != 200:
-            self.logger.warning(f"get_server_keys: {server_name}: got {response}")
 
         json_response = response.json_response
         return ServerVerifyKeys(json_response)
@@ -93,10 +88,6 @@ class FederationHandler:
             minimum_valid_until_ts=minimum_valid_until_ts,
             timeout=timeout,
         )
-        if response.http_code != 200:
-            self.logger.warning(
-                f"get_server_keys_from_notary: {fetch_server_name}: got {response}"
-            )
 
         server_verify_keys = ServerVerifyKeys({})
 
@@ -251,9 +242,6 @@ class FederationHandler:
         )
 
         if response.http_code != 200:
-            # self.logger.warning(
-            #     f"get_event_from_server: {destination_server}, {event_id}: {response.http_code}:{response.reason}"
-            # )
             new_event_base = EventError(
                 EventID(event_id),
                 {
@@ -271,22 +259,17 @@ class FederationHandler:
                 split_keys = keys_to_pop.split(",")
             else:
                 split_keys = [keys_to_pop]
-        # self.logger.info(f"split_keys: {split_keys}")
+
         for data in pdu_list:
             if inject_new_data:
                 data.update(inject_new_data)
             for key_to_lose in split_keys:
                 key_to_lose = key_to_lose.strip()
-                self.logger.info(f"keys being popped: {key_to_lose}")
 
                 data.pop(key_to_lose, None)
             # This path is only taken on success, errors are sorted above
             new_event_base = determine_what_kind_of_event(EventID(event_id), None, data)
-            if inject_new_data or keys_to_pop:
-                self.logger.info(
-                    f"Dump of new data:\n{json.dumps(new_event_base.raw_data, indent=4)}"
-                )
-            else:
+            if not (inject_new_data or keys_to_pop):
                 self._events_cache.set((destination_server, event_id), new_event_base)
 
         assert new_event_base is not None
@@ -433,11 +416,6 @@ class FederationHandler:
             timeout=timeout,
         )
 
-        if response.http_code != 200:
-            self.logger.warning(
-                f"get_state_ids_from_server: {destination_server}: got {response}"
-            )
-
         pdu_list = response.json_response.get("pdu_ids", [])
         auth_chain_list = response.json_response.get("auth_chain_ids", [])
 
@@ -458,11 +436,6 @@ class FederationHandler:
             event_id,
             timeout=timeout,
         )
-
-        if response.http_code != 200:
-            self.logger.warning(
-                f"get_state_from_server: {destination_server}: got {response.errcode or response.http_code} {response.error or response.reason}"
-            )
 
         pdus_list = response.json_response.get("pdus", [])
         auth_chain_list = response.json_response.get("auth_chain", [])
@@ -489,16 +462,10 @@ class FederationHandler:
             assert room_alias.startswith("#")
             _, destination_server = room_alias.split(":", maxsplit=1)
         except ValueError as e:
-            self.logger.warning(
-                f"resolve_room_alias: {room_alias} had malformed destination server"
-            )
             raise MalformedRoomAliasError(
                 summary_exception="Room Alias did not have ':'"
             ) from e
         except AssertionError as e:
-            self.logger.warning(
-                f"resolve_room_alias: {room_alias} does not start with '#'"
-            )
             raise MalformedRoomAliasError(
                 summary_exception="Room Alias did not start with '#'"
             ) from e
@@ -533,11 +500,6 @@ class FederationHandler:
             timeout=timeout,
         )
 
-        if response.http_code != 200:
-            self.logger.warning(
-                f"_send_events_to_server: {destination_server}: got {response}"
-            )
-
         return response
 
     async def get_public_rooms_from_server(
@@ -564,11 +526,6 @@ class FederationHandler:
             third_party_instance_id=third_party_instance_id,
             timeout=timeout,
         )
-
-        if response.http_code != 200:
-            self.logger.warning(
-                f"get_public_rooms_from_server: {destination_server}: got {response}"
-            )
 
         return response
 
@@ -675,7 +632,6 @@ class FederationHandler:
             timeout=timeout,
         )
         if response.http_code != 200:
-            # self.logger.warning(f"make_join: dest: {destination_server}: {response}")
             assert isinstance(response, MatrixError)
             raise response
 

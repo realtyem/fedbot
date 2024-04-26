@@ -12,7 +12,6 @@ from aiohttp import (
     client_exceptions,
 )
 from backoff._typing import Details
-from mautrix.util.logging import TraceLogger
 from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
 from yarl import URL
@@ -53,6 +52,7 @@ from federationbot.tracing import (
 )
 
 backoff_logger = logging.getLogger("backoff")
+fedapi_logger = logging.getLogger("federation_api")
 SOCKET_TIMEOUT_SECONDS = 2.0
 USER_AGENT_STRING = "Sir FederationInspector 0.0.7"
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
@@ -81,11 +81,9 @@ def backoff_update_retries_handler(details: Details) -> None:
 class FederationApi:
     def __init__(
         self,
-        logger: TraceLogger,
         server_signing_keys: Dict[str, str],
         task_controller: ReactionTaskController,
     ):
-        self.logger = logger
         self.server_signing_keys = server_signing_keys
         self.task_controller = task_controller
         self.json_decoder = json.JSONDecoder()
@@ -117,7 +115,7 @@ class FederationApi:
             connector=TCPConnector(keepalive_timeout=60, limit=1000, limit_per_host=3),
             trace_configs=[trace_config],
         )
-        self.delegation_handler = DelegationHandler(self.logger)
+        self.delegation_handler = DelegationHandler()
 
     async def shutdown(self) -> None:
         await self.http_client.close()
@@ -303,9 +301,10 @@ class FederationApi:
             client_exceptions.ClientError,  # e
             Exception,  # e
         ) as e:
-            self.logger.info(
-                f"federation_request: General Exception: for {destination_server_name}"
-                f":\n {e}"
+            fedapi_logger.info(
+                "federation_request: General Exception: for %s:\n %r",
+                destination_server_name,
+                e,
             )
             raise FedBotException(e.__class__.__name__, str(e)) from e
 
@@ -474,8 +473,8 @@ class FederationApi:
             diag_info.error(f"Request to {path} failed")
             if code == 200:
                 # Going to log this for now, see how prevalent it is
-                self.logger.warning(
-                    f"fedreq: HIT possible Caddy condition: {destination_server_name}"
+                fedapi_logger.debug(
+                    "fedreq: HIT possible Caddy condition: %s", destination_server_name
                 )
 
             return MatrixError(
@@ -515,6 +514,15 @@ class FederationApi:
             timeout_seconds=timeout_seconds,
         )
 
+        if response.http_code != 200:
+            fedapi_logger.debug(
+                "get_server_version: %s: got %d: %s %s",
+                server_name,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
+            )
+
         if diagnostics and response.diag_info is not None:
             # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
             if response.http_code != 200:
@@ -534,6 +542,15 @@ class FederationApi:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            fedapi_logger.debug(
+                "get_server_keys: %s: got %d: %s %s",
+                server_name,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
+            )
+
         return response
 
     async def get_server_notary_keys(
@@ -551,6 +568,15 @@ class FederationApi:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            fedapi_logger.debug(
+                "get_server_notary_keys: %s: got %d: %s %s",
+                from_server_name,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
+            )
+
         return response
 
     async def get_event(
@@ -566,6 +592,16 @@ class FederationApi:
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
+
+        if response.http_code != 200:
+            fedapi_logger.debug(
+                "get_event: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
+            )
+
         return response
 
     async def get_state_ids(
@@ -583,6 +619,15 @@ class FederationApi:
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
+
+        if response.http_code != 200:
+            fedapi_logger.warning(
+                "get_event_auth: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
+            )
 
         return response
 
@@ -602,6 +647,15 @@ class FederationApi:
             timeout_seconds=timeout,
         )
 
+        if response.http_code != 200:
+            fedapi_logger.debug(
+                "get_state: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
+            )
+
         return response
 
     async def get_event_auth(
@@ -620,8 +674,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_event_auth: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "get_event_auth: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response
@@ -648,8 +706,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_timestamp_to_event: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "get_timestamp_to_event: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response
@@ -673,8 +735,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_backfill: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "get_backfill: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response
@@ -698,8 +764,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_user_devices: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "get_user_devices: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response
@@ -720,11 +790,13 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_room_alias_from_directory: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "get_room_alias_from_directory: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
-        else:
-            self.logger.info(json.dumps(response.json_response, indent=4))
 
         return response
 
@@ -743,10 +815,6 @@ class FederationApi:
         for pdu in pdus_to_send:
             formatted_data["pdus"].append(pdu)
 
-        # self.logger.info(
-        #     f"outgoing transaction:\n{json.dumps(formatted_data, indent=4)}"
-        # )
-
         response = await self.federation_request(
             destination_server_name=destination_server,
             path=f"/_matrix/federation/v1/send/{now}",
@@ -757,8 +825,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"_send_transaction_to_server: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "put_pdu_transaction: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response
@@ -792,8 +864,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"get_public_rooms: {destination_server}: got {response.http_code}: {response.reason}"
+            fedapi_logger.debug(
+                "get_public_rooms: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response
@@ -824,8 +900,12 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            self.logger.warning(
-                f"make_join: {destination_server}: got {response.http_code}: {response.errcode}: {response.error or response.reason}"
+            fedapi_logger.debug(
+                "make_join: %s: got %d: %s %s",
+                destination_server,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason,
             )
 
         return response

@@ -201,7 +201,6 @@ class FederationBot(Plugin):
         )
 
         self.federation_handler = FederationHandler(
-            logger=self.log,
             bot_mxid=self.client.mxid,
             server_signing_keys=self.server_signing_keys,
             task_controller=self.reaction_task_controller,
