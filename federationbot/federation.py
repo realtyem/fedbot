@@ -467,7 +467,7 @@ class FederationHandler:
             for ctx in response._traces:
                 context = ctx._trace_config_ctx
                 diag_info.trace_ctx = context
-                self.logger.info(f"Found context info in _traces: {context}")
+                # self.logger.info(f"Found context info in _traces: {context}")
 
             if 200 <= code < 599:
                 result = await response.text()
@@ -1388,7 +1388,7 @@ class FederationHandler:
             timeout=timeout,
         )
         if response.http_code != 200:
-            self.logger.warning(f"make_join: dest: {destination_server}: {response}")
+            # self.logger.warning(f"make_join: dest: {destination_server}: {response}")
             assert isinstance(response, MatrixError)
             raise response
 

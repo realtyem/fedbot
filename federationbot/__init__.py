@@ -2212,7 +2212,7 @@ class FederationBot(Plugin):
                     user_id=str(self.client.mxid),
                 )
             except MatrixError as _e:
-                self.log.warning(f"_head_task: {_host}: {_e}")
+                # self.log.warning(f"_head_task: {_host}: {_e}")
                 return _host, _e
 
             # One way or the other, we return the response
@@ -2276,7 +2276,7 @@ class FederationBot(Plugin):
                             last_event_map[host] = retrieved_event_id, retrieved_event
 
         for result in results:
-            self.log.info(f"head_command: result: {result}")
+            # self.log.info(f"head_command: result: {result}")
             if isinstance(result, BaseException):
                 raise result
 
