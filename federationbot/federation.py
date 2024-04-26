@@ -82,8 +82,8 @@ USER_AGENT_STRING = "Sir FederationInspector 0.0.7"
 def backoff_logging_handler(details: Details) -> None:
     wait = details.get("wait", 0.0)
     tries = details.get("tries", 0)
-    host = details.get("kwargs", {}).get("destination_server_name", "not found")
-    backoff_logger.info(
+    host = details.get("args", (None, "arg not found"))[1]
+    backoff_logger.debug(
         "Backing off {wait:0.2f} seconds after {tries} tries on "
         "host {host}".format(wait=wait, tries=tries, host=host)
     )
