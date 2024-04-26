@@ -484,7 +484,7 @@ class FederationHandler:
                 result_dict = self.json_decoder.decode(result)
 
             except json.decoder.JSONDecodeError:
-                diag_info.error("JSONDecodeError, work-around failed")
+                diag_info.error("JSONDecodeError")
                 diag_info.add("No usable data in response")
                 # error_reason = "No/bad JSON returned"
 

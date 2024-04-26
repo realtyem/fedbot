@@ -382,6 +382,15 @@ class DelegationHandler:
                         "Expected Content-Type of 'application/json', will try "
                         "work-around"
                     )
+                except json.decoder.JSONDecodeError:
+                    self.logger.warning(
+                        f"JSONDecodeError from well-known request on {host}"
+                    )
+                    diag_info.error("JSONDecodeError")
+                    diag_info.add(
+                        "Content-Type was correct, but contained unusable data"
+                    )
+                if not content:
                     try:
                         text_result = await response.text()
                         content = self.json_decoder.decode(text_result)
