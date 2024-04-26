@@ -207,7 +207,6 @@ class FederationApi:
             # defaults to 5, for roundups on timeouts
             # ceil_threshold=5.0,
         )
-        trace_context = {"url": url_object}
 
         try:
             response = await self.http_client.request(
@@ -217,7 +216,7 @@ class FederationApi:
                 timeout=client_timeouts,
                 server_hostname=server_hostname_sni,
                 json=content,
-                trace_request_ctx=trace_context,
+                trace_request_ctx={"url": url_object},
             )
 
         # Split the different exceptions up based on where the information is extracted from
@@ -322,12 +321,8 @@ class FederationApi:
         Returns:
             MatrixResponse
         """
-        result_dict: Optional[Dict[str, Any]] = None
         diag_info = DiagnosticInfo(diagnostics)
-        context = None
         server_result = self.server_discovery_cache.get(destination_server_name)
-        errcode: Optional[str] = None
-        error: Optional[str] = None
         now = time.time()
 
         # Either no ServerResult, or
@@ -344,11 +339,10 @@ class FederationApi:
                 diag_info=diag_info,
             )
 
-        if server_result:
-            # These only get filled in when diagnostics is True
-            # This will add the word "Checking: " to the front of "Connectivity"
-            diag_info.mark_step_num("Connectivity")
-            diag_info.add(f"Making request to {server_result.get_host()}{path}")
+        # These only get filled in when diagnostics is True
+        # This will add the word "Checking: " to the front of "Connectivity"
+        diag_info.mark_step_num("Connectivity")
+        diag_info.add(f"Making request to {server_result.get_host()}{path}")
 
         reference_key = self.task_controller.setup_task_set()
         await self.task_controller.add_threaded_tasks(
@@ -373,11 +367,9 @@ class FederationApi:
         except FedBotException as e:
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
             await self.task_controller.cancel(reference_key)
-            code = 0
-            error_reason = str(e.summary_exception)
             diag_info.error(str(e.long_exception))
             # Since there was an exception, cache the result unless it was a timeout error, as that shouldn't count
-            server_result.unhealthy = error_reason
+            server_result.unhealthy = str(e.summary_exception)
 
             if not isinstance(e, PluginTimeout):
                 # Most all errors will be cached for 5 minutes
@@ -389,59 +381,56 @@ class FederationApi:
             self.server_discovery_cache.set(server_result.host, server_result)
 
             return MatrixError(
-                http_code=code,
-                errcode=str(code),
-                reason=error_reason,
+                http_code=0,
+                errcode=str(0),
+                reason=str(e.summary_exception),
                 diag_info=diag_info if diagnostics else None,
                 json_response={},
             )
 
         # The server was responsive, but may not have returned something useful
-        # assert not isinstance(response, BaseException)
+        errcode: Optional[str] = None
+        error: Optional[str] = None
         async with response:
             code = response.status
             reason = response.reason or "No Reason/status returned"
             headers = response.headers
             self.server_discovery_cache.set(server_result.host, server_result)
-            for ctx in response._traces:
-                context = ctx._trace_config_ctx
-                diag_info.trace_ctx = context
+            for ctx in response._traces:  # noqa: W0212  # pylint:disable=protected-access
+                diag_info.trace_ctx = ctx._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
                 # self.logger.info(f"Found context info in _traces: {context}")
-
-            if 200 <= code < 599:
-                result = await response.text()
-            else:
-                result = None
 
             diag_info.add(f"Request status: code:{code}, reason: {reason}")
 
-        # Should be done with that threaded task by now, clean it up
-        await self.task_controller.cancel(reference_key)
+            if 200 <= code < 599:
+                try:
+                    result_dict = self.json_decoder.decode(await response.text())
+                except json.decoder.JSONDecodeError:
+                    diag_info.error("JSONDecodeError")
+                    diag_info.add("No usable data in response")
+                    # error_reason = "No/bad JSON returned"
+                    result_dict = None
 
-        if result:
-            try:
-                result_dict = self.json_decoder.decode(result)
-
-            except json.decoder.JSONDecodeError:
-                diag_info.error("JSONDecodeError")
-                diag_info.add("No usable data in response")
-                # error_reason = "No/bad JSON returned"
-
-            else:
                 # if there was a matrix related error, pick the bits out of the json
                 if result_dict:
                     error = result_dict.get("error", error)
                     errcode = result_dict.get("errcode", errcode)
 
-        if diagnostics:
-            tls_handled_by = headers.get("server", None)
-            diag_info.tls_handled_by = tls_handled_by
+            else:
+                result_dict = None
 
+        # Should be done with that threaded task by now, clean it up
+        await self.task_controller.cancel(reference_key)
+
+        diag_info.tls_handled_by = headers.get("server", None)
+
+        caddy_hit = bool(code == 200 and result_dict is None)
+        result_dict = {}
         # The request is complete.
         # Caddy is notorious for returning a 200 as a default for non-existent endpoints. This is a problem, and
         # I believe it is against the Spec. When this happens, there should be no JSON to decode so result_dict
         # should still be None. Lump that in with other errors to return
-        if code != 200 or (code == 200 and result_dict is None):
+        if code != 200 or caddy_hit:
             diag_info.error(f"Request to {path} failed")
             if code == 200:
                 # Going to log this for now, see how prevalent it is
@@ -451,10 +440,10 @@ class FederationApi:
                 http_code=code,
                 reason=reason,
                 diag_info=diag_info if diagnostics else None,
-                json_response=result_dict or {},
+                json_response=result_dict,
                 errcode=errcode,
                 error=error,
-                tracing_context=context,
+                tracing_context=diag_info.trace_ctx,
             )
 
         # Don't need a success diagnostic message here, the one above works fine
@@ -462,10 +451,10 @@ class FederationApi:
             http_code=code,
             reason=reason,
             diag_info=diag_info if diagnostics else None,
-            json_response=result_dict or {},
+            json_response=result_dict,
             errcode=errcode,
             error=error,
-            tracing_context=context,
+            tracing_context=diag_info.trace_ctx,
         )
 
     async def get_server_version(
