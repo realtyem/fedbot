@@ -354,9 +354,7 @@ class DelegationHandler:
 
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
-            response = await request_cb(
-                destination_server_name=host, path="/.well-known/matrix/server"
-            )
+            response = await request_cb(host, "/.well-known/matrix/server")
 
         # The callback used above handles a boatload of individual exceptions and consolidates them into one
         # that is easier to extract displayable data from.
