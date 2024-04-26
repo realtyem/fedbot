@@ -3624,11 +3624,11 @@ class FederationBot(Plugin):
         # This will be assigned by now
         assert event_id is not None
 
-        pdu_list_from_response = await self._get_events_from_backfill(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            start_event_id=event_id,
+        pdu_list_from_response = await self.federation_handler.get_events_from_backfill(
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
             limit=limit_int,
         )
 
@@ -4361,55 +4361,6 @@ class FederationBot(Plugin):
 
         assert isinstance(origin_server_ts, int)
         return room_id, event_id, origin_server_ts
-
-    async def _get_events_from_backfill(
-        self,
-        origin_server: str,
-        destination_server: str,
-        room_id: str,
-        start_event_id: str,
-        limit: int = 1,
-    ) -> List[EventBase]:
-        """
-        Retrieve a series of events from the backfill mechanism. This will have 3 types of
-        return values(listed below)
-
-        Args:
-            origin_server: The server to make the request from(applies auth to request)
-            destination_server: The server being asked
-            room_id: The room the Event ID should be part of
-            start_event_id: The actual Event ID to look up
-
-        Returns:
-            * EventBase in question
-            * Error from federation response in the EventError custom class
-
-        """
-        room_version = int(
-            await self.federation_handler.discover_room_version(origin_server, destination_server, room_id)
-        )
-        response = await self.federation_handler.api.get_backfill(
-            origin_server,
-            destination_server,
-            room_id,
-            start_event_id,
-            limit=str(limit),
-        )
-        if response.http_code != 200:
-            # If there was an error, put it into a format that is expected.
-            return [
-                EventError(
-                    event_id=EventID(""),
-                    data={
-                        "error": f"{response.reason}",
-                        "errcode": f"{response.http_code}",
-                    },
-                )
-            ]
-
-        pdus_list = response.json_response.get("pdus", [])
-
-        return parse_list_response_into_list_of_event_bases(pdus_list, room_version)
 
 
 def wrap_in_code_block_markdown(existing_buffer: str) -> str:

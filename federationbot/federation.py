@@ -588,6 +588,54 @@ class FederationHandler:
         auth_events = response.json_response.get("event", {}).get("auth_events", [])
         return MakeJoinResponse(room_version=room_version, prev_events=prev_events, auth_events=auth_events)
 
+    async def get_events_from_backfill(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        start_event_id: str,
+        limit: int = 1,
+    ) -> List[EventBase]:
+        """
+        Retrieve a series of events from the backfill mechanism. This will have 3 types of
+        return values(listed below)
+
+        Args:
+            origin_server: The server to make the request from(applies auth to request)
+            destination_server: The server being asked
+            room_id: The room the Event ID should be part of
+            start_event_id: The actual Event ID to look up
+            limit: Number of Events to pull
+
+        Returns:
+            * EventBase in question
+            * Error from federation response in the EventError custom class
+
+        """
+        room_version = int(await self.discover_room_version(origin_server, destination_server, room_id))
+        response = await self.api.get_backfill(
+            origin_server,
+            destination_server,
+            room_id,
+            start_event_id,
+            limit=str(limit),
+        )
+        if response.http_code != 200:
+            # If there was an error, put it into a format that is expected.
+            return [
+                EventError(
+                    event_id=EventID(""),
+                    data={
+                        "error": f"{response.reason}",
+                        "errcode": f"{response.http_code}",
+                    },
+                )
+            ]
+
+        pdus_list = response.json_response.get("pdus", [])
+
+        return parse_list_response_into_list_of_event_bases(pdus_list, room_version)
+
 
 def filter_events_based_on_type(events: List[EventBase], filter_by: str) -> List[EventBase]:
     events_to_return = []
