@@ -32,22 +32,8 @@ from unpaddedbase64 import encode_base64
 
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
-from federationbot.events import (
-    CreateRoomStateEvent,
-    Event,
-    EventBase,
-    EventError,
-    GenericStateEvent,
-    RoomMemberStateEvent,
-    determine_what_kind_of_event,
-    redact_event,
-)
-from federationbot.federation import (
-    FederationHandler,
-    filter_events_based_on_type,
-    filter_state_events_based_on_membership,
-    parse_list_response_into_list_of_event_bases,
-)
+from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
+from federationbot.federation import FederationHandler, parse_list_response_into_list_of_event_bases
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixResponse
 from federationbot.utils import (
     BitmapProgressBar,
@@ -782,11 +768,11 @@ class FederationBot(Plugin):
 
         # Prep the host list, just in case we need it later on so the worker doesn't
         # have to do it on-demand, increasing its complexity
-        host_list = await self.get_hosts_in_room_ordered(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            event_id_in_timeline=event_id,
+        host_list = await self.federation_handler.get_hosts_in_room_ordered(
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
         )
 
         good_host_list: List[str] = []
@@ -1474,11 +1460,11 @@ class FederationBot(Plugin):
         )
         # 2. Get the hosts in the room, test which ones are live and filter out the dead
         await command_event.respond("Retrieving list of hosts in room")
-        host_list = await self.get_hosts_in_room_ordered(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            event_id_in_timeline=head_data.prev_events[0],
+        host_list = await self.federation_handler.get_hosts_in_room_ordered(
+            origin_server,
+            destination_server,
+            room_id,
+            head_data.prev_events[0],
         )
 
         good_host_list: List[str] = []
@@ -1670,11 +1656,11 @@ class FederationBot(Plugin):
         # This will be assigned by now
         assert event_id is not None
 
-        host_list = await self.get_hosts_in_room_ordered(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            event_id_in_timeline=event_id,
+        host_list = await self.federation_handler.get_hosts_in_room_ordered(
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
         )
 
         # Time to start rendering. Build the header lines first
@@ -1964,7 +1950,7 @@ class FederationBot(Plugin):
 
         # room_version = head_response.room_version
         self.log.info(f"head: {head_response.prev_events}")
-        host_list = await self.get_hosts_in_room_ordered(
+        host_list = await self.federation_handler.get_hosts_in_room_ordered(
             origin_server, destination_server, room_id, head_response.prev_events[0]
         )
         if not host_list:
@@ -3943,7 +3929,7 @@ class FederationBot(Plugin):
             assert event_id_from_room_right_now is not None
             self.log.debug(f"Timestamp to event responded with event_id: {event_id_from_room_right_now}")
             # Get all the hosts in the supplied room
-            host_list = await self.get_hosts_in_room_ordered(
+            host_list = await self.federation_handler.get_hosts_in_room_ordered(
                 origin_server, origin_server, room_id, event_id_from_room_right_now
             )
 
@@ -4241,72 +4227,6 @@ class FederationBot(Plugin):
             room_id = str(command_event.room_id)
 
         return room_id, list_of_servers
-
-    async def get_hosts_in_room_ordered(
-        self,
-        origin_server: str,
-        destination_server: str,
-        room_id: str,
-        event_id_in_timeline: str,
-    ) -> List[str]:
-        # Should be a faithful recreation of what Synapse does.
-
-        # SELECT
-        #     /* Match the domain part of the MXID */
-        #     substring(c.state_key FROM '@[^:]*:(.*)$') as server_domain
-        # FROM current_state_events c
-        # /* Get the depth of the event from the events table */
-        # INNER JOIN events AS e USING (event_id)
-        # WHERE
-        #     /* Find any join state events in the room */
-        #     c.type = 'm.room.member'
-        #     AND c.membership = 'join'
-        #     AND c.room_id = ?
-        # /* Group all state events from the same domain into their own buckets (groups) */
-        # GROUP BY server_domain
-        # /* Sorted by lowest depth first */
-        # ORDER BY min(e.depth) ASC;
-
-        # (Given the toolbox at the time of writing) I think the best way to simulate
-        # this will be to use get_state_ids_from_server(), which returns a tuple of the
-        # current state ids and the auth chain ids. The state ids should have all the
-        # data from the room up to that point already layered to be current. Pull those
-        # events, then sort them based on above.
-        # Update for 0.0.5: Taking Tom's suggestion, going to use the alternative,
-        # get_state_from_server() instead. It will at the very least save some
-        # processing steps.
-        state_events, _ = await self.federation_handler.get_state_from_server(
-            origin_server=origin_server,
-            destination_server=destination_server,
-            room_id=room_id,
-            event_id=event_id_in_timeline,
-        )
-        self.log.debug(f"get_hosts_in_room_ordered: got {len(state_events)} events from state")
-        converted_state_events = []
-        for state_event in state_events:
-            # Won't be able to retrieve the room_version for this, and the event ids are not available or necessary
-            converted_state_events.append(
-                determine_what_kind_of_event(None, room_version=None, data_to_use=state_event)
-            )
-
-        filtered_room_member_events = cast(
-            List[RoomMemberStateEvent],
-            filter_events_based_on_type(converted_state_events, "m.room.member"),
-        )
-        joined_member_events = cast(
-            List[RoomMemberStateEvent],
-            filter_state_events_based_on_membership(filtered_room_member_events, "join"),
-        )
-        self.log.debug(f"get_hosts_in_room_ordered: got {len(joined_member_events)} joined member events")
-        joined_member_events.sort(key=lambda x: x.depth)
-        hosts_ordered = []
-        for member in joined_member_events:
-            host = get_domain_from_id(member.state_key)
-            if host not in hosts_ordered:
-                hosts_ordered.extend([host])
-
-        self.log.debug(f"get_hosts_in_room_ordered: got {len(hosts_ordered)} hosts")
-        return hosts_ordered
 
     async def _discover_event_ids_and_room_ids(
         self,

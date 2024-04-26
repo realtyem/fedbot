@@ -1,4 +1,4 @@
-from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 import asyncio
 import json
 import logging
@@ -635,6 +635,72 @@ class FederationHandler:
         pdus_list = response.json_response.get("pdus", [])
 
         return parse_list_response_into_list_of_event_bases(pdus_list, room_version)
+
+    async def get_hosts_in_room_ordered(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+        event_id_in_timeline: str,
+    ) -> List[str]:
+        # Should be a faithful recreation of what Synapse does.
+
+        # SELECT
+        #     /* Match the domain part of the MXID */
+        #     substring(c.state_key FROM '@[^:]*:(.*)$') as server_domain
+        # FROM current_state_events c
+        # /* Get the depth of the event from the events table */
+        # INNER JOIN events AS e USING (event_id)
+        # WHERE
+        #     /* Find any join state events in the room */
+        #     c.type = 'm.room.member'
+        #     AND c.membership = 'join'
+        #     AND c.room_id = ?
+        # /* Group all state events from the same domain into their own buckets (groups) */
+        # GROUP BY server_domain
+        # /* Sorted by lowest depth first */
+        # ORDER BY min(e.depth) ASC;
+
+        # (Given the toolbox at the time of writing) I think the best way to simulate
+        # this will be to use get_state_ids_from_server(), which returns a tuple of the
+        # current state ids and the auth chain ids. The state ids should have all the
+        # data from the room up to that point already layered to be current. Pull those
+        # events, then sort them based on above.
+        # Update for 0.0.5: Taking Tom's suggestion, going to use the alternative,
+        # get_state_from_server() instead. It will at the very least save some
+        # processing steps.
+        state_events, _ = await self.get_state_from_server(
+            origin_server,
+            destination_server,
+            room_id,
+            event_id_in_timeline,
+        )
+        fed_handler_logger.debug("get_hosts_in_room_ordered: got %d events from state", len(state_events))
+        converted_state_events = []
+        for state_event in state_events:
+            # Won't be able to retrieve the room_version for this, and the event ids are not available or necessary
+            converted_state_events.append(
+                determine_what_kind_of_event(None, room_version=None, data_to_use=state_event)
+            )
+
+        filtered_room_member_events = cast(
+            List[RoomMemberStateEvent],
+            filter_events_based_on_type(converted_state_events, "m.room.member"),
+        )
+        joined_member_events = cast(
+            List[RoomMemberStateEvent],
+            filter_state_events_based_on_membership(filtered_room_member_events, "join"),
+        )
+        fed_handler_logger.debug("get_hosts_in_room_ordered: got %d joined member events", len(joined_member_events))
+        joined_member_events.sort(key=lambda x: x.depth)
+        hosts_ordered = []
+        for member in joined_member_events:
+            host = get_domain_from_id(member.state_key)
+            if host not in hosts_ordered:
+                hosts_ordered.extend([host])
+
+        fed_handler_logger.debug("get_hosts_in_room_ordered: got %d hosts", len(hosts_ordered))
+        return hosts_ordered
 
 
 def filter_events_based_on_type(events: List[EventBase], filter_by: str) -> List[EventBase]:
