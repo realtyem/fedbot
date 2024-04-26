@@ -272,54 +272,35 @@ class FederationHandler:
         async def _get_event_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_event_id: str = await queue.get()
-                try:
-                    event_base_dict = await self.get_event_from_server(
-                        origin_server=origin_server,
-                        destination_server=destination_server,
-                        event_id=worker_event_id,
-                        timeout=timeout,
-                    )
 
-                # TODO: may not need these any more
-                except asyncio.TimeoutError:
-                    error_event = EventError(
-                        EventID(worker_event_id),
-                        {"error": "Request Timed Out", "errcode": "Timeout err"},
-                    )
-                    event_to_event_base[worker_event_id] = error_event
-                except FedBotException as e:
-                    error_event = EventError(
-                        EventID(worker_event_id),
-                        {"error": f"{e}", "errcode": "Plugin error"},
-                    )
-                    event_to_event_base[worker_event_id] = error_event
+                event_base_dict = await self.get_event_from_server(
+                    origin_server=origin_server,
+                    destination_server=destination_server,
+                    event_id=worker_event_id,
+                    timeout=timeout,
+                )
 
-                else:
-                    for r_event_id, event_base in event_base_dict.items():
-                        # Add this newly retrieved Event data to the outside dict that
-                        # is being returned.
-                        event_to_event_base[r_event_id] = event_base
+                for r_event_id, event_base in event_base_dict.items():
+                    # Add this newly retrieved Event data to the outside dict that
+                    # is being returned.
+                    event_to_event_base[r_event_id] = event_base
 
-                finally:
-                    queue.task_done()
+                queue.task_done()
 
         event_queue: asyncio.Queue[str] = asyncio.Queue()
         for event_id in events_list:
             await event_queue.put(event_id)
 
-        tasks = []
-        for _ in range(min(len(events_list), 3)):
-            task = asyncio.create_task(_get_event_worker(event_queue))
-            tasks.append(task)
+        reference_key = self.task_controller.setup_task_set()
+
+        # Limit this to no more than three. Synapse in particular isn't capable of pulling more than 3 events
+        # from its database simultaneously. No sense is overloading it, and it's pretty quick usually.
+        self.task_controller.add_tasks(reference_key, _get_event_worker, event_queue, limit=min(len(events_list), 3))
 
         await event_queue.join()
 
         # Cancel our worker tasks.
-        for task in tasks:
-            task.cancel()
-        # Wait until all worker tasks are cancelled.
-        await asyncio.gather(*tasks, return_exceptions=True)
-
+        await self.task_controller.cancel(reference_key)
         return event_to_event_base
 
     async def find_event_on_servers(
