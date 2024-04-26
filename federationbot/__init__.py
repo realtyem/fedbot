@@ -29,6 +29,7 @@ from mautrix.types import (
     EventID,
     EventType,
     Format,
+    Membership,
     MessageType,
     PaginatedMessages,
     PaginationDirection,
@@ -3047,7 +3048,7 @@ class FederationBot(Plugin):
         room_to_check: Optional[str] = str(command_event.room_id)
 
         # Figure out what goes into list_of_servers_to_check
-        if thing_to_test is not None:
+        if thing_to_test:
             # First, filter out if the thing passed in was a room. If it wasn't that means it was a server
             if thing_to_test.startswith("#") or thing_to_test.startswith("!"):
                 if bool(is_room_id_or_alias(thing_to_test)):
@@ -3081,8 +3082,10 @@ class FederationBot(Plugin):
                 await command_event.respond(NOT_IN_ROOM_ERROR)
                 return
 
-            for member in joined_members:
-                list_of_servers_to_check.add(get_domain_from_id(member))
+            for member, status in joined_members.items():
+                # In case of members not being JOINed, just filter them out
+                if status.membership == Membership.JOIN:
+                    list_of_servers_to_check.add(get_domain_from_id(member))
 
         number_of_servers = len(list_of_servers_to_check)
 
