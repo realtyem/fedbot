@@ -826,6 +826,7 @@ class FederationBot(Plugin):
 
         # Get the last event that was in the room, for its depth and as a starting spot
         now = int(time.time() * 1000)
+        # TODO: swap this out for 'fed head'
         ts_response = await self.federation_handler.get_timestamp_to_event_from_server(
             origin_server=origin_server,
             destination_server=origin_server,
@@ -1018,11 +1019,13 @@ class FederationBot(Plugin):
                                 event_id_error_list.add(_event_id)
                         # Prep for next iteration. Don't worry about adding auth events
                         # to this, as they will come along in due time
+                        # TODO: maybe add a backfill of two at this point, to skip over gaps?
                         if not prev_good_events:
                             self.log.warning(
                                 f"{worker_name}: Unexpectedly found an empty prev_good_events on {next_event_id}"
                             )
                         next_list_to_get.update(prev_good_events)
+                        next_list_to_get.update(auth_good_events)
 
                     else:
                         # is an EventError. Chances of hitting this are extremely low,
