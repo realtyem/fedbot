@@ -15,6 +15,7 @@ from asyncio import AbstractEventLoop, Task
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 import asyncio
+import functools
 import random
 import threading
 
@@ -185,6 +186,7 @@ class TaskSetEntry(Generic[T]):
         *args,
         executor: ThreadPoolExecutor,
         limit: int = 1,
+        **kwargs,
     ) -> None:
         """
         Add this Callable and its args 'limit' number of times to the grouping of Tasks.
@@ -200,7 +202,9 @@ class TaskSetEntry(Generic[T]):
         """
         for _ in range(limit):
             self.coros.append(
-                await self.loop.run_in_executor(executor, new_task, *args)
+                await self.loop.run_in_executor(
+                    executor, functools.partial(new_task, *args, **kwargs)
+                )
             )
 
     # Currently, this is unused/broken. It is part of the experiment threaded Task experiment
@@ -438,10 +442,10 @@ class ReactionTaskController(Generic[T]):
         new_task: Callable[..., Coroutine[Any, Any, T]],
         *args,
         limit: int = 1,
+        **kwargs,
     ) -> None:
         """
-        NOTE: Currently does not work correctly. The ThreadPoolExecutor does not like receiving an asyncio Task
-        coroutine.
+        Add a callable that can be awaited to a thread from the pool.
 
         Args:
             reference_key:
@@ -460,6 +464,7 @@ class ReactionTaskController(Generic[T]):
             *args,
             limit=limit,
             executor=self.executor,
+            **kwargs,
         )
 
     async def get_task_results(
