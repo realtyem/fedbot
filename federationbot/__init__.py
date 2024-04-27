@@ -302,6 +302,34 @@ class FederationBot(Plugin):
         await command_event.respond(stuff.json())
 
     @test_command.subcommand(
+        name="alias",
+        help="test room alias from another server",
+    )
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
+    @command.argument(name="target_server", required=False)
+    async def alias_subcommand(
+        self,
+        command_event: MessageEvent,
+        room_id_or_alias: str,
+        target_server: Optional[str],
+    ) -> None:
+        origin_server = self.federation_handler.hosting_server
+        if target_server:
+            destination_server = target_server
+        else:
+            destination_server = room_id_or_alias.split(":", maxsplit=1)[1]
+        self.log.warning(f"alias: {destination_server}, alias: {room_id_or_alias}")
+        if room_id_or_alias.startswith("!"):
+            await command_event.reply("I need a room alias not a room id")
+            return
+        stuff = await self.federation_handler.api.get_room_alias_from_directory(
+            origin_server,
+            destination_server,
+            room_id_or_alias,
+        )
+        await command_event.respond(wrap_in_code_block_markdown(json.dumps(stuff.json_response, indent=4)))
+
+    @test_command.subcommand(
         name="room_walk",
         help="Use the /message client endpoint to force fresh state download(beta).",
     )
