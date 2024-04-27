@@ -425,7 +425,6 @@ class FederationApi:
         diag_info.tls_handled_by = headers.get("server", None)
 
         caddy_hit = bool(code == 200 and result_dict is None)
-        result_dict = {}
         # The request is complete.
         # Caddy is notorious for returning a 200 as a default for non-existent endpoints. This is a problem, and
         # I believe it is against the Spec. When this happens, there should be no JSON to decode so result_dict
@@ -433,6 +432,8 @@ class FederationApi:
         if code != 200 or caddy_hit:
             diag_info.error(f"Request to {path} failed")
             if code == 200:
+                result_dict = {}
+
                 # Going to log this for now, see how prevalent it is
                 fedapi_logger.debug("fedreq: HIT possible Caddy condition: %s", destination_server_name)
 
@@ -465,9 +466,8 @@ class FederationApi:
         timeout_seconds: float = 10.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=server_name,
-            path="/_matrix/federation/v1/version",
-            method="GET",
+            server_name,
+            "/_matrix/federation/v1/version",
             force_rediscover=force_rediscover,
             diagnostics=diagnostics,
             timeout_seconds=timeout_seconds,
@@ -493,9 +493,8 @@ class FederationApi:
 
     async def get_server_keys(self, server_name: str, timeout: float = 10.0) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=server_name,
-            path="/_matrix/key/v2/server",
-            method="GET",
+            server_name,
+            "/_matrix/key/v2/server",
             timeout_seconds=timeout,
         )
 
@@ -518,10 +517,9 @@ class FederationApi:
         timeout: float = 10.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=from_server_name,
-            path=f"/_matrix/key/v2/query/{fetch_server_name}",
+            from_server_name,
+            f"/_matrix/key/v2/query/{fetch_server_name}",
             query_args=[("minimum_valid_until_ts", minimum_valid_until_ts)],
-            method="GET",
             timeout_seconds=timeout,
         )
 
@@ -544,8 +542,8 @@ class FederationApi:
         timeout: float = 10.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/event/{event_id}",
+            destination_server,
+            f"/_matrix/federation/v1/event/{event_id}",
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
@@ -570,8 +568,8 @@ class FederationApi:
         timeout: float = 10.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/state_ids/{room_id}",
+            destination_server,
+            f"/_matrix/federation/v1/state_ids/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
             timeout_seconds=timeout,
@@ -597,8 +595,8 @@ class FederationApi:
         timeout: float = 60.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/state/{room_id}",
+            destination_server,
+            f"/_matrix/federation/v1/state/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
             timeout_seconds=timeout,
@@ -624,8 +622,8 @@ class FederationApi:
         timeout: float = 10.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
+            destination_server,
+            f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
@@ -655,8 +653,8 @@ class FederationApi:
         #    "origin_server_ts": 123455676543whatever_int
         # }
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
+            destination_server,
+            f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
             query_args=[("dir", "b"), ("ts", utc_time_at_ms)],
             origin_server=origin_server,
             timeout_seconds=timeout,
@@ -684,8 +682,8 @@ class FederationApi:
     ) -> MatrixResponse:
 
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/backfill/{room_id}",
+            destination_server,
+            f"/_matrix/federation/v1/backfill/{room_id}",
             query_args=[("v", event_id), ("limit", limit)],
             origin_server=origin_server,
             timeout_seconds=timeout,
@@ -714,8 +712,8 @@ class FederationApi:
         # )
 
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/user/devices/{user_mxid}",
+            destination_server,
+            f"/_matrix/federation/v1/user/devices/{user_mxid}",
             origin_server=origin_server,
             timeout_seconds=timeout,
         )
@@ -739,8 +737,8 @@ class FederationApi:
         timeout: float = 10.0,
     ) -> MatrixResponse:
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path="/_matrix/federation/v1/query/directory",
+            destination_server,
+            "/_matrix/federation/v1/query/directory",
             query_args=[("room_alias", room_alias)],
             origin_server=origin_server,
             timeout_seconds=timeout,
@@ -773,8 +771,8 @@ class FederationApi:
             formatted_data["pdus"].append(pdu)
 
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/send/{now}",
+            destination_server,
+            f"/_matrix/federation/v1/send/{now}",
             method="PUT",
             content=formatted_data,
             timeout_seconds=timeout,
@@ -813,10 +811,10 @@ class FederationApi:
             query_args.append(("third_party_instance_id", third_party_instance_id))
 
         response = await self.federation_request(
-            origin_server=origin_server,
-            path="/_matrix/federation/v1/publicRooms",
-            destination_server_name=destination_server,
+            destination_server,
+            "/_matrix/federation/v1/publicRooms",
             query_args=query_args,
+            origin_server=origin_server,
             timeout_seconds=timeout,
         )
 
@@ -849,8 +847,8 @@ class FederationApi:
             query_list.extend([("ver", f"{i + 1}")])
 
         response = await self.federation_request(
-            destination_server_name=destination_server,
-            path=f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
+            destination_server,
+            f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
             query_args=query_list,
             timeout_seconds=timeout,
             origin_server=origin_server,
