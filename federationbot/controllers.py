@@ -29,6 +29,16 @@ class ReactionCommandStatus(Enum):
     CLEANUP = "Remove "
 
 
+class EmojiReactionCommandStatus(Enum):
+    # Notice the extra space, this obfuscates the reaction slightly so as not to pick up
+    # stray commands from other rooms. I hope.
+    # Alternatives: ❌ ⏹ 🚮 🛑 ⏸ ▶
+    START = "▶ "
+    PAUSE = "⏸ "
+    STOP = "⏹ "
+    CLEANUP = "❌ "
+
+
 class ReactionControlEntry:
     """
     The object for adding control reactions to messages made by the bot. Adds 'Start', 'Stop', and 'Pause'.
@@ -43,20 +53,23 @@ class ReactionControlEntry:
         client: The MaubotMatrixClient, used to add/cleanup control reactions to the response messages
     """
 
-    current_status: ReactionCommandStatus
+    current_status: ReactionCommandStatus | EmojiReactionCommandStatus
     related_command_event: MessageEvent
     client: MaubotMatrixClient
     reaction_collection_of_event_ids: Set[EventID]
+    emoji: bool
 
     def __init__(
         self,
         command_event: MessageEvent,
         client: MaubotMatrixClient,
-        default_starting_status: ReactionCommandStatus = ReactionCommandStatus.START,
+        emoji: bool,
+        default_starting_status: ReactionCommandStatus | EmojiReactionCommandStatus = ReactionCommandStatus.START,
     ) -> None:
         self.client = client
         self.related_command_event = command_event
         self.current_status = default_starting_status
+        self.emoji = emoji
         self.reaction_collection_of_event_ids = set()
 
     async def setup(self, pinned_message: EventID) -> None:
@@ -71,17 +84,17 @@ class ReactionControlEntry:
         stop_reaction_event = await self.client.react(
             self.related_command_event.room_id,
             pinned_message,
-            ReactionCommandStatus.STOP.value,
+            EmojiReactionCommandStatus.STOP.value if self.emoji else ReactionCommandStatus.STOP.value,
         )
         pause_reaction_event = await self.client.react(
             self.related_command_event.room_id,
             pinned_message,
-            ReactionCommandStatus.PAUSE.value,
+            EmojiReactionCommandStatus.PAUSE.value if self.emoji else ReactionCommandStatus.PAUSE.value,
         )
         start_reaction_event = await self.client.react(
             self.related_command_event.room_id,
             pinned_message,
-            ReactionCommandStatus.START.value,
+            EmojiReactionCommandStatus.START.value if self.emoji else ReactionCommandStatus.START.value,
         )
         self.reaction_collection_of_event_ids = {
             stop_reaction_event,
@@ -105,15 +118,15 @@ class ReactionControlEntry:
         self.reaction_collection_of_event_ids.clear()
 
     def start(self) -> None:
-        self.current_status = ReactionCommandStatus.START
+        self.current_status = EmojiReactionCommandStatus.START if self.emoji else ReactionCommandStatus.START
 
     def stop(self) -> None:
-        self.current_status = ReactionCommandStatus.STOP
+        self.current_status = EmojiReactionCommandStatus.STOP if self.emoji else ReactionCommandStatus.STOP
 
     def pause(self) -> None:
-        self.current_status = ReactionCommandStatus.PAUSE
+        self.current_status = EmojiReactionCommandStatus.PAUSE if self.emoji else ReactionCommandStatus.PAUSE
 
-    async def add_cleanup_control(self, pinned_message: EventID) -> None:
+    async def add_cleanup_control(self, pinned_message: EventID, emoji: bool = False) -> None:
         """
         Adds a cleanup reaction to the command response that the reaction handler will be able to redact the command
         response to save on screen real estate.
@@ -125,10 +138,10 @@ class ReactionControlEntry:
         await self.client.react(
             self.related_command_event.room_id,
             pinned_message,
-            ReactionCommandStatus.CLEANUP.value,
+            EmojiReactionCommandStatus.CLEANUP.value if emoji else ReactionCommandStatus.CLEANUP.value,
         )
 
-    def get_status(self) -> ReactionCommandStatus:
+    def get_status(self) -> ReactionCommandStatus | EmojiReactionCommandStatus:
         return self.current_status
 
 
@@ -302,13 +315,14 @@ class ReactionTaskController(Generic[T]):
         self,
         pinned_message: EventID,
         command_event: MessageEvent,
-        default_starting_status: ReactionCommandStatus = ReactionCommandStatus.START,
+        emoji: bool = False,
+        default_starting_status: ReactionCommandStatus | EmojiReactionCommandStatus = ReactionCommandStatus.START,
     ) -> None:
         if pinned_message in self.tracked_reactions:
             raise MessageAlreadyHasReactions
 
         # The creation will place the starting status as STOP, make it a start instead
-        control_entry = ReactionControlEntry(command_event, self.client, default_starting_status)
+        control_entry = ReactionControlEntry(command_event, self.client, emoji, default_starting_status)
         await control_entry.setup(pinned_message)
         self.tracked_reactions[pinned_message] = control_entry
 
@@ -341,17 +355,17 @@ class ReactionTaskController(Generic[T]):
         self.tracked_reactions[pinned_message].stop()
 
     def is_started(self, pinned_message: EventID) -> bool:
-        if (
-            pinned_message in self.tracked_reactions
-            and self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.START
+        if pinned_message in self.tracked_reactions and (
+            self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.START
+            or self.tracked_reactions[pinned_message].get_status() == EmojiReactionCommandStatus.START
         ):
             return True
         return False
 
     def is_paused(self, pinned_message: EventID) -> bool:
-        if (
-            pinned_message in self.tracked_reactions
-            and self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.PAUSE
+        if pinned_message in self.tracked_reactions and (
+            self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.PAUSE
+            or self.tracked_reactions[pinned_message].get_status() == EmojiReactionCommandStatus.PAUSE
         ):
             return True
         return False
@@ -362,9 +376,9 @@ class ReactionTaskController(Generic[T]):
         return False
 
     def is_stopped(self, pinned_message: EventID) -> bool:
-        if (
-            pinned_message in self.tracked_reactions
-            and self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.STOP
+        if pinned_message in self.tracked_reactions and (
+            self.tracked_reactions[pinned_message].get_status() == ReactionCommandStatus.STOP
+            or self.tracked_reactions[pinned_message].get_status() == EmojiReactionCommandStatus.STOP
         ):
             return True
         return False
@@ -380,7 +394,8 @@ class ReactionTaskController(Generic[T]):
             # The cancel() includes a built-in stop()
             await self.tracked_reactions[pinned_message].cancel()
             if add_cleanup_control:
-                await self.tracked_reactions[pinned_message].add_cleanup_control(pinned_message)
+                pinned_control_entry = self.tracked_reactions[pinned_message]
+                await pinned_control_entry.add_cleanup_control(pinned_message, pinned_control_entry.emoji)
             self.tracked_reactions.pop(pinned_message, None)
         if isinstance(pinned_message, Hashable) and pinned_message in self.tasks_sets:
             await self.tasks_sets[pinned_message].clear_all_tasks()
@@ -448,27 +463,34 @@ class ReactionTaskController(Generic[T]):
             return await self.tasks_sets[reference_key].gather_threaded_results(return_exceptions=return_exceptions)
         return await self.tasks_sets[reference_key].gather_results(return_exceptions=return_exceptions)
 
-    async def add_cleanup_control(self, related_message: EventID, room_id: RoomID) -> None:
+    async def add_cleanup_control(self, related_message: EventID, room_id: RoomID, emoji: bool = False) -> None:
         # Just sticking the reaction the handler will look for onto the message
-        await self.client.react(
-            room_id,
-            related_message,
-            ReactionCommandStatus.CLEANUP.value,
-        )
+        if emoji:
+            await self.client.react(
+                room_id,
+                related_message,
+                EmojiReactionCommandStatus.CLEANUP.value,
+            )
+        else:
+            await self.client.react(
+                room_id,
+                related_message,
+                ReactionCommandStatus.CLEANUP.value,
+            )
 
     async def react_control_handler(self, react_evt: ReactionEvent) -> None:
         reaction_data = react_evt.content.relates_to
         # The first condition makes sure that the initial placement of the reactions is not registered
         if react_evt.sender != self.client.mxid and reaction_data.event_id is not None:
             if reaction_data.event_id in self.tracked_reactions:
-                if reaction_data.key == ReactionCommandStatus.STOP.value:
+                if reaction_data.key in (ReactionCommandStatus.STOP.value, EmojiReactionCommandStatus.STOP.value):
                     self.tracked_reactions[reaction_data.event_id].stop()
-                elif reaction_data.key == ReactionCommandStatus.PAUSE.value:
+                elif reaction_data.key in (ReactionCommandStatus.PAUSE.value, EmojiReactionCommandStatus.PAUSE.value):
                     self.tracked_reactions[reaction_data.event_id].pause()
-                elif reaction_data.key == ReactionCommandStatus.START.value:
+                elif reaction_data.key in (ReactionCommandStatus.START.value, EmojiReactionCommandStatus.START.value):
                     self.tracked_reactions[reaction_data.event_id].start()
 
-            if reaction_data.key == ReactionCommandStatus.CLEANUP.value:
+            if reaction_data.key in (ReactionCommandStatus.CLEANUP.value, EmojiReactionCommandStatus.CLEANUP.value):
                 await self.remove_last_display_of(reaction_data.event_id, react_evt.room_id)
 
         return

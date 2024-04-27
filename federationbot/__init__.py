@@ -30,7 +30,7 @@ from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
-from federationbot.controllers import ReactionTaskController
+from federationbot.controllers import EmojiReactionCommandStatus, ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
 from federationbot.federation import FederationHandler, parse_list_response_into_list_of_event_bases
@@ -194,7 +194,9 @@ class FederationBot(Plugin):
         command_event: MessageEvent,
     ) -> None:
         pinned_message = await command_event.respond(f"Received Status Command on: {self.client.mxid}")
-        await self.reaction_task_controller.setup_control_reactions(pinned_message, command_event)
+        await self.reaction_task_controller.setup_control_reactions(
+            pinned_message, command_event, emoji=True, default_starting_status=EmojiReactionCommandStatus.START
+        )
 
         finish_on_this_round = False
         while True:
@@ -2857,7 +2859,7 @@ class FederationBot(Plugin):
             )
             list_of_message_ids.extend([current_message_id])
         for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id, emoji=True)
 
     @fed_command.subcommand(
         name="version",
