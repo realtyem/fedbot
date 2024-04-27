@@ -49,6 +49,7 @@ from federationbot.utils import (
     pad,
     pretty_print_timestamp,
     round_half_up,
+    wrap_in_details,
 )
 
 # For 'whole room' commands, limit the maximum number of servers to even try
@@ -2852,9 +2853,11 @@ class FederationBot(Plugin):
         )
 
         # Wrap in code block markdown before sending
+        count = 0
         for chunk in final_list_of_data:
+            count += 1
             current_message_id = await command_event.respond(
-                make_into_text_event(chunk, allow_html=True, ignore_body=True),
+                make_into_text_event(wrap_in_details(chunk, f" ⏩ Page {count} ⏪"), allow_html=True, ignore_body=True),
                 allow_html=True,
             )
             list_of_message_ids.extend([current_message_id])
