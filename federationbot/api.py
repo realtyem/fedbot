@@ -35,7 +35,7 @@ from federationbot.tracing import (
     on_response_chunk_received,
 )
 
-backoff_logger = logging.getLogger("backoff")
+backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
 SOCKET_TIMEOUT_SECONDS = 2.0
 USER_AGENT_STRING = "Sir FederationInspector 0.0.7"
@@ -44,7 +44,7 @@ USER_AGENT_STRING = "Sir FederationInspector 0.0.7"
 # "Maubot/Fedbot 0.0.7"
 
 
-def backoff_logging_handler(details: Details) -> None:
+def backoff_logging_backoff_handler(details: Details) -> None:
     wait = details.get("wait", 0.0)
     tries = details.get("tries", 0)
     host = details.get("args", (None, "arg not found"))[1]
@@ -52,6 +52,18 @@ def backoff_logging_handler(details: Details) -> None:
         "Backing off %.2f seconds after %d tries on host %s",
         wait,
         tries,
+        host,
+    )
+
+
+def backoff_logging_giveup_handler(details: Details) -> None:
+    elapsed = details.get("elapsed", 0.0)
+    tries = details.get("tries", 0)
+    host = details.get("args", (None, "arg not found"))[1]
+    backoff_logger.debug(
+        "Giving up after %d tries and %.2f seconds on host %s",
+        tries,
+        elapsed,
         host,
     )
 
@@ -112,12 +124,11 @@ class FederationApi:
         backoff.expo,
         PluginTimeout,
         max_tries=3,
-        backoff_log_level=logging.INFO,
-        giveup_log_level=logging.INFO,
-        on_backoff=[backoff_logging_handler, backoff_update_retries_handler],
         logger=None,
-        max_value=1.0,
-        base=1.25,
+        on_backoff=[backoff_logging_backoff_handler, backoff_update_retries_handler],
+        on_giveup=[backoff_logging_giveup_handler, backoff_update_retries_handler],
+        max_value=4.0,
+        base=1.5,
     )
     async def _federation_request(
         self,
