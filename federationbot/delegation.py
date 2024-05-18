@@ -360,92 +360,105 @@ class DelegationHandler:
 
     async def check_dns_for_srv_records(
         self, server_name: str, diag_info: DiagnosticInfo = DiagnosticInfo(False)
-    ) -> Tuple[Optional[str], Optional[str], DiagnosticInfo]:
+    ) -> List[Tuple[str, str]]:
         """
-        Check for SRV records.
+        Check for SRV records. Wrap the inner version of the function to allow for backoff control and error handling.
 
         Args:
             server_name: the hostname to look up
             diag_info: while we always collect errors, additional data is collected with
                 this
 
-        Returns: Tuple of(optional string of hostname, optional string of port number,
-            DiagnosticInfo)
+        Returns: List containing Tuples of hostnames that need to be resolved and the port that was found
         """
-        retries = 0
-        while retries < 3:
-            try:
-                return await self._check_dns_for_srv_records(
-                    server_name=server_name,
-                    diag_info=diag_info,
-                )
+        host_port_tuples: List[Tuple[str, str]] = []
 
-            except dns.resolver.NoNameservers:
+        try:
+            maybe_returned_tuples = await self._check_dns_for_srv_records(
+                server_name=server_name,
+                diag_info=diag_info,
+            )
+
+        # Still not convinced this is necessary anymore, watch for logging to say we are
+        except dns.resolver.NoNameservers:
+            diag_info.add("Hit a possible SERVFAIL condition, working around")
+            server_discovery_logger.warning(f"Are we still hitting this? SRV lookup {server_name}")
+            try:
+                return await self._check_dns_for_srv_records(server_name, diag_info)
+            except Exception as e:
                 # Wait for a moment before retrying, as this is a DNS server failure,
                 # aka SERVFAIL was returned
-                await sleep(1)
-                retries = retries + 1
-                diag_info.error(f"DNS SERVFAIL: retry count: {retries}")
+                diag_info.error(f"Not able to contact any Nameservers, retried 3 times, {e}")
 
-            except dns.resolver.NXDOMAIN:
-                # No records are being returned, don't bother retrying
-                retries = 10
-                diag_info.error(f"SRV DNS records for '{server_name}' do not exist(NXDOMAIN)")
+        else:
+            host_port_tuples.extend(maybe_returned_tuples)
 
-            # except dns.resolver.LifetimeTimeout as e:
-            #     self.logger.info(
-            #       "check_dns_for_srv_records: LifetimeTimeout Exception: for server "
-            #       f"{server_name}:\n {e}"
-            #     )
+        return host_port_tuples
 
-        return None, None, diag_info
-
-    async def _check_dns_for_srv_records(
-        self, server_name: str, diag_info: DiagnosticInfo
-    ) -> Tuple[Optional[str], Optional[str], DiagnosticInfo]:
+    async def _check_dns_for_srv_records(self, server_name: str, diag_info: DiagnosticInfo) -> List[Tuple[str, str]]:
         """
-        Check DNS records for a SRV record. First for a '_matrix-fed._tcp." then for the
+        Check DNS records for the SRV records. First for a '_matrix-fed._tcp." then for the
         deprecated '_matrix._tcp.'
 
         Args:
             server_name: The hostname to look up
             diag_info: Always collect errors, but other diagnostics can be collected too
         Returns:
-            tuple of string of the hostname(or None), string of the port number(or
-            None), and the DiagnosticInfo object. Prefer the non-deprecated record for
-            returned values, if both exist.
+            List of optional tuples of string of the hostname(or None), string of the port number(or
+            None). The non-deprecated record for returned values will be first, if both exist.
         """
-        host = None
-        port = None
-        dep_host = None
-        dep_port = None
-        # SRV records return dns.rdtypes.IN.SRV
+        host_port_tuples: List[Tuple[str, str]] = []
+
         try:
-            srv_records: dns.resolver.Answer = await self.dns_resolver.resolve(f"_matrix-fed._tcp.{server_name}", "SRV")
+            srv_responses = self.dns_query(f"_matrix-fed._tcp.{server_name}", "SRV")
 
         except dns.resolver.NoAnswer:
             diag_info.add(f"No 'SRV' record for '_matrix-fed._tcp.{server_name}'")
+        except dns.resolver.NXDOMAIN:
+            diag_info.error(f"No 'SRV' record for '_matrix-fed._tcp.{server_name}'(NXDOMAIN)")
 
         else:
-            for rdata in srv_records:
+            name = dns.name.from_text(f"_matrix-fed._tcp.{server_name}")
+            # Use the 'create' kwarg so that an exception isn't raised when it is not found
+            srv_response = srv_responses.find_rrset(
+                dns.message.ANSWER, name, dns.rdataclass.IN, dns.rdatatype.SRV, create=True
+            )
+
+            for rdata in srv_response:
+                # Sometimes hosts returned from DNS queries contain appended periods
                 host = str(rdata.target).rstrip(".")
                 port = rdata.port
                 diag_info.mark_srv_record_found()
                 diag_info.add(f"SRV record found: '_matrix-fed._tcp.{server_name}' -> " f"{host}:{port}")
+                host_port_tuples.extend(((host, port),))
 
         try:
-            deprecated_srv_records = await self.dns_resolver.resolve("_matrix._tcp." + server_name, "SRV")
+            dep_responses = self.dns_query(f"_matrix._tcp.{server_name}", "SRV")
+
         except dns.resolver.NoAnswer:
             diag_info.add(f"No 'SRV' record for '_matrix._tcp.{server_name}'")
+        except dns.resolver.NXDOMAIN:
+            diag_info.error(f"No 'SRV' record for '_matrix._tcp.{server_name}'(NXDOMAIN)")
 
         else:
-            for rdata in deprecated_srv_records:
-                dep_host = str(rdata.target).rstrip(".")
-                dep_port = rdata.port
-                diag_info.mark_srv_record_found()
-                diag_info.add(f"SRV record found: '_matrix._tcp.{server_name} -> " f"{dep_host}:{dep_port}")
+            dep_name = dns.name.from_text(f"_matrix._tcp.{server_name}")
+            # Use the 'create' kwarg so that an exception isn't raised
+            dep_response = dep_responses.find_rrset(
+                dns.message.ANSWER, dep_name, dns.rdataclass.IN, dns.rdatatype.SRV, create=True
+            )
 
-        return host or dep_host, port or dep_port, diag_info
+            for rdata in dep_response:
+                # Sometimes hosts returned from DNS queries contain appended periods
+                host = str(rdata.target).rstrip(".")
+                port = rdata.port
+                diag_info.mark_srv_record_found()
+                diag_info.add(f"SRV record found: '_matrix._tcp.{server_name}' -> " f"{host}:{port}")
+                host_port_tuples.extend(((host, port),))
+
+        if not host_port_tuples:
+            diag_info.add("No 'SRV' records found")
+
+        return host_port_tuples
 
     async def make_well_known_request(
         self, request_cb: Callable, host: str, diag_info: DiagnosticInfo
