@@ -1,5 +1,5 @@
-from typing import Any, Callable, Dict, Optional, Tuple
 from asyncio import sleep
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import ipaddress
 import json
 import logging
@@ -7,6 +7,7 @@ import logging
 from aiohttp import client_exceptions
 from backoff._typing import Details
 from dns.asyncresolver import Resolver
+from dns.message import Message
 import backoff
 import dns.resolver
 
@@ -171,107 +172,191 @@ class DelegationHandler:
         # DNS timeout for a request default is 2 seconds
         self.json_decoder = json.JSONDecoder()
 
-    async def check_dns_for_reg_records(
+    def dns_query(
         self,
         server_name: str,
+        query_type: str,
+        diag_info: DiagnosticInfo = DiagnosticInfo(False),
+    ):
+        query = dns.message.make_query(server_name, query_type)
+        nameserver = self.dns_resolver.nameservers[0]
+
+        # This returns a tuple(Message, used_tcp_bool), just get the first part
+        response = dns.query.udp_with_fallback(query, str(nameserver))[0]
+
+        if response.rcode() == dns.rcode.SERVFAIL:
+            diag_info.error(f"No '{query_type}' record for '{server_name}'(SERVFAIL) potential DNSSEC validation fail")
+        elif response.rcode() == dns.rcode.NXDOMAIN:
+            diag_info.error(f"No '{query_type}' record for '{server_name}'(NXDOMAIN)")
+
+        if (
+            response.rcode() != dns.rcode.NOERROR
+            and response.rcode() != dns.rcode.NXDOMAIN
+            and response.rcode() != dns.rcode.SERVFAIL
+        ):
+            server_discovery_logger.warning(
+                f"DNS query {query_type} for {server_name} got {response.rcode()}, {response.answer}"
+            )
+
+        # NOTE: To disable DNSSEC validation and try again to see what it says. For now, don't use since seems to work
+        # even without.
+        # query.flags = query.flags | dns.flags.CD
+        # response = dns.query.udp_with_fallback(query, "1.1.1.1")[0]
+        # server_discovery_logger.info(f"DNSSEC fallback response: {response.answer}")
+        #
+        # a_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "A")
+        return response
+
+    def check_dns_from_list_for_reg_records(
+        self,
+        list_of_host_port_tuples: List[Tuple[str, str]],
         check_cname: bool = True,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
-    ) -> Tuple[Optional[str], Optional[str], Optional[str], DiagnosticInfo]:
+    ) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
         """
-        Check DNS records for A, then AAAA, and (optionally) CNAME.
+        Check DNS records for A, then AAAA, and (optionally) CNAME which will replace the A or AAAA records returned.
 
         Args:
-            server_name: the hostname to look up
+            list_of_host_port_tuples: A list of tuples, matching [host:string, port:string]. Port isn't used, but is
+                passed through to the returned result.
             check_cname: if checking for CNAME as well
             diag_info: while we always collect errors, additional data is collected with
                 this
 
-        Returns: Tuple of (IP for A record, IP for AAAA record, IP for CNAME,
-            DiagnosticInfo). Any of the IP records can be None
+        Returns: a 2-Tuple of Lists, one for IP4(A records) and one for IP6(AAAA records). Each list contains another
+            2-Tuple of [ip_address:str, port:str]
         """
-        retries = 0
-        while retries < 3:
+        diag_info.mark_step_num("for DNS records")
+        list_of_ip4_port_tuples: List[Tuple[str, str]] = []
+        list_of_ip6_port_tuples: List[Tuple[str, str]] = []
+        for host_port_entry in list_of_host_port_tuples:
+            host, port = host_port_entry
+
             try:
-                return await self._check_dns_for_reg_records(
-                    server_name=server_name,
+                ip4_list, ip6_list = self._check_dns_for_reg_records(
+                    server_name=host,
                     check_cname=check_cname,
                     diag_info=diag_info,
                 )
 
+            # TODO: Not sure we hit this any more, needs stress testing
             except dns.resolver.NoNameservers:
-                # Wait for a moment before retrying, as this is a DNS server failure,
-                # aka SERVFAIL was returned
-                await sleep(1)
-                retries = retries + 1
-                diag_info.error(f"DNS SERVFAIL: retry count: {retries}")
+                diag_info.add("Hit a possible SERVFAIL condition, working around")
+                server_discovery_logger.warning(f"Do we still hit this? {host}")
 
-            except dns.resolver.NXDOMAIN:
-                # No records are being returned, don't bother retrying
-                retries = 10
-                diag_info.error(f"DNS records for '{server_name}' do not exist(NXDOMAIN)")
-
-            # mypy complains that this isn't in the module...
+            # This one is still used, I think. It hits the backoff system, so I think yes
             except dns.resolver.LifetimeTimeout:
                 # Wait for a moment before retrying, as this is a DNS server failure,
                 # the request timed out several times probably because the DNS server
-                # was busy
-                await sleep(1)
-                retries = retries + 1
-                diag_info.error(f"DNS timed out: retry count: {retries}")
+                # was busy. The backoff handler should handle this for us, but log it anyway
+                diag_info.error("Not able to contact any Nameservers, retried 3 times(Timeout)")
 
-        return None, None, None, diag_info
+            except dns.resolver.NXDOMAIN:
+                diag_info.error(f"No DNS records found for '{host}'(NXDOMAIN)")
 
-    async def _check_dns_for_reg_records(
+            except Exception as e:
+                diag_info.error(f"Hit a DNS exception: {e}")
+                server_discovery_logger.error(f"Hit a DNS exception: {e}")
+
+            else:
+                for ip4 in ip4_list:
+                    list_of_ip4_port_tuples.extend(((ip4, port),))
+                for ip6 in ip6_list:
+                    list_of_ip6_port_tuples.extend(((ip6, port),))
+
+        return list_of_ip4_port_tuples, list_of_ip6_port_tuples
+
+    def _check_dns_for_reg_records(
         self,
         server_name: str,
         check_cname: bool,
         diag_info: DiagnosticInfo,
-    ) -> Tuple[Optional[str], Optional[str], Optional[str], DiagnosticInfo]:
-        a_ip_address = None
-        a4_ip_address = None
-        cname_ip_address = None
-        diag_info.mark_step_num("for DNS records")
+    ) -> Tuple[List[str], List[str]]:
+        a_ip_addresses: List[str] = []
+        a4_ip_addresses: List[str] = []
 
-        # A records return a dns.rdtypes.IN.A object that has an 'address' property
-        try:
-            a_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "A")
-
-        except dns.resolver.NoAnswer:
-            diag_info.add(f"No 'A' DNS record found for '{server_name}'")
-
-        else:
-            for rdata in a_records:
-                a_ip_address = rdata.address
-                diag_info.mark_dns_record_found()
-                diag_info.add(f"DNS 'A' record found: {server_name} -> {a_ip_address}")
-
-        # AAAA records return a dns.rdtypes.IN.AAAA object that also uses 'address'
-        try:
-            a4_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "AAAA")
-
-        except dns.resolver.NoAnswer:
-            diag_info.add(f"No 'AAAA' DNS record found for '{server_name}'")
-
-        else:
-            for rdata in a4_records:
-                a4_ip_address = rdata.address
-                diag_info.mark_dns_record_found()
-                diag_info.add(f"DNS 'AAAA' record found: {server_name} -> {a4_ip_address}")
+        # Apparently CNAME records piggyback on the A request somehow, use it if needed
+        a_cname_responses = self.dns_query(server_name, "A")
+        a4_responses = self.dns_query(server_name, "AAAA")
 
         if check_cname:
-            # CNAME records return a dns.rdtypes.ANY.CNAME object which uses 'target'
-            try:
-                cname_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "CNAME")
+            server_name = self.recursively_resolve_cname_dns_record(server_name, a_cname_responses, diag_info)
 
-            except dns.resolver.NoAnswer:
-                diag_info.add(f"No 'CNAME' DNS record found for '{server_name}'")
+            # Re-fetch these if a new hostname was found through the CNAME resolution
+            a_cname_responses = self.dns_query(server_name, "A")
+            a4_responses = self.dns_query(server_name, "AAAA")
 
-            else:
-                for rdata in cname_records:
-                    cname_ip_address = rdata.target
-                    diag_info.add(f"DNS 'CNAME' record found: {server_name} -> {cname_ip_address}")
+        if a_cname_responses.rcode() == dns.rcode.NXDOMAIN and a4_responses.rcode() == dns.rcode.NXDOMAIN:
+            raise dns.resolver.NXDOMAIN
 
-        return a_ip_address, a4_ip_address, cname_ip_address, diag_info
+        name = dns.name.from_text(server_name)
+        a_responses = a_cname_responses.find_rrset(
+            dns.message.ANSWER, name, dns.rdataclass.IN, dns.rdatatype.A, create=True
+        )
+        a4_responses = a4_responses.find_rrset(
+            dns.message.ANSWER, name, dns.rdataclass.IN, dns.rdatatype.AAAA, create=True
+        )
+
+        for rdata in a_responses:
+            a_ip_addresses.extend((str(rdata.address),))
+            diag_info.mark_dns_record_found()
+            diag_info.add(f"DNS 'A' record found: {server_name} -> {rdata.address}")
+
+        if not a_ip_addresses:
+            diag_info.add(f"No 'A' DNS record found for '{server_name}'")
+
+        for rdata in a4_responses:
+            a4_ip_addresses.extend((str(rdata.address),))
+            diag_info.mark_dns_record_found()
+            diag_info.add(f"DNS 'AAAA' record found: {server_name} -> {rdata.address}")
+
+        if not a4_ip_addresses:
+            diag_info.add(f"No 'AAAA' DNS record found for '{server_name}'")
+
+        return a_ip_addresses, a4_ip_addresses
+
+    def recursively_resolve_cname_dns_record(
+        self,
+        server_name: str,
+        initial_dns_message: Message,
+        diag_info: DiagnosticInfo,
+    ) -> str:
+        """
+        CNAME records are allowed to be recursive. One can point at another. Resolve them until we don't get any more
+            and return the hostname.
+            Note: does not check for a circular reference pattern yet, that comes later.
+
+        Args:
+            server_name: The host to check
+            initial_dns_message: The already queried for result, everything needed should be in here
+            diag_info: DiagnosticInfo for adding messages to display
+
+        Returns: Final CNAME resolved hostname to look up, or original server hostname
+
+        """
+        # 1. pass in the Message from the original query
+        # 2. if there is a CNAME from that server_name
+        #    a. recursively call same function with new server_name as target from the CNAME
+        #    b. return last found if nothing else found
+        name = dns.name.from_text(server_name)
+        cname_rrset = initial_dns_message.find_rrset(
+            dns.message.ANSWER, name, dns.rdataclass.IN, dns.rdatatype.CNAME, create=True
+        )
+
+        # Start with the original server name, then it will be returned if nothing else is found
+        last_cname_found = server_name
+
+        # There should ever only be one single *final* cname to use
+        for rdata in cname_rrset:
+            found_cname_target = str(rdata.target)
+            diag_info.add(f"DNS 'CNAME' record found: {server_name} -> {found_cname_target}")
+
+            # Setting the result to last_cname_found means it was the last one found, duh
+            last_cname_found = self.recursively_resolve_cname_dns_record(
+                found_cname_target, initial_dns_message, diag_info
+            )
+
+        return last_cname_found
 
     async def check_dns_for_srv_records(
         self, server_name: str, diag_info: DiagnosticInfo = DiagnosticInfo(False)
