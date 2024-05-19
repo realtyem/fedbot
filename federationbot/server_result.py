@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from types import SimpleNamespace
@@ -95,98 +95,45 @@ class ServerResult:
 
     host: str
     well_known_host: Optional[str]
-    srv_host: Optional[str]
-    port: str
     host_header: str
     sni_server_name: str
     errors: List[str]
-    error_reason: Optional[str]
     diag_info: DiagnosticInfo
+    list_of_ip4_port_tuples: List[Tuple[str, str]]
+    list_of_ip6_port_tuples: List[Tuple[str, str]]
     unhealthy: Optional[str] = None
     retry_time_s: float = 0
     use_sni: bool = True
+    chosen_ip_port_tuple: Optional[Tuple[str, str]] = None
 
     def __init__(
         self,
-        port: str,
+        list_of_ip4_port_tuples: List[Tuple[str, str]],
+        list_of_ip6_port_tuples: List[Tuple[str, str]],
         host_header: Optional[str] = None,
         sni_server_name: Optional[str] = None,
         host: Optional[str] = None,
         well_known_host: Optional[str] = None,
-        srv_host: Optional[str] = None,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ) -> None:
         self.host = host if host else ""
-        self.port = port
         self.host_header = host_header if host_header else ""
         self.sni_server_name = sni_server_name if sni_server_name else ""
         self.well_known_host = well_known_host
-        self.srv_host = srv_host
         self.errors = []
-        self.error_reason = None
         self.diag_info = diag_info
+        self.list_of_ip4_port_tuples = list_of_ip4_port_tuples
+        self.list_of_ip6_port_tuples = list_of_ip6_port_tuples
 
-    def is_well_known(self) -> bool:
-        return self.well_known_host is not None
-
-    def is_srv(self) -> bool:
-        return self.srv_host is not None
-
-    def to_line(self) -> str:
-        if self.srv_host:
-            host = self.srv_host
-
-        elif self.well_known_host:
-            host = self.well_known_host
-
-        else:
-            host = self.host
-
-        return f"{host}:{self.port}"
-
-    def to_summary_line(self, include_original_host: bool = True) -> str:
-        buffer = ""
-        if self.is_srv():
-            buffer = f"{self.srv_host}"
-
-        if self.is_well_known():
-            buffer = f"{self.well_known_host}" f"{' -> '+buffer if buffer else ''}"
-
-        if self.host and include_original_host:
-            buffer = f"{self.host}{'('+buffer+')' if buffer else ''}"
-
-        return f"{buffer}{':'+self.port}"
-
-    def get_host(self) -> str:
-        if self.srv_host:
-            return self.srv_host
-        if self.well_known_host:
-            return self.well_known_host
-        return self.host
-
-
-@dataclass
-class ServerResultError(ServerResult):
-    """
-    The error form of a ServerResult. The important detail is the error_reason
-    """
-
-    def __init__(
-        self,
-        port: Optional[str] = None,
-        host_header: Optional[str] = None,
-        host: Optional[str] = None,
-        well_known_host: Optional[str] = None,
-        srv_host: Optional[str] = None,
-        error_reason: Optional[str] = None,
-        diag_info: DiagnosticInfo = DiagnosticInfo(False),
-    ) -> None:
-        super().__init__(
-            host_header=host_header,
-            host=host,
-            port=port if port else "",
-            well_known_host=well_known_host,
-            srv_host=srv_host,
-            diag_info=diag_info,
-        )
-        self.error_reason = error_reason
+    def get_ip_port_or_hostname(self) -> Tuple[str, str]:
+        # For the moment, just choose the first tuple in the list, and remember it's a (host:str, port:str)
+        if not self.chosen_ip_port_tuple and self.list_of_ip4_port_tuples:
+            self.chosen_ip_port_tuple = self.list_of_ip4_port_tuples[0]
+        if not self.chosen_ip_port_tuple and self.list_of_ip6_port_tuples:
+            self.chosen_ip_port_tuple = self.list_of_ip6_port_tuples[0]
+        # Fallback to the hostname, which forces another DNS lookup in case something went wrong
+        try:
+            assert self.chosen_ip_port_tuple is not None
+        except AssertionError:
+            print(f"{self.host} had no ip_port tuples at critical stage")
+        return self.chosen_ip_port_tuple  # or self.well_known_host or self.host
