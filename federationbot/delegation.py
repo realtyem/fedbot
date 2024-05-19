@@ -12,7 +12,7 @@ import backoff
 import dns.resolver
 
 from federationbot.errors import FedBotException, SchemeError
-from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
+from federationbot.server_result import DiagnosticInfo, ServerResult
 
 server_discovery_logger = logging.getLogger("server_discovery")
 backoff_logger = logging.getLogger("dns_backoff")
@@ -696,43 +696,52 @@ class DelegationHandler:
 
         except SchemeError as e:
             diag_info.error(e.long_exception)
+            # TODO: is there something smarter to do here? Pretty sure this can't happen
             raise e
 
         # Spec step 1, check for literal IP
-        # HOST header should be the server_name, as it was passed in(including port)
+        # HOST header should be the server_name, as it was passed in(including port but only if supplied).
         diag_info.mark_step_num("Step 1", "Checking for Literal IP")
+        ip4_address_port_tuples: List[Tuple[str, str]] = []
+        ip6_address_port_tuples: List[Tuple[str, str]] = []
+
         if is_this_an_ip_address(host):
             diag_info.add(f"Server is literal IP: {host}")
-            server_result = ServerResult(
+            if "." in host:
+                ip4_address_port_tuples = [(host, port or "8448")]
+
+            else:
+                ip6_address_port_tuples = [(host, port or "8448")]
+
+            return ServerResult(
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
                 host=host,
-                port=port or "8448",
-                host_header=f"{server_name}{':'+port if port else ''}",
+                # Remember that the HOST header only gets a port if one was included in the server name
+                host_header=f"{host}{':'+port if port else ''}",
                 sni_server_name=server_name,
                 diag_info=diag_info,
             )
-            return server_result
 
         # Spec step 2: if there is a port, use the given host as the server name
         # HOST header should be the server_name, as it was passed in(including port)
         diag_info.mark_step_num("Step 2", "Checking for explicit Port on server name")
         if port:
             diag_info.add(f"Server name has explicit port: {port}")
-            # The DNS test itself adds the diagnostic info, don't need the return ip's
-            # (if any are even found)
+
             (
-                _,
-                _,
-                _,
-                diag_info,
-            ) = await self.check_dns_for_reg_records(host, diag_info=diag_info)
-            server_result = ServerResult(
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
+            ) = self.check_dns_from_list_for_reg_records([(host, port)], diag_info=diag_info)
+
+            return ServerResult(
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
                 host=host,
-                port=port,
-                host_header=f"{server_name}",
+                host_header=f"{host}:{port}",
                 sni_server_name=host,
                 diag_info=diag_info,
             )
-            return server_result
 
         # Spec step 3: Well-Known pre-parsing
         diag_info.mark_step_num("Step 3", "Well-Known")
@@ -747,10 +756,7 @@ class DelegationHandler:
         if not content:
             diag_info.add("No usable data in response")
 
-        # If there is content, then something came back. Find out if it's useful or not
         else:
-            # If host is None, this well-known was no good, pull from diag_info to find out
-            # if it was not there, or had an error.
             # If port is None, then check SRV record
             # _parse_and_check_well_known_response() will mark the diag_info for us.
             (
@@ -758,70 +764,63 @@ class DelegationHandler:
                 well_known_port,
             ) = _parse_and_check_well_known_response(response=content, diag_info=diag_info)
 
-            if not well_known_host:
-                if diag_info.well_known_test_status == ResponseStatusType.NONE:
-                    # There is actually nothing to do here, so ride the conditional to the
-                    # next section
-                    pass
-                elif diag_info.well_known_test_status == ResponseStatusType.ERROR:
-                    # There is nothing to do here either, but leave this condition in place
-                    # so as to highlight the explicitness(and allow for additional
-                    # processing later, maybe)
-                    pass
-                # The else that would other wise be here is for ResponseStatusType.OK, but
-                # since well_known_host returned None it doesn't exist. Effectively skipping
-                # the next section to move down to Step 4 and beyond.
-            else:
-                server_result = await self.handle_well_known_delegation(
+            if well_known_host:
+                return await self.handle_well_known_delegation(
                     original_host=host,
                     well_known_host=well_known_host,
                     well_known_port=well_known_port,
                     diag_info=diag_info,
                 )
-                return server_result
-        # diag_info.append_from(response.errors)
 
-        # So well-known was a bust, move on to SRV records
         # Step 4 and 5(the deprecated SRV)
         # HOST header should be the original server name, no port
         diag_info.mark_step_num("Step 4(and 5)", "Checking for SRV records")
-        srv_host, srv_port, diag_info = await self.check_dns_for_srv_records(host, diag_info=diag_info)
 
-        if srv_host and srv_port:
-            # SRV records should always have a port, that is literally their
-            # purpose
+        # Grab these but them into a Set to deduplicate. If both SRV record types are used, they may just match
+        set_of_srv_result_tuples = set(await self.check_dns_for_srv_records(host, diag_info=diag_info))
+
+        for srv_result in set_of_srv_result_tuples:
+            srv_host, srv_port = srv_result
+
             (
-                _,
-                _,
-                _,
-                diag_info,
-            ) = await self.check_dns_for_reg_records(srv_host, diag_info=diag_info)
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
+            ) = self.check_dns_from_list_for_reg_records([(srv_host, srv_port)], check_cname=False, diag_info=diag_info)
 
-            server_result = ServerResult(
+        if ip4_address_port_tuples or ip6_address_port_tuples:
+            # If more than one port is returned, this may be a problem. Probably could sort through the iterable
+            # again to find the matching ip address? Let's get some logging to see if this happens
+            # TODO: decide if this should just be handled on the other side
+            if len(ip4_address_port_tuples) > 1 or len(ip6_address_port_tuples) > 1:
+                server_discovery_logger.warning(
+                    f"STEP 5 ISSUE FOUND: {server_name} ip-port tuples potential issue: {ip4_address_port_tuples}"
+                )
+
+            return ServerResult(
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
                 host=host,
-                srv_host=srv_host,
-                port=srv_port,
+                well_known_host=host,
                 host_header=host,
                 sni_server_name=host,
                 diag_info=diag_info,
             )
-            return server_result
 
         # Step 6, no SRV records and no explicit port,
         # use provided hostname with implied port 8448
         diag_info.mark_step_num("Step 6", "Use implied port 8448")
-        (
-            _,
-            _,
-            _,
-            diag_info,
-        ) = await self.check_dns_for_reg_records(host, diag_info=diag_info)
 
-        server_result = ServerResult(
+        (
+            ip4_address_port_tuples,
+            ip6_address_port_tuples,
+        ) = self.check_dns_from_list_for_reg_records([(host, "8448")], diag_info=diag_info)
+
+        # if ip4_address_port_tuples or ip6_address_port_tuples:
+        return ServerResult(
+            ip4_address_port_tuples,
+            ip6_address_port_tuples,
             host=host,
-            port="8448",
             host_header=host,
             sni_server_name=host,
             diag_info=diag_info,
         )
-        return server_result
