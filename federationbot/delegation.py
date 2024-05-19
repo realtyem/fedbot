@@ -266,6 +266,16 @@ class DelegationHandler:
 
         return list_of_ip4_port_tuples, list_of_ip6_port_tuples
 
+    @backoff.on_exception(
+        backoff.expo,
+        dns.resolver.LifetimeTimeout,
+        max_tries=3,
+        logger=None,
+        on_backoff=[backoff_dns_backoff_logging_handler],
+        on_giveup=[backoff_dns_giveup_logging_handler],
+        max_value=2.0,
+        base=1.0,
+    )
     def _check_dns_for_reg_records(
         self,
         server_name: str,
@@ -395,6 +405,16 @@ class DelegationHandler:
 
         return host_port_tuples
 
+    @backoff.on_exception(
+        backoff.expo,
+        dns.resolver.LifetimeTimeout,
+        max_tries=3,
+        logger=None,
+        on_backoff=[backoff_srv_backoff_logging_handler],
+        on_giveup=[backoff_srv_giveup_logging_handler],
+        max_value=2.0,
+        base=1.0,
+    )
     async def _check_dns_for_srv_records(self, server_name: str, diag_info: DiagnosticInfo) -> List[Tuple[str, str]]:
         """
         Check DNS records for the SRV records. First for a '_matrix-fed._tcp." then for the
