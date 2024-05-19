@@ -166,9 +166,10 @@ def _parse_and_check_well_known_response(
 class DelegationHandler:
     def __init__(self) -> None:
         self.dns_resolver = Resolver()
-        # DNS lifetime of requests default is 5 seconds
-        self.dns_resolver.lifetime = 10.0
         # DNS timeout for a request default is 2 seconds
+        # DNS lifetime of requests default is 5 seconds
+        # The lifetime we can touch, make it longer to give some more time for slow DNS servers
+        self.dns_resolver.lifetime = 10.0
         self.json_decoder = json.JSONDecoder()
 
     def dns_query(
