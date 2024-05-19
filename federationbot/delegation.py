@@ -537,89 +537,95 @@ class DelegationHandler:
         well_known_port: Optional[str],
         diag_info: DiagnosticInfo,
     ) -> ServerResult:
+        # These will be added to the returned ServerResult
+        ip4_address_port_tuples: List[Tuple[str, str]] = []
+        ip6_address_port_tuples: List[Tuple[str, str]] = []
+
         # Step 3.1 Literal IP
-        # Same as Step 1 except use well-known discovered values
-        # (imply port 8448, if port was not included)
-        # HOST header should be the result of the well_known
-        # request(including port)
+        # Same as Step 1 except use well-known discovered values (imply port 8448, if port was not included)
+        # HOST header should be the result of the well_known request(including port)
         diag_info.mark_step_num("Step 3.1", "Checking Well-Known for Literal IP")
         if is_this_an_ip_address(well_known_host):
-            host_header = f"{well_known_host}:{well_known_port or '8448'}"
+            if "." in well_known_host:
+                # It's a loose check, as it's not really important right now which one this goes in
+                ip4_address_port_tuples = [(well_known_host, well_known_port or "8448")]
 
-            diag_info.add(f"Host defined in Well-Known was Literal IP {host_header}")
+            else:
+                ip6_address_port_tuples = [(well_known_host, well_known_port or "8448")]
+
+            diag_info.add(f"Host defined in Well-Known was Literal IP {well_known_host}:{well_known_port or '8448'}")
             diag_info.mark_well_known_maybe_found()
-            server_result = ServerResult(
+
+            # Literal IP address names will not have any DNS resolution done
+            return ServerResult(
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
                 host=original_host,
                 well_known_host=well_known_host,
-                port=well_known_port if well_known_port else "8448",
-                host_header=host_header,
+                host_header=f"{well_known_host}:{well_known_port or '8448'}",
                 sni_server_name=well_known_host,
                 diag_info=diag_info,
             )
-            return server_result
 
         if well_known_port:
-            # A port was found, and since we are here that means that host was not
-            # None. Go with it
+            # A port was found, and since we are here that means that host was not None. Go with it
 
-            # Step 3b, same as Step 2 above
-            # HOST header should be the result of the well_known
-            # request(including port)
+            # Step 3b, same as Step 2
+            # HOST header should be the result of the well_known request(including port)
             diag_info.mark_step_num("Step 3.2", "Checking Well-Known Host for explicit Port")
-
-            # Because of our explicit conditional above
             diag_info.add(f"Explicit port found: {well_known_port}")
 
             (
-                _,
-                _,
-                _,
-                diag_info,
-            ) = await self.check_dns_for_reg_records(well_known_host, diag_info=diag_info)
-            host_header = f"{well_known_host}:{well_known_port}"
+                _ip4_address_port_tuples,
+                _ip6_address_port_tuples,
+            ) = self.check_dns_from_list_for_reg_records([(well_known_host, well_known_port)], diag_info=diag_info)
 
-            server_result = ServerResult(
+            return ServerResult(
+                _ip4_address_port_tuples,
+                _ip6_address_port_tuples,
                 host=original_host,
                 well_known_host=well_known_host,
-                port=well_known_port,
-                host_header=host_header,
+                host_header=f"{well_known_host}:{well_known_port}",
                 sni_server_name=well_known_host,
                 diag_info=diag_info,
             )
-            return server_result
 
-        # Step 3c(and 3d), check SRV records then resolve regular DNS
-        # records, except for CNAME. Still no explicit port.
+        # Step 3c(and 3d), check SRV records then resolve regular DNS records, except for CNAME. Still no explicit port.
         # HOST header should be the well_known host only, no port
         diag_info.mark_step_num(
             "Step 3.3(and 3.4)",
             "Checking for SRV records of host from Well-Known",
         )
-        srv_host, srv_port, diag_info = await self.check_dns_for_srv_records(well_known_host, diag_info=diag_info)
+        # Grab these but make them into a Set to deduplicate. If both SRV record types are used, they may just match.
+        # It's important to remember that this returns 'host', 'port' tuples, not ip addresses
+        set_of_srv_result_tuples = set(await self.check_dns_for_srv_records(well_known_host, diag_info=diag_info))
 
-        if srv_host and srv_port:
-            # SRV records should always have a port, that is literally
-            # their purpose
+        for srv_result in set_of_srv_result_tuples:
+            srv_host, srv_port = srv_result
+
+            # There may be multiple of these, if SRV is defined more than once. Extend the list to get them all.
+            # Some ding-a-ling may have even gotten the ports mixed up, so keep them together
             (
-                _,
-                _,
-                _,
-                diag_info,
-            ) = await self.check_dns_for_reg_records(srv_host, check_cname=False, diag_info=diag_info)
+                _ip4_address_port_tuples,
+                _ip6_address_port_tuples,
+            ) = self.check_dns_from_list_for_reg_records([(srv_host, srv_port)], check_cname=False, diag_info=diag_info)
 
-            server_result = ServerResult(
+            ip4_address_port_tuples.extend(_ip4_address_port_tuples)
+            ip6_address_port_tuples.extend(_ip6_address_port_tuples)
+
+        if ip4_address_port_tuples or ip6_address_port_tuples:
+            # If there are no SRV records, both of these will be empty Lists
+            return ServerResult(
+                ip4_address_port_tuples,
+                ip6_address_port_tuples,
                 host=original_host,
                 well_known_host=well_known_host,
-                srv_host=srv_host,
-                port=srv_port,
                 host_header=well_known_host,
                 sni_server_name=well_known_host,
                 diag_info=diag_info,
             )
-            return server_result
 
-        # Step 3e, no SRV records and no explicit port, use well-known with
-        # implied port 8448
+        # Step 3e, no SRV records and no explicit port, use well-known with implied port 8448
         # HOST header should be the well_known host, no port
         diag_info.mark_step_num(
             "Step 3.5",
@@ -627,21 +633,19 @@ class DelegationHandler:
         )
 
         (
-            _,
-            _,
-            _,
-            diag_info,
-        ) = await self.check_dns_for_reg_records(well_known_host, diag_info=diag_info)
+            ip4_addresses,
+            ip6_addresses,
+        ) = self.check_dns_from_list_for_reg_records([(well_known_host, "8448")], diag_info=diag_info)
 
-        server_result = ServerResult(
+        return ServerResult(
+            ip4_addresses,
+            ip6_addresses,
             host=original_host,
             well_known_host=well_known_host,
-            port="8448",
             host_header=well_known_host,
             sni_server_name=well_known_host,
             diag_info=diag_info,
         )
-        return server_result
 
     async def handle_delegation(
         self,
