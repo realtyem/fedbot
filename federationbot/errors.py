@@ -10,12 +10,12 @@ class FedBotException(Exception):
     """
 
     summary_exception: str
-    long_exception: Optional[str]
+    long_exception: str
 
     def __init__(self, summary_exception: str, long_exception: Optional[str] = None) -> None:
         super().__init__(summary_exception, long_exception)
         self.summary_exception = summary_exception
-        self.long_exception = long_exception
+        self.long_exception = long_exception or ""
 
 
 class PluginTimeout(FedBotException):
