@@ -47,9 +47,6 @@ class DiagnosticInfo:
         if self.diagnostics_enabled:
             self.list_of_results.extend([f"{front_pad}{comment}"])
 
-    def append_from(self, other_info: List[str]):
-        self.list_of_results.extend(other_info)
-
     def mark_step_num(self, step_num: str, comment: str = "", front_pad: str = "") -> None:
         self.add(
             f"Checking {step_num}: {comment}",
