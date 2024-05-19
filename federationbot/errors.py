@@ -67,9 +67,9 @@ class WellKnownError(ServerDiscoveryError):
     """
 
 
-class WellKnownHasSchemeError(WellKnownError):
+class SchemeError(ServerDiscoveryError):
     """
-    The Host found in well-known has a scheme when it should not
+    The Host has a scheme when it should not
     """
 
 

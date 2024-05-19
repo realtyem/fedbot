@@ -11,8 +11,8 @@ from dns.message import Message
 import backoff
 import dns.resolver
 
-from federationbot.errors import FedBotException, WellKnownHasSchemeError
-from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult, ServerResultError
+from federationbot.errors import FedBotException, SchemeError
+from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 
 server_discovery_logger = logging.getLogger("server_discovery")
 backoff_logger = logging.getLogger("dns_backoff")
@@ -86,7 +86,7 @@ def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[s
     server_port: Optional[str] = None
 
     if server_name.startswith(("http:", "https")) or "://" in server_name:
-        raise WellKnownHasSchemeError
+        raise SchemeError("SchemeError", f"Scheme should not be present for '{server_name}'")
 
     # str.split() will raise a ValueError if the value to split by isn't there
     try:
@@ -147,7 +147,7 @@ def _parse_and_check_well_known_response(
         # have to cover the basics by hand.
         try:
             host, port = check_and_maybe_split_server_name(well_known_result)
-        except WellKnownHasSchemeError:
+        except SchemeError:
             diag_info.error("Well-Known 'm.server' has a scheme when it should not:")
             diag_info.error(f"{well_known_result}", front_pad="      ")
             diag_info.mark_error_on_well_known()
@@ -693,12 +693,10 @@ class DelegationHandler:
         # Try and split the server_name from any potential port
         try:
             host, port = check_and_maybe_split_server_name(server_name)
-        except WellKnownHasSchemeError:
-            diag_info.error(f"Server name was malformed: {server_name}")
-            return ServerResultError(
-                error_reason=f"Server name was malformed: {server_name}",
-                diag_info=diag_info,
-            )
+
+        except SchemeError as e:
+            diag_info.error(e.long_exception)
+            raise e
 
         # Spec step 1, check for literal IP
         # HOST header should be the server_name, as it was passed in(including port)
