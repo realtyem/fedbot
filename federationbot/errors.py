@@ -55,7 +55,7 @@ class ServerUnreachable(FedBotException):
     """
 
 
-class ServerDiscoveryError(Exception):
+class ServerDiscoveryError(FedBotException):
     """
     Error occurred during server discovery process
     """
