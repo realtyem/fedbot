@@ -43,8 +43,9 @@ from federationbot.tracing import (
 
 backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
-SOCKET_TIMEOUT_SECONDS = 2.0
 USER_AGENT_STRING = "Sir FederationInspector 0.0.7"
+
+SOCKET_TIMEOUT_SECONDS = 5.0
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
 # the /_matrix urlspace. 'bot' and 'Python' trigger it, so use a different name
 # "Maubot/Fedbot 0.0.7"
