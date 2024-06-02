@@ -3415,15 +3415,16 @@ class FederationBot(Plugin):
 
         async def _server_keys_from_notary_worker(
             _queue: asyncio.Queue[str],
-        ) -> Tuple[str, MatrixResponse]:
-            worker_server_name = await _queue.get()
+        ) -> None:
+            while True:
+                worker_server_name = await _queue.get()
 
-            response = await self.federation_handler.api.get_server_notary_keys(
-                worker_server_name, notary_server_to_use, minimum_valid_until_ts
-            )
+                result = await self.federation_handler.api.get_server_notary_keys(
+                    worker_server_name, notary_server_to_use, minimum_valid_until_ts
+                )
 
-            _queue.task_done()
-            return worker_server_name, response
+                server_to_server_data[worker_server_name] = result
+                _queue.task_done()
 
         keys_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
@@ -3432,7 +3433,7 @@ class FederationBot(Plugin):
         # Setup the task into the controller
         reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
 
-        await self.reaction_task_controller.add_threaded_tasks(
+        self.reaction_task_controller.add_tasks(
             reference_key,
             _server_keys_from_notary_worker,
             keys_queue,
@@ -3441,14 +3442,7 @@ class FederationBot(Plugin):
 
         started_at = time.monotonic()
 
-        results = await self.reaction_task_controller.get_task_results(reference_key, threaded=True)
-        for result in results:
-            if isinstance(result, BaseException):
-                self.log.warning(f"_server_keys_from_notary: got an Exception: {result}")
-                continue
-
-            host, response = result
-            server_to_server_data[host] = response
+        await keys_queue.join()
 
         total_time = time.monotonic() - started_at
         # Cancel our worker tasks.
