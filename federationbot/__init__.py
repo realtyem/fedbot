@@ -2223,15 +2223,7 @@ class FederationBot(Plugin):
             for member in joined_members:
                 list_of_servers_to_check.add(get_domain_from_id(member))
 
-        # The first of the 'entire room' limitations
         number_of_servers = len(list_of_servers_to_check)
-        if number_of_servers > MAX_NUMBER_OF_SERVERS_TO_ATTEMPT:
-            await command_event.respond(
-                f"To many servers in this room: {number_of_servers}. Please select "
-                "a specific server instead.\n\n(This command can have a very large"
-                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})"
-            )
-            return
 
         list_of_message_ids = []
         # Some quality of life niceties
@@ -2949,15 +2941,7 @@ class FederationBot(Plugin):
         else:
             list_of_servers_to_check.add(server_to_check)
 
-        # Guard against there being to many servers on the response
         number_of_servers = len(list_of_servers_to_check)
-        if number_of_servers > MAX_NUMBER_OF_SERVERS_TO_ATTEMPT:
-            await command_event.respond(
-                f"To many servers in this room: {number_of_servers}. Please select "
-                "a specific server instead.\n\n(This command can have a very large"
-                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})"
-            )
-            return
 
         current_message_id = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server" f"{'s' if number_of_servers > 1 else ''}"
