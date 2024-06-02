@@ -436,8 +436,13 @@ class FederationApi:
                 except json.decoder.JSONDecodeError:
                     diag_info.error("JSONDecodeError")
                     diag_info.add("No usable data in response")
-                    # error_reason = "No/bad JSON returned"
                     result_dict = None
+                except client_exceptions.ServerTimeoutError:
+                    diag_info.error("Server Timed out while reading response")
+                    result_dict = None
+                    fedapi_logger.debug(
+                        "fedreq: Weird server timeout while reading response: %s %s", destination_server_name, path
+                    )
 
                 # if there was a matrix related error, pick the bits out of the json
                 if result_dict:
