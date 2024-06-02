@@ -2254,7 +2254,7 @@ class FederationBot(Plugin):
 
         delegation_queue: asyncio.Queue[str] = asyncio.Queue()
         for server_name in list_of_servers_to_check:
-            await delegation_queue.put(server_name)
+            delegation_queue.put_nowait(server_name)
 
         reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
 
@@ -2267,7 +2267,6 @@ class FederationBot(Plugin):
 
         started_at = time.monotonic()
         await delegation_queue.join()
-
         total_time = time.monotonic() - started_at
 
         # Cancel our worker tasks.
