@@ -5,7 +5,6 @@ from enum import Enum
 import asyncio
 import functools
 import random
-import threading
 import time
 
 from maubot.matrix import MaubotMatrixClient
@@ -498,27 +497,3 @@ class ReactionTaskController(Generic[T]):
                 await self.remove_last_display_of(reaction_data.event_id, react_evt.room_id)
 
         return
-
-
-# Save these for a later time, as they are incomplete
-def async_func_wrapper(await_func, *args):
-    loop = asyncio.new_event_loop()
-    results = loop.run_until_complete(await_func(args))
-    loop.close()
-    return results
-
-
-def wait_loop(loop_mapping: Dict[int, AbstractEventLoop]):
-    # use in get_task_results for threaded results(doesn't work yet)
-    #
-    # futures = [self.tasks_sets[reference_key].loop.run_in_executor(
-    #     self.executor, self.wait_loop, self.tasks_sets[reference_key].loop_mapping
-    #     ) for _ in range(self.max_workers)]
-    # return await asyncio.gather(*futures)
-
-    curr_thread_id = threading.current_thread().ident
-    assert curr_thread_id is not None
-    if curr_thread_id in loop_mapping:
-        threads_event_loop = loop_mapping[curr_thread_id]
-
-        return threads_event_loop.run_until_complete(asyncio.gather(*asyncio.all_tasks()))
