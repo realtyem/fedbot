@@ -3201,7 +3201,9 @@ class FederationBot(Plugin):
             server_name_col.maybe_update_column_width(len(server_name))
             keyid_block = server_results.json_response.get("verify_keys", {})
             oldkeyid_block = server_results.json_response.get("old_verify_keys", {})
-            for key_id in keyid_block.keys():
+            for key_id in keyid_block:
+                server_key_col.maybe_update_column_width(key_id)
+            for key_id in oldkeyid_block:
                 server_key_col.maybe_update_column_width(key_id)
 
         # Begin constructing the message
