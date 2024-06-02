@@ -506,15 +506,6 @@ class FederationApi:
             timeout_seconds=timeout_seconds,
         )
 
-        if response.http_code != 200:
-            fedapi_logger.debug(
-                "get_server_version: %s: got %d: %s %s",
-                server_name,
-                response.http_code,
-                response.errcode,
-                response.error or response.reason,
-            )
-
         if diagnostics and response.diag_info is not None:
             # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
             if response.http_code != 200:
