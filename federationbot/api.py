@@ -269,7 +269,7 @@ class FederationApi:
             # e is an OSError, may have e.strerror
             client_exceptions.ClientOSError,
         ) as e:
-            if getattr(e, "os_error"):
+            if hasattr(e, "os_error"):
                 # This gets type ignored, as it is defined but for some reason mypy can't figure that out
                 raise FedBotException(e.__class__.__name__, e.os_error.strerror) from e  # type: ignore[attr-defined]
 
