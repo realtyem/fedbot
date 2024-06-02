@@ -13,7 +13,13 @@ import backoff
 from federationbot.cache import LRUCache
 from federationbot.controllers import ReactionTaskController
 from federationbot.delegation import DelegationHandler
-from federationbot.errors import FedBotException, PluginTimeout, ServerSSLException, ServerUnreachable
+from federationbot.errors import (
+    FedBotException,
+    PluginTimeout,
+    ServerDiscoveryError,
+    ServerSSLException,
+    ServerUnreachable,
+)
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 from federationbot.tracing import (
@@ -174,8 +180,18 @@ class FederationApi:
                     f"{server_result.unhealthy}",
                     "Server was previously unreachable",
                 )
-            destination_port = int(server_result.port)
-            resolved_destination_server = server_result.get_host()
+            ip_port_tuple = server_result.get_ip_port_or_hostname()
+
+            try:
+                host, port = ip_port_tuple
+            except TypeError:
+                raise ServerDiscoveryError(
+                    "No DNS entries found", f"No DNS queries had answers for {destination_server_name}"
+                )
+            else:
+                resolved_destination_server = host
+                destination_port = int(port)
+
             server_hostname_sni = server_result.sni_server_name if server_result.use_sni else None
             request_headers.update({"Host": server_result.host_header})
 
@@ -353,7 +369,7 @@ class FederationApi:
         # These only get filled in when diagnostics is True
         # This will add the word "Checking: " to the front of "Connectivity"
         diag_info.mark_step_num("Connectivity")
-        diag_info.add(f"Making request to {server_result.get_host()}{path}")
+        diag_info.add(f"Making request to {server_result.get_ip_port_or_hostname()}{path}")
 
         reference_key = self.task_controller.setup_task_set()
         await self.task_controller.add_threaded_tasks(
