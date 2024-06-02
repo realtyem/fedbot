@@ -6,6 +6,7 @@ import asyncio
 import functools
 import random
 import threading
+import time
 
 from maubot.matrix import MaubotMatrixClient
 from mautrix.types import EventID, MessageEvent, ReactionEvent, RoomID
@@ -333,7 +334,7 @@ class ReactionTaskController(Generic[T]):
     ) -> Hashable:
         if reference_key is None:
             # Use a nice large base for the random key
-            reference_key = random.randint(0, 1024 * 1024)
+            reference_key = str(random.randint(0, 1024 * 1024)) + "-" + str(time.time())
         if reference_key in self.tasks_sets:
             raise ReferenceKeyAlreadyExists
         self.tasks_sets.setdefault(reference_key, TaskSetEntry())
