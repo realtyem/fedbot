@@ -273,6 +273,7 @@ class TaskSetEntry(Generic[T]):
         # Use return_exceptions set to True so all tasks actually are finished before exiting the system(or some
         # get left behind and keep running as orphans)
         await self.gather_results()
+        await self.gather_threaded_results()
 
 
 class ReactionTaskController(Generic[T]):
