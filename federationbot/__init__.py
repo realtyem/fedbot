@@ -3061,6 +3061,7 @@ class FederationBot(Plugin):
             limit=10,
         )
         await version_queue.join()
+
         await self.reaction_task_controller.cancel(reference_key)
 
         return server_to_version_data
