@@ -167,6 +167,7 @@ class TaskSetEntry(Generic[T]):
         new_task: Callable[..., Coroutine[Any, Any, T | None]],
         *args,
         limit: int = 1,
+        **kwargs,
     ) -> None:
         """
         Add this Callable and its args 'limit' number of times to the grouping of Tasks.
@@ -179,7 +180,7 @@ class TaskSetEntry(Generic[T]):
 
         """
         for _ in range(limit):
-            self.tasks.append(asyncio.create_task(new_task(*args)))  # type: ignore[arg-type]
+            self.tasks.append(asyncio.create_task(new_task(*args, **kwargs)))  # type: ignore[arg-type]
 
     async def add_threaded_tasks(
         self,
@@ -416,11 +417,12 @@ class ReactionTaskController(Generic[T]):
         new_task: Callable[..., Coroutine[Any, Any, T | None]],
         *args,
         limit: int = 1,
+        **kwargs,
     ) -> None:
         if reference_key not in self.tasks_sets:
             raise ReferenceKeyNotFound("Need to run setup_task_set() first")
 
-        self.tasks_sets[reference_key].add_tasks(new_task, *args, limit=limit)
+        self.tasks_sets[reference_key].add_tasks(new_task, *args, limit=limit, **kwargs)
 
     async def add_threaded_tasks(
         self,
