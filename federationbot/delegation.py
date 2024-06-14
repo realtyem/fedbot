@@ -803,17 +803,17 @@ class DelegationHandler:
             srv_host, srv_port = srv_result
 
             (
-                ip4_address_port_tuples,
-                ip6_address_port_tuples,
+                _ip4_address_port_tuples,
+                _ip6_address_port_tuples,
             ) = self.check_dns_from_list_for_reg_records([(srv_host, srv_port)], check_cname=False, diag_info=diag_info)
 
+            ip4_address_port_tuples.extend(_ip4_address_port_tuples)
+            ip6_address_port_tuples.extend(_ip6_address_port_tuples)
+
         if ip4_address_port_tuples or ip6_address_port_tuples:
-            # If more than one port is returned, this may be a problem. Probably could sort through the iterable
-            # again to find the matching ip address? Let's get some logging to see if this happens
-            # TODO: decide if this should just be handled on the other side
             if len(ip4_address_port_tuples) > 1 or len(ip6_address_port_tuples) > 1:
                 server_discovery_logger.warning(
-                    f"STEP 5 ISSUE FOUND: {server_name} ip-port tuples potential issue: {ip4_address_port_tuples}"
+                    f"STEP 5 ISSUE FOUND: {server_name} ip-port tuples potential issue: {ip4_address_port_tuples} {ip6_address_port_tuples}"
                 )
 
             return ServerResult(
