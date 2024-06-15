@@ -360,7 +360,7 @@ class FederationApi:
             # If this server was attempted at some point and failed, there is no
             # point trying again until the cache entry is replaced.
 
-            server_result = await self.delegation_handler.handle_delegation(
+            server_result = await self.delegation_handler.discover_server(
                 destination_server_name,
                 self._federation_request,
                 diag_info=diag_info,

@@ -857,3 +857,13 @@ class DelegationHandler:
             sni_server_name=host,
             diag_info=diag_info,
         )
+
+    async def discover_server(
+        self,
+        server_name: str,
+        fed_req_callback: Callable,
+        diag_info: DiagnosticInfo = DiagnosticInfo(False),
+    ) -> ServerResult:
+        result = await self.handle_delegation(server_name, fed_req_callback, diag_info)
+
+        return result
