@@ -493,46 +493,7 @@ class DelegationHandler:
         Returns: A Dict[str, Any] of the JSON returned, or None
 
         """
-        content: Optional[Dict[str, Any]] = None
-
-        try:
-            # This will return a context manager called ClientResponse that will need to be parsed below
-            response = await request_cb(host, "/.well-known/matrix/server")
-
-        # The callback used above handles a boatload of individual exceptions and consolidates them into one
-        # that is easier to extract displayable data from.
-        except FedBotException as e:
-            diag_info.error(f"{e.summary_exception}")
-            if e.__class__.__name__ != "PluginTimeout":
-                diag_info.add(f"{e.long_exception}")
-            return None
-
-        async with response:
-            status = response.status
-            reason = response.reason
-            headers = response.headers
-
-            if status == 200:
-                # Potentially anything from 200 up to 500 can have something to say
-                try:
-                    content = await response.json()
-                except client_exceptions.ContentTypeError:
-                    diag_info.error("Response had Content-Type: " f"{headers.get('Content-Type', 'None Found')}")
-                    diag_info.add("Expected Content-Type of 'application/json', will try work-around")
-                except json.decoder.JSONDecodeError:
-                    server_discovery_logger.warning("JSONDecodeError from well-known request on %s", host)
-                    diag_info.error("JSONDecodeError")
-                    diag_info.add("Content-Type was correct, but contained unusable data")
-                if not content:
-                    try:
-                        text_result = await response.text()
-                        content = self.json_decoder.decode(text_result)
-                    except json.decoder.JSONDecodeError:
-                        # self.logger.info(f"text_result: {text_result}")
-                        diag_info.error("JSONDecodeError, work-around failed")
-
-        diag_info.add(f"Request status: code:{status}, reason: {reason}")
-
+        status, content = await self.make_simple_request(request_cb, host, "/.well-known/matrix/server", diag_info)
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
         if status == 404:
             diag_info.mark_no_well_known()
@@ -549,6 +510,51 @@ class DelegationHandler:
             diag_info.add(f"{content}")
 
         return content
+
+    async def make_simple_request(
+        self, request_cb: Callable, host: str, path: str, diag_info: DiagnosticInfo
+    ) -> Tuple[int, Optional[Dict[str, Any]]]:
+        content: Optional[Dict[str, Any]] = None
+
+        try:
+            # This will return a context manager called ClientResponse that will need to be parsed below
+            response = await request_cb(host, path)
+
+        # The callback used above handles a boatload of individual exceptions and consolidates them into one
+        # that is easier to extract displayable data from.
+        except FedBotException as e:
+            diag_info.error(f"{e.summary_exception}")
+            if e.__class__.__name__ != "PluginTimeout":
+                diag_info.add(f"{e.long_exception}")
+            return 0, None
+
+        async with response:
+            status = response.status
+            reason = response.reason
+            headers = response.headers
+
+            if status == 200:
+                # Potentially anything from 200 up to 500 can have something to say
+                try:
+                    content = await response.json()
+                except client_exceptions.ContentTypeError:
+                    diag_info.error("Response had Content-Type: " f"{headers.get('Content-Type', 'None Found')}")
+                    diag_info.add("Expected Content-Type of 'application/json', will try work-around")
+                except json.decoder.JSONDecodeError:
+                    server_discovery_logger.warning("JSONDecodeError from request on %s to %s", host, path)
+                    diag_info.error("JSONDecodeError")
+                    diag_info.add("Content-Type was correct, but contained unusable data")
+                if not content:
+                    try:
+                        text_result = await response.text()
+                        content = self.json_decoder.decode(text_result)
+                    except json.decoder.JSONDecodeError:
+                        # self.logger.info(f"text_result: {text_result}")
+                        diag_info.error("JSONDecodeError, work-around failed")
+
+        diag_info.add(f"Request status: code:{status}, reason: {reason}")
+
+        return status, content
 
     async def handle_well_known_delegation(
         self,
