@@ -145,6 +145,8 @@ class FederationApi:
         method: str = "GET",
         origin_server: Optional[str] = None,
         server_result: Optional[ServerResult] = None,
+        force_ip: Optional[str] = None,
+        force_port: Optional[int] = None,
         content: Optional[Dict[str, Any]] = None,
         timeout_seconds: float = 10.0,
     ) -> ClientResponse:
@@ -174,6 +176,7 @@ class FederationApi:
         #
         # From what I understand, having a port as 'None' will cause the URL to select
         # the most likely port based on the scheme. Sounds handy, use that.
+        destination_port: Optional[int]
         request_headers = {"User-Agent": USER_AGENT_STRING}
         if server_result:
             if server_result.unhealthy:
@@ -190,15 +193,17 @@ class FederationApi:
                     "No DNS entries found", f"No DNS queries had answers for {destination_server_name}"
                 )
             else:
-                resolved_destination_server = host
+                resolved_destination_server = force_ip or host
                 destination_port = int(port)
 
             server_hostname_sni = server_result.sni_server_name if server_result.use_sni else None
             request_headers.update({"Host": server_result.host_header})
 
         else:
-            destination_port = None
-            resolved_destination_server = destination_server_name
+            # To allow for the simple request machinery in the delegation handler, allow overriding the ip/port when
+            # there is no ServerResult. Default to None, so default behavior should fall through.
+            destination_port = force_port
+            resolved_destination_server = force_ip or destination_server_name
             server_hostname_sni = None
 
         url_object = URL.build(
