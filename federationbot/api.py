@@ -287,12 +287,6 @@ class FederationApi:
         ) as e:
             raise FedBotException(e.__class__.__name__, str(e.message)) from e
 
-        # Save these other exceptions, as they might get revisited
-        # except client_exceptions.WSServerHandshakeError:
-
-        # Pretty sure will never hit this one either, as it's not enforced here
-        # except client_exceptions.ContentTypeError:
-
         except client_exceptions.ServerTimeoutError as e:
             # ServerTimeoutError is asyncio.TimeoutError under it's hood
             raise PluginTimeout(
