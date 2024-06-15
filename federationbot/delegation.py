@@ -2,6 +2,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import ipaddress
 import json
 import logging
+import time
 
 from aiohttp import client_exceptions
 from backoff._typing import Details
@@ -493,7 +494,9 @@ class DelegationHandler:
         Returns: A Dict[str, Any] of the JSON returned, or None
 
         """
-        status, content = await self.make_simple_request(request_cb, host, "/.well-known/matrix/server", diag_info)
+        status, request_time, content = await self.make_simple_request(
+            request_cb, host, "/.well-known/matrix/server", diag_info
+        )
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
         if status == 404:
             diag_info.mark_no_well_known()
@@ -512,21 +515,24 @@ class DelegationHandler:
         return content
 
     async def make_simple_request(
-        self, request_cb: Callable, host: str, path: str, diag_info: DiagnosticInfo
-    ) -> Tuple[int, Optional[Dict[str, Any]]]:
+        self, request_cb: Callable, host: str, path: str, diag_info: DiagnosticInfo, force_port: Optional[int] = None
+    ) -> Tuple[int, float, Optional[Dict[str, Any]]]:
         content: Optional[Dict[str, Any]] = None
 
+        # We don't collect response times in request_cb, that's at a higher level
+        start_time = time.monotonic()
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
-            response = await request_cb(host, path)
+            response = await request_cb(host, path, force_port=force_port)
 
         # The callback used above handles a boatload of individual exceptions and consolidates them into one
         # that is easier to extract displayable data from.
         except FedBotException as e:
+            stop_time = time.monotonic()
             diag_info.error(f"{e.summary_exception}")
             if e.__class__.__name__ != "PluginTimeout":
                 diag_info.add(f"{e.long_exception}")
-            return 0, None
+            return 0, stop_time - start_time, None
 
         async with response:
             status = response.status
@@ -552,9 +558,10 @@ class DelegationHandler:
                         # self.logger.info(f"text_result: {text_result}")
                         diag_info.error("JSONDecodeError, work-around failed")
 
+        stop_time = time.monotonic()
         diag_info.add(f"Request status: code:{status}, reason: {reason}")
 
-        return status, content
+        return status, stop_time - start_time, content
 
     async def handle_well_known_delegation(
         self,
