@@ -2021,9 +2021,11 @@ class FederationBot(Plugin):
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
+                _queue.task_done()
                 return _host, _e
 
             # One way or the other, we return the response
+            _queue.task_done()
             return _host, join_response
 
         reference_task_key = self.reaction_task_controller.setup_task_set()
