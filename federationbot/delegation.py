@@ -514,6 +514,52 @@ class DelegationHandler:
 
         return content
 
+    async def make_version_request(
+        self,
+        request_cb: Callable,
+        hostname: str,
+        ip_address: str,
+        port: int,
+        diag_info: DiagnosticInfo,
+        server_result: ServerResult,
+    ) -> Tuple[bool, Tuple[str, int], Optional[Dict[str, Any]], float]:
+        """
+        Make the GET request to the federation version endpoint. Borrow the error handling code from FederationHandler
+        Args:
+            request_cb: The Callable on FederationHandler. Use _federation_request()
+            hostname: The basic host to check
+            ip_address: The IP address that represents the hostname
+            port: The port to test
+            diag_info: DiagnosticInfo object to append info/errors too
+            server_result: The solved ServerResult for it's Host header data
+
+        Returns: A Tuple of (if request was successful, the tuple of host/port, optionally Dict[str, Any] of the
+            JSON returned, and finally the float of the response time)
+
+        """
+        successful_request = False
+        status, request_time, content = await self.make_simple_request(
+            request_cb,
+            hostname,
+            "/_matrix/federation/v1/version",
+            diag_info,
+            server_result=server_result,
+            force_ip=ip_address,
+            force_port=port,
+        )
+
+        if status != 200 or (status == 200 and content is None):
+            # Don't forget to work around Caddy defaulting to 200 for unknown endpoints. I still believe this is against
+            # spec and therefore is an error.
+            if status == 200:
+                server_discovery_logger.debug("servdisc_version: HIT possible caddy condition: %s", hostname)
+
+        else:
+            successful_request = True
+            diag_info.add(f"{content}")
+
+        return successful_request, (ip_address, port), content, request_time
+
     async def make_simple_request(
         self,
         request_cb: Callable,
