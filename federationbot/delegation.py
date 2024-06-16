@@ -918,6 +918,17 @@ class DelegationHandler:
         server_name: str,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ) -> ServerResult:
+        """
+        Pulls in the necessary information for discovering any delegation for a server, then does a check on the
+            federation endpoint for version to ensure connectivity. The fastest server that responds is saved to the
+            ServerResult and thus used for further requests to that server.
+        Args:
+            server_name: The raw server name from the back half of an mxid
+            diag_info: DiagnosticInfo, for verbose messages to be displayed
+
+        Returns: ServerResult modified with an IP address and port to use
+
+        """
         result = await self.handle_delegation(server_name, diag_info)
 
         test_task_list = []
