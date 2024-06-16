@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 from itertools import chain
 import asyncio
 import ipaddress
@@ -6,7 +6,7 @@ import json
 import logging
 import time
 
-from aiohttp import client_exceptions
+from aiohttp import ClientResponse, client_exceptions
 from backoff._typing import Details
 from dns.asyncresolver import Resolver
 from dns.message import Message
@@ -167,13 +167,20 @@ def _parse_and_check_well_known_response(
 
 
 class DelegationHandler:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        fed_request_callback: Callable[
+            ...,
+            Coroutine[Any, Any, ClientResponse],
+        ],
+    ) -> None:
         self.dns_resolver = Resolver()
         # DNS timeout for a request default is 2 seconds
         # DNS lifetime of requests default is 5 seconds
         # The lifetime we can touch, make it longer to give some more time for slow DNS servers
         self.dns_resolver.lifetime = 10.0
         self.json_decoder = json.JSONDecoder()
+        self.fed_request_callback = fed_request_callback
 
     def dns_query(
         self,
@@ -483,22 +490,17 @@ class DelegationHandler:
 
         return host_port_tuples
 
-    async def make_well_known_request(
-        self, request_cb: Callable, host: str, diag_info: DiagnosticInfo
-    ) -> Optional[Dict[str, Any]]:
+    async def make_well_known_request(self, host: str, diag_info: DiagnosticInfo) -> Optional[Dict[str, Any]]:
         """
         Make the GET request to the well-known endpoint. Borrow the error handling code from FederationHandler
         Args:
-            request_cb: The Callable on FederationHandler. Use _federation_request()
             host: The basic host to check
             diag_info: DiagnosticInfo object to append info/errors too
 
         Returns: A Dict[str, Any] of the JSON returned, or None
 
         """
-        status, request_time, content = await self.make_simple_request(
-            request_cb, host, "/.well-known/matrix/server", diag_info
-        )
+        status, request_time, content = await self.make_simple_request(host, "/.well-known/matrix/server", diag_info)
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
         if status == 404:
             diag_info.mark_no_well_known()
@@ -518,7 +520,6 @@ class DelegationHandler:
 
     async def make_version_request(
         self,
-        request_cb: Callable,
         hostname: str,
         ip_address: str,
         port: int,
@@ -528,7 +529,6 @@ class DelegationHandler:
         """
         Make the GET request to the federation version endpoint. Borrow the error handling code from FederationHandler
         Args:
-            request_cb: The Callable on FederationHandler. Use _federation_request()
             hostname: The basic host to check
             ip_address: The IP address that represents the hostname
             port: The port to test
@@ -541,7 +541,6 @@ class DelegationHandler:
         """
         successful_request = False
         status, request_time, content = await self.make_simple_request(
-            request_cb,
             hostname,
             "/_matrix/federation/v1/version",
             diag_info,
@@ -564,7 +563,6 @@ class DelegationHandler:
 
     async def make_simple_request(
         self,
-        request_cb: Callable,
         hostname: str,
         path: str,
         diag_info: DiagnosticInfo,
@@ -578,7 +576,7 @@ class DelegationHandler:
         start_time = time.monotonic()
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
-            response = await request_cb(
+            response = await self.fed_request_callback(
                 hostname, path, server_result=server_result, force_ip=force_ip, force_port=force_port
             )
 
@@ -740,7 +738,6 @@ class DelegationHandler:
     async def handle_delegation(
         self,
         server_name: str,
-        fed_req_callback: Callable,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ) -> ServerResult:
         """
@@ -838,7 +835,6 @@ class DelegationHandler:
 
         # Borrow our FederationHandler error handling to make this request
         content = await self.make_well_known_request(
-            request_cb=fed_req_callback,
             host=host,
             diag_info=diag_info,
         )
@@ -918,19 +914,16 @@ class DelegationHandler:
     async def discover_server(
         self,
         server_name: str,
-        fed_req_callback: Callable,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ) -> ServerResult:
-        result = await self.handle_delegation(server_name, fed_req_callback, diag_info)
+        result = await self.handle_delegation(server_name, diag_info)
 
         test_task_list = []
         for ip_port_tuple in chain(result.list_of_ip4_port_tuples, result.list_of_ip6_port_tuples):
             ip_address, port = ip_port_tuple
             test_task_list.append(
                 asyncio.create_task(
-                    self.make_version_request(
-                        fed_req_callback, server_name, ip_address, int(port), diag_info, server_result=result
-                    )
+                    self.make_version_request(server_name, ip_address, int(port), diag_info, server_result=result)
                 )
             )
 

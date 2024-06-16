@@ -116,7 +116,7 @@ class FederationApi:
             connector=TCPConnector(keepalive_timeout=60, limit=1000, limit_per_host=3),
             trace_configs=[trace_config],
         )
-        self.delegation_handler = DelegationHandler()
+        self.delegation_handler = DelegationHandler(self._federation_request)
 
     async def shutdown(self) -> None:
         await self.http_client.close()
@@ -362,7 +362,6 @@ class FederationApi:
 
             server_result = await self.delegation_handler.discover_server(
                 destination_server_name,
-                self._federation_request,
                 diag_info=diag_info,
             )
 
