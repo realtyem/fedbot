@@ -515,7 +515,14 @@ class DelegationHandler:
         return content
 
     async def make_simple_request(
-        self, request_cb: Callable, host: str, path: str, diag_info: DiagnosticInfo, force_port: Optional[int] = None
+        self,
+        request_cb: Callable,
+        hostname: str,
+        path: str,
+        diag_info: DiagnosticInfo,
+        server_result: Optional[ServerResult] = None,
+        force_ip: Optional[str] = None,
+        force_port: Optional[int] = None,
     ) -> Tuple[int, float, Optional[Dict[str, Any]]]:
         content: Optional[Dict[str, Any]] = None
 
@@ -523,7 +530,9 @@ class DelegationHandler:
         start_time = time.monotonic()
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
-            response = await request_cb(host, path, force_port=force_port)
+            response = await request_cb(
+                hostname, path, server_result=server_result, force_ip=force_ip, force_port=force_port
+            )
 
         # The callback used above handles a boatload of individual exceptions and consolidates them into one
         # that is easier to extract displayable data from.
@@ -547,7 +556,7 @@ class DelegationHandler:
                     diag_info.error("Response had Content-Type: " f"{headers.get('Content-Type', 'None Found')}")
                     diag_info.add("Expected Content-Type of 'application/json', will try work-around")
                 except json.decoder.JSONDecodeError:
-                    server_discovery_logger.warning("JSONDecodeError from request on %s to %s", host, path)
+                    server_discovery_logger.warning("JSONDecodeError from request on %s to %s", hostname, path)
                     diag_info.error("JSONDecodeError")
                     diag_info.add("Content-Type was correct, but contained unusable data")
                 if not content:
