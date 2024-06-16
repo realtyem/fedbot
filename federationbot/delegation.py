@@ -1,4 +1,6 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from itertools import chain
+import asyncio
 import ipaddress
 import json
 import logging
@@ -920,5 +922,48 @@ class DelegationHandler:
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ) -> ServerResult:
         result = await self.handle_delegation(server_name, fed_req_callback, diag_info)
+
+        test_task_list = []
+        for ip_port_tuple in chain(result.list_of_ip4_port_tuples, result.list_of_ip6_port_tuples):
+            ip_address, port = ip_port_tuple
+            test_task_list.append(
+                asyncio.create_task(
+                    self.make_version_request(
+                        fed_req_callback, server_name, ip_address, int(port), diag_info, server_result=result
+                    )
+                )
+            )
+
+        # This will add the word "Checking: " to the front of "Connectivity"
+        diag_info.mark_step_num("Connectivity")
+        # diag_info.add(f"Making request to {server_result.get_ip_port_or_hostname()}{path}")
+
+        # Going to use the default of asyncio.ALL_COMPLETED for block. IP6 addresses on my server don't complete, which
+        # exposes that errors finish really fast, but not successfully
+        try:
+            done, pending = await asyncio.wait(test_task_list)
+        except Exception as e:
+            server_discovery_logger.warning(f"discover_server: {server_name} had an exception: {e}")
+        else:
+            # Set the fastest response time to a really high number, so that a call to min() will override it
+            fastest_response_time = 60000.0
+            for result_break_down in done:
+                # I don't think this code path can have an exception here, but keep this for now
+                # exception = result_break_down.exception()
+                # if isinstance(exception, Exception):
+                #     server_discovery_logger.warning(f"discover_server: {server_name} Exception found: {exception}")
+
+                diag_info.add(f"Requesting version from {res_ip}:{res_port} took {request_time}")
+                # bool,  (str,    int),    Dict, float
+                success, (res_ip, res_port), _, request_time = result_break_down.result()
+
+                if success:
+                    if fastest_response_time > request_time:
+                        fastest_response_time = request_time
+                        # By saving the ip/port directly, we'll always contact the same server if they are load-balanced
+                        result.chosen_ip_port_tuple = (res_ip, str(res_port))
+
+            for result_break_down in pending:
+                result_break_down.cancel()
 
         return result

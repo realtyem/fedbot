@@ -366,11 +366,6 @@ class FederationApi:
                 diag_info=diag_info,
             )
 
-        # These only get filled in when diagnostics is True
-        # This will add the word "Checking: " to the front of "Connectivity"
-        diag_info.mark_step_num("Connectivity")
-        diag_info.add(f"Making request to {server_result.get_ip_port_or_hostname()}{path}")
-
         reference_key = self.task_controller.setup_task_set()
         await self.task_controller.add_threaded_tasks(
             reference_key,
