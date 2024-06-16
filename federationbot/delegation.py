@@ -571,8 +571,9 @@ class DelegationHandler:
         force_port: Optional[int] = None,
     ) -> Tuple[int, float, Optional[Dict[str, Any]]]:
         content: Optional[Dict[str, Any]] = None
-
-        # We don't collect response times in request_cb, that's at a higher level
+        # This is dumb, but due to how async requests are made there was no nice way in existing infrastructure to keep
+        # the request diagnostic message next to it's result. Save it here and add() it after the request is made.
+        prerender_diag = f"Making request to {force_ip or hostname}{':' + str(force_port) if force_port else ''}"
         start_time = time.monotonic()
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
@@ -584,7 +585,7 @@ class DelegationHandler:
         # that is easier to extract displayable data from.
         except FedBotException as e:
             stop_time = time.monotonic()
-            diag_info.error(f"{e.summary_exception}")
+            diag_info.error(f"{prerender_diag}, Errored: {e.summary_exception}")
             if e.__class__.__name__ != "PluginTimeout":
                 diag_info.add(f"{e.long_exception}")
             return 0, stop_time - start_time, None
@@ -593,6 +594,8 @@ class DelegationHandler:
             status = response.status
             reason = response.reason
             headers = response.headers
+
+            diag_info.add(f"{prerender_diag}, Request status: {status}, reason: {reason}")
 
             if status == 200:
                 # Potentially anything from 200 up to 500 can have something to say
@@ -614,7 +617,6 @@ class DelegationHandler:
                         diag_info.error("JSONDecodeError, work-around failed")
 
         stop_time = time.monotonic()
-        diag_info.add(f"Request status: code:{status}, reason: {reason}")
 
         return status, stop_time - start_time, content
 
@@ -929,7 +931,6 @@ class DelegationHandler:
 
         # This will add the word "Checking: " to the front of "Connectivity"
         diag_info.mark_step_num("Connectivity")
-        # diag_info.add(f"Making request to {server_result.get_ip_port_or_hostname()}{path}")
 
         # Going to use the default of asyncio.ALL_COMPLETED for block. IP6 addresses on my server don't complete, which
         # exposes that errors finish really fast, but not successfully
@@ -946,7 +947,6 @@ class DelegationHandler:
                 # if isinstance(exception, Exception):
                 #     server_discovery_logger.warning(f"discover_server: {server_name} Exception found: {exception}")
 
-                diag_info.add(f"Requesting version from {res_ip}:{res_port} took {request_time}")
                 # bool,  (str,    int),    Dict, float
                 success, (res_ip, res_port), _, request_time = result_break_down.result()
 
