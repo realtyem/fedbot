@@ -423,6 +423,7 @@ class FederationHandler:
             destination_server,
             room_alias,
         )
+
         if alias_result.http_code != 200:
             raise FedBotException(
                 summary_exception=f"{alias_result.errcode or alias_result.http_code}: {alias_result.error or alias_result.reason}"
