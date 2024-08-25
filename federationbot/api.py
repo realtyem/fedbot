@@ -387,6 +387,7 @@ class FederationApi:
                 raise response
 
         except FedBotException as e:
+            fedapi_logger.warning(f"Problem on {destination_server_name}: {e}")
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
             await self.task_controller.cancel(reference_key)
             diag_info.error(str(e.long_exception))
