@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 import asyncio
 import functools
+import logging
 import random
 import time
 
@@ -18,6 +19,7 @@ from federationbot.errors import (
 )
 
 T = TypeVar("T")
+task_control_logger = logging.getLogger("task_control")
 
 
 class ReactionCommandStatus(Enum):
@@ -132,6 +134,7 @@ class ReactionControlEntry:
         response to save on screen real estate.
         Args:
             pinned_message: The EventID of the command response, for finding which reactions to remove
+            emoji: True if using the Emoji reaction symbols instead of words
 
         """
         # Don't actually have to save this, as the handler will be capable of removing old stuff without saving it
@@ -205,28 +208,6 @@ class TaskSetEntry(Generic[T]):
         for _ in range(limit):
             self.coros.append(await self.loop.run_in_executor(executor, functools.partial(new_task, *args, **kwargs)))
 
-    # Currently, this is unused/broken. It is part of the experiment threaded Task experiment
-    # def run(
-    #     self,
-    #     new_task: Callable[..., Coroutine[Any, Any, T]],
-    #     *args,
-    # ):
-    #     curr_thread_id = threading.current_thread().ident
-    #     assert curr_thread_id is not None
-    #
-    #     if curr_thread_id not in self.loop_mapping:
-    #         self.loop_mapping[curr_thread_id] = asyncio.new_event_loop()
-    #
-    #     thread_loop = self.loop_mapping[curr_thread_id]
-    #     if not thread_loop.is_running():
-    #         thread_loop.run_forever()
-    #         thread_loop.set_debug(True)
-    #
-    #     coro = new_task(*args)
-    #     task = thread_loop.create_task(coro)
-    #     self.loop_to_futures_set.setdefault(curr_thread_id, set()).add(task)
-    #     return task
-
     async def gather_results(self, return_exceptions: bool = True) -> Sequence[T | BaseException]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
@@ -299,19 +280,6 @@ class ReactionTaskController(Generic[T]):
         self.tasks_sets = {}
         self.client = client
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
-
-    # Currently unused/broken. It was part of the threaded Task experiment.
-    # def maybe_shutdown_thread_loop(self, thread_id: int) -> None:
-    #     # currently unused
-    #     # curr_thread_id = threading.current_thread().ident
-    #     if thread_id not in self.event_loops_per_thread:
-    #         return
-    #
-    #     thread_loop = self.event_loops_per_thread[thread_id]
-    #     if thread_loop.is_running():
-    #         thread_loop.stop()
-    #         thread_loop.close()
-    #         self.event_loops_per_thread.pop(thread_id)
 
     async def setup_control_reactions(
         self,
