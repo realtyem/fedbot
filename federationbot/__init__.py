@@ -2102,7 +2102,7 @@ class FederationBot(Plugin):
 
         final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
         for message in final_buffer_messages:
-            current_message = await command_event.respond(make_into_text_event(wrap_in_code_block_markdown(message)))
+            current_message = await command_event.respond(make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True))
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
