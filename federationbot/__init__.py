@@ -33,7 +33,7 @@ from unpaddedbase64 import encode_base64
 from federationbot.controllers import EmojiReactionCommandStatus, ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
-from federationbot.federation import FederationHandler, parse_list_response_into_list_of_event_bases
+from federationbot.federation import FederationHandler
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixResponse
 from federationbot.utils import (
     BitmapProgressBar,
@@ -3758,24 +3758,23 @@ class FederationBot(Plugin):
         assert event_id is not None
 
         started_at = time.monotonic()
-        response = await self.federation_handler.api.get_event_auth(
-            origin_server,
-            destination_server,
-            room_id,
-            event_id,
-        )
-        total_time = time.monotonic() - started_at
-
-        if response.http_code != 200:
-            await command_event.respond(f"Some kind of error\n{response.http_code}:{response.reason}")
+        try:
+            list_of_event_bases = await self.federation_handler.get_event_auth(
+                origin_server,
+                destination_server,
+                room_id,
+                event_id,
+            )
+        except MatrixError as e:
+            await command_event.respond(f"Some kind of error\n{e.http_code}:{e.reason}")
             return
 
-        # The response should contain all the pdu data inside 'pdus'
-        list_from_response = response.json_response.get("auth_chain", [])
-        list_of_event_bases = parse_list_response_into_list_of_event_bases(list_from_response)
+        total_time = time.monotonic() - started_at
+
         # Time to start rendering. Build the header lines first
         header_message = ""
         dc_depth = DisplayLineColumnConfig("Depth")
+        dc_eid = DisplayLineColumnConfig("Event ID")
         dc_etype = DisplayLineColumnConfig("Event Type")
         dc_sender = DisplayLineColumnConfig("Sender")
         dc_extras = DisplayLineColumnConfig("Extras")
@@ -3785,6 +3784,7 @@ class FederationBot(Plugin):
             # Don't worry about resizing the 'Extras' Column,
             # it's on the end and variable length
             dc_depth.maybe_update_column_width(len(str(event.depth)))
+            dc_eid.maybe_update_column_width(len(str(event.event_id)))
             dc_etype.maybe_update_column_width(len(event.event_type))
             dc_sender.maybe_update_column_width(len(event.sender))
 
@@ -3795,6 +3795,7 @@ class FederationBot(Plugin):
 
         # Build the header line...
         header_message += f"{dc_depth.pad()} "
+        header_message += f"{dc_eid.pad()}"
         header_message += f"{dc_etype.pad()} "
         header_message += f"{dc_sender.pad()} "
         header_message += f"{dc_extras.pad()}\n"
@@ -3806,6 +3807,7 @@ class FederationBot(Plugin):
         # Begin the render, first construct the template list
         template_list = [
             (["depth"], dc_depth),
+            (["event_id"], dc_eid),
             (["event_type"], dc_etype),
             (["sender"], dc_sender),
         ]
