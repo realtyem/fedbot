@@ -807,7 +807,7 @@ class DelegationHandler:
                 ip6_address_port_tuples,
                 host=host,
                 # Remember that the HOST header only gets a port if one was included in the server name
-                host_header=f"{host}{':'+port if port else ''}",
+                host_header=f"{host}{':' + port if port else ''}",
                 sni_server_name=server_name,
                 diag_info=diag_info,
             )

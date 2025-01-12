@@ -919,7 +919,10 @@ class FederationBot(Plugin):
                         auth_events = pulled_event.auth_events
                         event_id_ok_list.add(next_event_id)
 
-                        (prev_good_events, prev_bad_events,) = await _parse_ancestor_events(
+                        (
+                            prev_good_events,
+                            prev_bad_events,
+                        ) = await _parse_ancestor_events(
                             worker_name,
                             prev_events,
                         )
@@ -927,7 +930,10 @@ class FederationBot(Plugin):
                         # We don't iterate the walk based on auth_events themselves,
                         # eventually we'll find them in prev_events. At worst, this is a
                         # prefetch for the cache.
-                        (auth_good_events, auth_bad_events,) = await _parse_ancestor_events(
+                        (
+                            auth_good_events,
+                            auth_bad_events,
+                        ) = await _parse_ancestor_events(
                             worker_name,
                             auth_events,
                         )
@@ -1703,7 +1709,7 @@ class FederationBot(Plugin):
             # if limit is more than the number of hosts, fix it
             limit = min(limit, len(host_list))
             for host_number in range(0, limit):
-                list_of_buffer_lines.extend([f"{host_list[host_number:host_number+1]}\n"])
+                list_of_buffer_lines.extend([f"{host_list[host_number:host_number + 1]}\n"])
         else:
             for host in host_list:
                 list_of_buffer_lines.extend([f"['{host}']\n"])
@@ -2014,10 +2020,10 @@ class FederationBot(Plugin):
             _host = await _queue.get()
             try:
                 join_response = await self.federation_handler.make_join_to_server(
-                    origin_server=origin_server,
-                    destination_server=_host,
-                    room_id=room_id,
-                    user_id=str(self.client.mxid),
+                    origin_server,
+                    _host,
+                    room_id,
+                    str(self.client.mxid),
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
@@ -2102,7 +2108,9 @@ class FederationBot(Plugin):
 
         final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
         for message in final_buffer_messages:
-            current_message = await command_event.respond(make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True))
+            current_message = await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True)
+            )
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
@@ -2653,7 +2661,10 @@ class FederationBot(Plugin):
         assert event_id is not None
 
         # This will retrieve the events and the auth chain, we only use the former here
-        (pdu_list, _,) = await self.federation_handler.get_state_ids_from_server(
+        (
+            pdu_list,
+            _,
+        ) = await self.federation_handler.get_state_ids_from_server(
             origin_server=origin_server,
             destination_server=destination_server,
             room_id=room_id,
@@ -2708,7 +2719,7 @@ class FederationBot(Plugin):
         list_of_buffer_lines = []
 
         # Use the sorted list to pull the events in order and begin the render
-        for (_, event_id) in list_of_event_ids:
+        for _, event_id in list_of_event_ids:
             buffered_message = ""
             event_base = event_to_event_base.get(event_id, None)
             if event_base:
@@ -3798,7 +3809,7 @@ class FederationBot(Plugin):
             (["event_type"], dc_etype),
             (["sender"], dc_sender),
         ]
-        for (_, event_base) in ordered_list:
+        for _, event_base in ordered_list:
             buffered_message = ""
             line_summary = event_base.to_template_line_summary(template_list)
             line_summary += " "
@@ -4102,7 +4113,7 @@ class FederationBot(Plugin):
                 )
                 if retry_count > 3:
                     await command_event.respond(
-                        f"Hit an error on public rooms after {retry_count+1} retry attempts: {public_room_result.http_code}: {public_room_result.reason} on {target_server}"
+                        f"Hit an error on public rooms after {retry_count + 1} retry attempts: {public_room_result.http_code}: {public_room_result.reason} on {target_server}"
                     )
                     return
                 retry_count += 1
@@ -4211,7 +4222,10 @@ class FederationBot(Plugin):
             if room_id_or_alias.startswith("#"):
                 # look up the room alias. The server is extracted from the alias itself.
                 try:
-                    (room_id, list_of_servers,) = await self.federation_handler.resolve_room_alias(
+                    (
+                        room_id,
+                        list_of_servers,
+                    ) = await self.federation_handler.resolve_room_alias(
                         origin_server=origin_server,
                         room_alias=room_id_or_alias,
                     )

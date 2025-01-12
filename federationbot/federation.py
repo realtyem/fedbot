@@ -358,7 +358,7 @@ class FederationHandler:
         room_id: str,
         event_id: str,
         timeout: float = 10.0,
-    ) -> Tuple[List[str], List[str],]:
+    ) -> Tuple[List[str], List[str]]:
         response = await self.api.get_state_ids(
             origin_server,
             destination_server,
