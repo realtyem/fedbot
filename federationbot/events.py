@@ -102,6 +102,14 @@ class EventBase:
         self,
         template_list: Sequence[Tuple[Sequence[str], DisplayLineColumnConfig]],
     ) -> str:
+        """
+        Take a template list and retrieve all the attributes then append them
+        before sending them back
+
+        The template list is a bunch of tuples containing the string name of the
+        attribute to look for on the EventBase, and the DisplayLineColumnConfig
+        to handle the render for the line
+        """
         summary = ""
         for template_item in template_list:
             attributes, dc = template_item
