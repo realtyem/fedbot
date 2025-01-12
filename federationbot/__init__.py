@@ -2257,7 +2257,7 @@ class FederationBot(Plugin):
                     worker_server_name,
                     force_rediscover=True,
                     diagnostics=True,
-                    timeout_seconds=10.0,
+                    timeout=10.0,
                 )
 
                 queue.task_done()

@@ -56,14 +56,14 @@ class FederationHandler:
         await self.room_version_cache.stop()
         await self.api.shutdown()
 
-    async def get_server_keys(self, server_name: str, timeout: float = 10.0) -> ServerVerifyKeys:
-        response = await self.api.get_server_keys(server_name=server_name, timeout=timeout)
+    async def get_server_keys(self, server_name: str, **kwargs) -> ServerVerifyKeys:
+        response = await self.api.get_server_keys(server_name=server_name, **kwargs)
 
         json_response = response.json_response
         return ServerVerifyKeys(json_response)
 
     async def get_server_keys_from_notary(
-        self, fetch_server_name: str, from_server_name: str, timeout: float = 10.0
+        self, fetch_server_name: str, from_server_name: str, **kwargs
     ) -> ServerVerifyKeys:
         minimum_valid_until_ts = int(time.time() * 1000) + (30 * 60 * 1000)  # Add 30 minutes
 
@@ -71,7 +71,7 @@ class FederationHandler:
             fetch_server_name=fetch_server_name,
             from_server_name=from_server_name,
             minimum_valid_until_ts=minimum_valid_until_ts,
-            timeout=timeout,
+            **kwargs,
         )
 
         server_verify_keys = ServerVerifyKeys({})
@@ -81,7 +81,7 @@ class FederationHandler:
         return server_verify_keys
 
     async def get_server_key_by_id(
-        self, for_server_name: str, key_id_needed: str, timeout: float = 10.0
+        self, for_server_name: str, key_id_needed: str, **kwargs
     ) -> Dict[KeyID, KeyContainer]:
 
         key_id_formatted = KeyID(key_id_needed)
@@ -90,10 +90,10 @@ class FederationHandler:
             if key_id_formatted in cached_server_keys.verify_keys:
                 return cached_server_keys.verify_keys
 
-        server_verify_keys = await self.get_server_keys(for_server_name, timeout)
+        server_verify_keys = await self.get_server_keys(for_server_name, **kwargs)
 
         if key_id_formatted not in server_verify_keys.verify_keys:
-            server_verify_keys = await self.get_server_keys_from_notary(for_server_name, self.hosting_server, timeout)
+            server_verify_keys = await self.get_server_keys_from_notary(for_server_name, self.hosting_server, **kwargs)
 
         # At this point we know
         # 1. Wasn't in the cache before(or at least this one key id wasn't)
@@ -180,9 +180,9 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         event_id: str,
-        timeout: float = 10.0,
         inject_new_data: Optional[Dict[str, Any]] = None,
         keys_to_pop: Optional[str] = None,
+        **kwargs,
     ) -> Dict[str, EventBase]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
@@ -209,7 +209,7 @@ class FederationHandler:
             destination_server,
             origin_server,
             event_id,
-            timeout=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -251,7 +251,7 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         events_list: Union[Sequence[str], Set[str]],
-        timeout: float = 10.0,
+        **kwargs,
     ) -> Dict[str, EventBase]:
         """
         Retrieve multiple Events from a given server. Uses Async Tasks and a Queue to
@@ -278,7 +278,7 @@ class FederationHandler:
                     origin_server=origin_server,
                     destination_server=destination_server,
                     event_id=worker_event_id,
-                    timeout=timeout,
+                    **kwargs,
                 )
 
                 for r_event_id, event_base in event_base_dict.items():
@@ -358,14 +358,14 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> Tuple[List[str], List[str]]:
         response = await self.api.get_state_ids(
             origin_server,
             destination_server,
             room_id,
             event_id,
-            timeout=timeout,
+            **kwargs,
         )
 
         pdu_list = response.json_response.get("pdu_ids", [])
@@ -379,14 +379,14 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id: str,
-        timeout: float = 60.0,
+        **kwargs,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         response = await self.api.get_state(
             origin_server,
             destination_server,
             room_id,
             event_id,
-            timeout=timeout,
+            **kwargs,
         )
 
         pdus_list = response.json_response.get("pdus", [])
@@ -440,13 +440,13 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         event_data: Sequence[Dict[str, Any]],
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.api.put_pdu_transaction(
             origin_server,
             destination_server,
             event_data,
-            timeout=timeout,
+            **kwargs,
         )
 
         return response
@@ -459,7 +459,7 @@ class FederationHandler:
         limit: int = 10,
         since: Optional[str] = None,
         third_party_instance_id: Optional[str] = None,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         if not origin_server:
             origin_server = self.hosting_server
@@ -473,7 +473,7 @@ class FederationHandler:
             limit=limit,
             since=since,
             third_party_instance_id=third_party_instance_id,
-            timeout=timeout,
+            **kwargs,
         )
 
         return response
@@ -483,7 +483,7 @@ class FederationHandler:
         origin_server: Optional[str],
         destination_server: Optional[str],
         room_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> int:
         room_version = self.room_version_cache.get(room_id)
         if room_version:
@@ -500,7 +500,7 @@ class FederationHandler:
                 destination_server=destination_server,
                 room_id=room_id,
                 user_id=self.bot_mxid,
-                timeout=timeout,
+                **kwargs,
             )
         except MatrixError:
             # TODO: Could do something smarter here, like check state
@@ -538,7 +538,6 @@ class FederationHandler:
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id,
-            # timeout=,
         )
         state_events = await self.get_events_from_server(
             origin_server=origin_server,
@@ -558,7 +557,7 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         user_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MakeJoinResponse:
         """
 
@@ -567,7 +566,6 @@ class FederationHandler:
             destination_server:
             room_id:
             user_id:
-            timeout:
 
         Returns: A MakeJoinResponse
         Raises: MatrixError with the data of why
@@ -578,7 +576,7 @@ class FederationHandler:
             destination_server=destination_server,
             room_id=room_id,
             user_id=user_id,
-            timeout=timeout,
+            **kwargs,
         )
         if response.http_code != 200:
             assert isinstance(response, MatrixError)
@@ -593,6 +591,7 @@ class FederationHandler:
         room_id: str,
         start_event_id: str,
         limit: int = 1,
+        **kwargs,
     ) -> List[EventBase]:
         """
         Retrieve a series of events from the backfill mechanism. This will have 3 types of
@@ -612,11 +611,7 @@ class FederationHandler:
         """
         room_version = await self.discover_room_version(origin_server, destination_server, room_id)
         response = await self.api.get_backfill(
-            origin_server,
-            destination_server,
-            room_id,
-            start_event_id,
-            limit=str(limit),
+            origin_server, destination_server, room_id, start_event_id, limit=str(limit), **kwargs
         )
         if response.http_code != 200:
             # If there was an error, put it into a format that is expected.
@@ -640,6 +635,7 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id_in_timeline: str,
+        **kwargs,
     ) -> List[str]:
         # Should be a faithful recreation of what Synapse does.
 
@@ -672,6 +668,7 @@ class FederationHandler:
             destination_server,
             room_id,
             event_id_in_timeline,
+            **kwargs,
         )
         fed_handler_logger.debug("get_hosts_in_room_ordered: got %d events from state", len(state_events))
         converted_state_events = []
@@ -701,15 +698,16 @@ class FederationHandler:
         return hosts_ordered
 
     async def get_event_auth(
-        self, origin_server: str, destination_server: str, room_id: str, event_id: str
+        self, origin_server: str, destination_server: str, room_id: str, event_id: str, **kwargs
     ) -> List[EventBase]:
         response = await self.api.get_event_auth(
             origin_server,
             destination_server,
             room_id,
             event_id,
+            **kwargs,
         )
-        room_version = await self.discover_room_version(origin_server, destination_server, room_id)
+        room_version = await self.discover_room_version(origin_server, destination_server, room_id, **kwargs)
         list_from_response = response.json_response.get("auth_chain", [])
         list_of_event_bases = parse_list_response_into_list_of_event_bases(list_from_response, room_version)
         return list_of_event_bases
