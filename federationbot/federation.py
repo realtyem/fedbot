@@ -1,4 +1,5 @@
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
+from dataclasses import asdict
 import asyncio
 import json
 import logging
@@ -583,11 +584,7 @@ class FederationHandler:
             assert isinstance(response, MatrixError)
             raise response
 
-        room_version: int = int(response.json_response.get("room_version", 0))
-        assert room_version > 0
-        prev_events = response.json_response.get("event", {}).get("prev_events", [])
-        auth_events = response.json_response.get("event", {}).get("auth_events", [])
-        return MakeJoinResponse(room_version=room_version, prev_events=prev_events, auth_events=auth_events)
+        return MakeJoinResponse(**asdict(response))
 
     async def get_events_from_backfill(
         self,
@@ -613,7 +610,7 @@ class FederationHandler:
             * Error from federation response in the EventError custom class
 
         """
-        room_version = int(await self.discover_room_version(origin_server, destination_server, room_id))
+        room_version = await self.discover_room_version(origin_server, destination_server, room_id)
         response = await self.api.get_backfill(
             origin_server,
             destination_server,
