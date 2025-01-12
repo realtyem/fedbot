@@ -3641,6 +3641,7 @@ class FederationBot(Plugin):
         # Time to start rendering. Build the header lines first
         header_message = ""
         dc_depth = DisplayLineColumnConfig("Depth")
+        dc_eid = DisplayLineColumnConfig("Event ID", initial_size=44)
         dc_etype = DisplayLineColumnConfig("Event Type")
         dc_sender = DisplayLineColumnConfig("Sender")
         dc_extras = DisplayLineColumnConfig("Extras")
@@ -3661,6 +3662,7 @@ class FederationBot(Plugin):
 
         # Build the header line...
         header_message += f"{dc_depth.pad()} "
+        header_message += f"{dc_eid.pad()} "
         header_message += f"{dc_etype.pad()} "
         header_message += f"{dc_sender.pad()} "
         header_message += f"{dc_extras.pad()}\n"
@@ -3672,18 +3674,17 @@ class FederationBot(Plugin):
         # Begin the render, first construct the template list
         template_list = [
             (["depth"], dc_depth),
+            (["event_id"], dc_eid),
             (["event_type"], dc_etype),
             (["sender"], dc_sender),
         ]
-        for (_, event_base) in pdu_list:
-            buffered_message = ""
+        for _, event_base in pdu_list:
             line_summary = event_base.to_template_line_summary(template_list)
             line_summary += " "
             line_summary += event_base.to_extras_summary()
+            line_summary += f"{line_summary}\n"
 
-            buffered_message += f"{line_summary}\n"
-
-            list_of_buffer_lines.extend([buffered_message])
+            list_of_buffer_lines.extend([line_summary])
 
         # Chunk the data as there may be a few 'pages' of it
         final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
