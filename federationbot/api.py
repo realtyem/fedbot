@@ -568,15 +568,6 @@ class FederationApi:
             **kwargs,
         )
 
-        if response.http_code != 200:
-            fedapi_logger.debug(
-                "get_event: %s: got %d: %s %s",
-                destination_server,
-                response.http_code,
-                response.errcode,
-                response.error or response.reason,
-            )
-
         return response
 
     async def get_state_ids(
