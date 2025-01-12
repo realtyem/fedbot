@@ -149,7 +149,7 @@ class FederationApi:
         force_ip: Optional[str] = None,
         force_port: Optional[int] = None,
         content: Optional[Dict[str, Any]] = None,
-        timeout_seconds: float = 10.0,
+        timeout: float = 10.0,
     ) -> ClientResponse:
         """
         Retrieve json response from over federation. This inner function handles
@@ -166,7 +166,7 @@ class FederationApi:
             server_result: Allows access to server discovery data, like port, host
                 header, and sni data
             content: if not a GET request, the content to send
-            timeout_seconds: float
+            timeout: float of seconds before socket read timeout occurs
 
         Returns: A ClientResponse aiohttp context manager thingy
 
@@ -237,7 +237,7 @@ class FederationApi:
             # This is the most useful for detecting bad servers
             sock_connect=SOCKET_TIMEOUT_SECONDS,
             # This is the one that may have the longest time, as we wait for a server to send a response
-            sock_read=timeout_seconds,
+            sock_read=timeout,
             # defaults to 5, for roundups on timeouts
             # ceil_threshold=5.0,
         )
@@ -323,9 +323,9 @@ class FederationApi:
         method: str = "GET",
         force_rediscover: bool = False,
         diagnostics: bool = False,
-        timeout_seconds: float = 10.0,
         origin_server: Optional[str] = None,
         content: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ) -> MatrixResponse:
         """
         Retrieve json response from over federation. This outer-level function handles
@@ -341,7 +341,7 @@ class FederationApi:
             force_rediscover: in case we need to bypass the cache to redo server
                 discovery
             diagnostics: Collect diagnostic data. Errors are always collected
-            timeout_seconds: Float of how many seconds before timeout
+            timeout: Float of how many seconds before timeout
             origin_server: The server to send the request as, signing keys will be
                 required to be setup in the config files for authed requests
             content: for non-GET requests, the Dict that will be transformed into json
@@ -364,6 +364,7 @@ class FederationApi:
             server_result = await self.delegation_handler.discover_server(
                 destination_server_name,
                 diag_info=diag_info,
+                **kwargs,
             )
 
         reference_key = self.task_controller.setup_task_set()
@@ -377,7 +378,7 @@ class FederationApi:
             origin_server=origin_server,
             server_result=server_result,
             content=content,
-            timeout_seconds=timeout_seconds,
+            **kwargs,
         )
         try:
             response_tuple = await self.task_controller.get_task_results(reference_key, threaded=True)
@@ -491,14 +492,14 @@ class FederationApi:
         server_name: str,
         force_rediscover: bool = False,
         diagnostics: bool = False,
-        timeout_seconds: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             server_name,
             "/_matrix/federation/v1/version",
             force_rediscover=force_rediscover,
             diagnostics=diagnostics,
-            timeout_seconds=timeout_seconds,
+            **kwargs,
         )
 
         if diagnostics and response.diag_info is not None:
@@ -510,11 +511,11 @@ class FederationApi:
 
         return response
 
-    async def get_server_keys(self, server_name: str, timeout: float = 10.0) -> MatrixResponse:
+    async def get_server_keys(self, server_name: str, **kwargs) -> MatrixResponse:
         response = await self.federation_request(
             server_name,
             "/_matrix/key/v2/server",
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -533,13 +534,13 @@ class FederationApi:
         fetch_server_name: str,
         from_server_name: str,
         minimum_valid_until_ts: int,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             from_server_name,
             f"/_matrix/key/v2/query/{fetch_server_name}",
             query_args=[("minimum_valid_until_ts", minimum_valid_until_ts)],
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -558,13 +559,13 @@ class FederationApi:
         destination_server: str,
         origin_server: str,
         event_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server,
             f"/_matrix/federation/v1/event/{event_id}",
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -584,14 +585,14 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server,
             f"/_matrix/federation/v1/state_ids/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -611,14 +612,14 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        timeout: float = 60.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server,
             f"/_matrix/federation/v1/state/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -638,13 +639,13 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server,
             f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -664,7 +665,7 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         utc_time_at_ms: int,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         # With no errors, will produce a json like:
         # {
@@ -676,7 +677,7 @@ class FederationApi:
             f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
             query_args=[("dir", "b"), ("ts", utc_time_at_ms)],
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -697,7 +698,7 @@ class FederationApi:
         room_id: str,
         event_id: str,
         limit: str = "10",
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
 
         response = await self.federation_request(
@@ -705,7 +706,7 @@ class FederationApi:
             f"/_matrix/federation/v1/backfill/{room_id}",
             query_args=[("v", event_id), ("limit", limit)],
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -724,7 +725,7 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         user_mxid: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         # url = URL(
         #     f"https://{destination_server}/_matrix/federation/v1/user/devices/{mxid}"
@@ -734,7 +735,7 @@ class FederationApi:
             destination_server,
             f"/_matrix/federation/v1/user/devices/{user_mxid}",
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -753,14 +754,14 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         room_alias: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_request(
             destination_server,
             "/_matrix/federation/v1/query/directory",
             query_args=[("room_alias", room_alias)],
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -779,7 +780,7 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         pdus_to_send: Sequence[Dict[str, Any]],
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         formatted_data: Dict[str, Any] = {}
         now = int(time.time() * 1000)
@@ -794,8 +795,8 @@ class FederationApi:
             f"/_matrix/federation/v1/send/{now}",
             method="PUT",
             content=formatted_data,
-            timeout_seconds=timeout,
             origin_server=origin_server,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -817,7 +818,7 @@ class FederationApi:
         limit: int = 10,
         since: Optional[str] = None,
         third_party_instance_id: Optional[str] = None,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         query_args = [
             ("include_all_networks", str(include_all_networks).lower()),
@@ -834,7 +835,7 @@ class FederationApi:
             "/_matrix/federation/v1/publicRooms",
             query_args=query_args,
             origin_server=origin_server,
-            timeout_seconds=timeout,
+            **kwargs,
         )
 
         if response.http_code != 200:
@@ -854,7 +855,7 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         user_id: str,
-        timeout: float = 10.0,
+        **kwargs,
     ) -> MatrixResponse:
         # In an ideal world, this would expand correctly in aiohttp. In reality, it does not.
         # query_list={
@@ -869,7 +870,7 @@ class FederationApi:
             destination_server,
             f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
             query_args=query_list,
-            timeout_seconds=timeout,
+            **kwargs,
             origin_server=origin_server,
         )
 

@@ -2024,6 +2024,7 @@ class FederationBot(Plugin):
                     _host,
                     room_id,
                     str(self.client.mxid),
+                    timeout=5,
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
@@ -2257,7 +2258,7 @@ class FederationBot(Plugin):
                     worker_server_name,
                     force_rediscover=True,
                     diagnostics=True,
-                    timeout_seconds=10.0,
+                    timeout=10.0,
                 )
 
                 queue.task_done()

@@ -490,7 +490,7 @@ class DelegationHandler:
 
         return host_port_tuples
 
-    async def make_well_known_request(self, host: str, diag_info: DiagnosticInfo) -> Optional[Dict[str, Any]]:
+    async def make_well_known_request(self, host: str, diag_info: DiagnosticInfo, **kwargs) -> Optional[Dict[str, Any]]:
         """
         Make the GET request to the well-known endpoint. Borrow the error handling code from FederationHandler
         Args:
@@ -500,7 +500,12 @@ class DelegationHandler:
         Returns: A Dict[str, Any] of the JSON returned, or None
 
         """
-        status, request_time, content = await self.make_simple_request(host, "/.well-known/matrix/server", diag_info)
+        status, request_time, content = await self.make_simple_request(
+            host,
+            "/.well-known/matrix/server",
+            diag_info,
+            timeout=2,
+        )
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
         if status == 404:
             diag_info.mark_no_well_known()
@@ -525,6 +530,7 @@ class DelegationHandler:
         port: int,
         diag_info: DiagnosticInfo,
         server_result: ServerResult,
+        **kwargs,
     ) -> Tuple[bool, Tuple[str, int], Optional[Dict[str, Any]], float]:
         """
         Make the GET request to the federation version endpoint. Borrow the error handling code from FederationHandler
@@ -547,6 +553,7 @@ class DelegationHandler:
             server_result=server_result,
             force_ip=ip_address,
             force_port=port,
+            timeout=2,
         )
 
         if status != 200 or (status == 200 and content is None):
@@ -569,6 +576,7 @@ class DelegationHandler:
         server_result: Optional[ServerResult] = None,
         force_ip: Optional[str] = None,
         force_port: Optional[int] = None,
+        **kwargs,
     ) -> Tuple[int, float, Optional[Dict[str, Any]]]:
         content: Optional[Dict[str, Any]] = None
         # This is dumb, but due to how async requests are made there was no nice way in existing infrastructure to keep
@@ -578,7 +586,7 @@ class DelegationHandler:
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
             response = await self.fed_request_callback(
-                hostname, path, server_result=server_result, force_ip=force_ip, force_port=force_port
+                hostname, path, server_result=server_result, force_ip=force_ip, force_port=force_port, **kwargs
             )
 
         # The callback used above handles a boatload of individual exceptions and consolidates them into one
@@ -917,6 +925,7 @@ class DelegationHandler:
         self,
         server_name: str,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
+        **kwargs,
     ) -> ServerResult:
         """
         Pulls in the necessary information for discovering any delegation for a server, then does a check on the
@@ -936,7 +945,9 @@ class DelegationHandler:
             ip_address, port = ip_port_tuple
             test_task_list.append(
                 asyncio.create_task(
-                    self.make_version_request(server_name, ip_address, int(port), diag_info, server_result=result)
+                    self.make_version_request(
+                        server_name, ip_address, int(port), diag_info, server_result=result, **kwargs
+                    )
                 )
             )
 
