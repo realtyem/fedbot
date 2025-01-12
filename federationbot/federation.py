@@ -700,6 +700,20 @@ class FederationHandler:
         fed_handler_logger.debug("get_hosts_in_room_ordered: got %d hosts", len(hosts_ordered))
         return hosts_ordered
 
+    async def get_event_auth(
+        self, origin_server: str, destination_server: str, room_id: str, event_id: str
+    ) -> List[EventBase]:
+        response = await self.api.get_event_auth(
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
+        )
+        room_version = await self.discover_room_version(origin_server, destination_server, room_id)
+        list_from_response = response.json_response.get("auth_chain", [])
+        list_of_event_bases = parse_list_response_into_list_of_event_bases(list_from_response, room_version)
+        return list_of_event_bases
+
 
 def filter_events_based_on_type(events: List[EventBase], filter_by: str) -> List[EventBase]:
     events_to_return = []
