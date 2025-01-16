@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from enum import Enum
 from types import SimpleNamespace
 
+from federationbot.errors import ServerUnreachable
+
 
 class ResponseStatusType(Enum):
     OK = "OK"
@@ -95,6 +97,7 @@ class ServerResult:
 
     host: str
     well_known_host: Optional[str]
+    port: str
     host_header: str
     sni_server_name: str
     errors: List[str]
@@ -110,6 +113,7 @@ class ServerResult:
         self,
         list_of_ip4_port_tuples: List[Tuple[str, str]],
         list_of_ip6_port_tuples: List[Tuple[str, str]],
+        port: str,
         host_header: Optional[str] = None,
         sni_server_name: Optional[str] = None,
         host: Optional[str] = None,
@@ -120,20 +124,23 @@ class ServerResult:
         self.host_header = host_header if host_header else ""
         self.sni_server_name = sni_server_name if sni_server_name else ""
         self.well_known_host = well_known_host
+        self.port = port
         self.errors = []
         self.diag_info = diag_info
         self.list_of_ip4_port_tuples = list_of_ip4_port_tuples
         self.list_of_ip6_port_tuples = list_of_ip6_port_tuples
 
     def get_ip_port_or_hostname(self) -> Tuple[str, str]:
+        # Use the hostname, which takes advantage of aiohttp dns caching
+        if not self.chosen_ip_port_tuple and self.port:
+            self.chosen_ip_port_tuple = self.well_known_host or self.host, self.port
         # For the moment, just choose the first tuple in the list, and remember it's a (host:str, port:str)
         if not self.chosen_ip_port_tuple and self.list_of_ip4_port_tuples:
             self.chosen_ip_port_tuple = self.list_of_ip4_port_tuples[0]
         if not self.chosen_ip_port_tuple and self.list_of_ip6_port_tuples:
             self.chosen_ip_port_tuple = self.list_of_ip6_port_tuples[0]
-        # Fallback to the hostname, which forces another DNS lookup in case something went wrong
         try:
             assert self.chosen_ip_port_tuple is not None
-        except AssertionError:
-            print(f"{self.host} had no ip_port tuples at critical stage")
+        except AssertionError as e:
+            raise ServerUnreachable(f"{self.host} had no ip_port tuples at critical stage") from e
         return self.chosen_ip_port_tuple  # or self.well_known_host or self.host

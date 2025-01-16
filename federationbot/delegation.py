@@ -644,23 +644,25 @@ class DelegationHandler:
         # HOST header should be the result of the well_known request(including port)
         diag_info.mark_step_num("Step 3.1", "Checking Well-Known for Literal IP")
         if is_this_an_ip_address(well_known_host):
+            _resolved_port = well_known_port or "8448"
             if "." in well_known_host:
                 # It's a loose check, as it's not really important right now which one this goes in
-                ip4_address_port_tuples = [(well_known_host, well_known_port or "8448")]
+                ip4_address_port_tuples = [(well_known_host, _resolved_port)]
 
             else:
-                ip6_address_port_tuples = [(well_known_host, well_known_port or "8448")]
+                ip6_address_port_tuples = [(well_known_host, _resolved_port)]
 
-            diag_info.add(f"Host defined in Well-Known was Literal IP {well_known_host}:{well_known_port or '8448'}")
+            diag_info.add(f"Host defined in Well-Known was Literal IP {well_known_host}:{_resolved_port}")
             diag_info.mark_well_known_maybe_found()
 
             # Literal IP address names will not have any DNS resolution done
             return ServerResult(
                 ip4_address_port_tuples,
                 ip6_address_port_tuples,
+                _resolved_port,
                 host=original_host,
                 well_known_host=well_known_host,
-                host_header=f"{well_known_host}:{well_known_port or '8448'}",
+                host_header=f"{well_known_host}:{_resolved_port}",
                 sni_server_name=well_known_host,
                 diag_info=diag_info,
             )
@@ -681,6 +683,7 @@ class DelegationHandler:
             return ServerResult(
                 _ip4_address_port_tuples,
                 _ip6_address_port_tuples,
+                well_known_port,
                 host=original_host,
                 well_known_host=well_known_host,
                 host_header=f"{well_known_host}:{well_known_port}",
@@ -716,6 +719,7 @@ class DelegationHandler:
             return ServerResult(
                 ip4_address_port_tuples,
                 ip6_address_port_tuples,
+                "",
                 host=original_host,
                 well_known_host=well_known_host,
                 host_header=well_known_host,
@@ -738,6 +742,7 @@ class DelegationHandler:
         return ServerResult(
             ip4_addresses,
             ip6_addresses,
+            "8448",
             host=original_host,
             well_known_host=well_known_host,
             host_header=well_known_host,
@@ -804,15 +809,17 @@ class DelegationHandler:
 
         if is_this_an_ip_address(host):
             diag_info.add(f"Server is literal IP: {host}")
+            _resolved_port = port or "8448"
             if "." in host:
-                ip4_address_port_tuples = [(host, port or "8448")]
+                ip4_address_port_tuples = [(host, _resolved_port)]
 
             else:
-                ip6_address_port_tuples = [(host, port or "8448")]
+                ip6_address_port_tuples = [(host, _resolved_port)]
 
             return ServerResult(
                 ip4_address_port_tuples,
                 ip6_address_port_tuples,
+                _resolved_port,
                 host=host,
                 # Remember that the HOST header only gets a port if one was included in the server name
                 host_header=f"{host}{':' + port if port else ''}",
@@ -834,6 +841,7 @@ class DelegationHandler:
             return ServerResult(
                 ip4_address_port_tuples,
                 ip6_address_port_tuples,
+                port,
                 host=host,
                 host_header=f"{host}:{port}",
                 sni_server_name=host,
@@ -895,6 +903,7 @@ class DelegationHandler:
             return ServerResult(
                 ip4_address_port_tuples,
                 ip6_address_port_tuples,
+                "",
                 host=host,
                 well_known_host=host,
                 host_header=host,
@@ -915,6 +924,7 @@ class DelegationHandler:
         return ServerResult(
             ip4_address_port_tuples,
             ip6_address_port_tuples,
+            "",
             host=host,
             host_header=host,
             sni_server_name=host,
@@ -957,28 +967,8 @@ class DelegationHandler:
         # Going to use the default of asyncio.ALL_COMPLETED for block. IP6 addresses on my server don't complete, which
         # exposes that errors finish really fast, but not successfully
         try:
-            done, pending = await asyncio.wait(test_task_list)
+            await asyncio.wait(test_task_list)
         except Exception as e:
             server_discovery_logger.warning(f"discover_server: {server_name} had an exception: {e}")
-        else:
-            # Set the fastest response time to a really high number, so that a call to min() will override it
-            fastest_response_time = 60000.0
-            for result_break_down in done:
-                # I don't think this code path can have an exception here, but keep this for now
-                # exception = result_break_down.exception()
-                # if isinstance(exception, Exception):
-                #     server_discovery_logger.warning(f"discover_server: {server_name} Exception found: {exception}")
-
-                # bool,  (str,    int),    Dict, float
-                success, (res_ip, res_port), _, request_time = result_break_down.result()
-
-                if success:
-                    if fastest_response_time > request_time:
-                        fastest_response_time = request_time
-                        # By saving the ip/port directly, we'll always contact the same server if they are load-balanced
-                        result.chosen_ip_port_tuple = (res_ip, str(res_port))
-
-            for result_break_down in pending:
-                result_break_down.cancel()
 
         return result
