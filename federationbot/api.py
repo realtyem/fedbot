@@ -111,7 +111,7 @@ class FederationApi:
         trace_config.on_dns_resolvehost_end.append(on_dns_resolvehost_end)
         trace_config.on_dns_resolvehost_start.append(on_dns_resolvehost_start)
 
-        connector = TCPConnector(limit=1000, limit_per_host=3, force_close=True)
+        connector = TCPConnector(ttl_dns_cache=60 * 60 * 5, limit=10000, limit_per_host=1, force_close=True)
         # TODO: Make a custom Resolver to handle server discovery
         self.http_client = ClientSession(
             connector=connector,
