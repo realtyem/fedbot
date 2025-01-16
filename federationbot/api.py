@@ -128,16 +128,6 @@ class FederationApi:
         predicate=lambda r: r.status == 429,
         value=lambda r: int(r.headers.get("Retry-After")),
     )
-    @backoff.on_exception(
-        backoff.expo,
-        PluginTimeout,
-        max_tries=3,
-        logger=None,
-        on_backoff=[backoff_logging_backoff_handler, backoff_update_retries_handler],
-        on_giveup=[backoff_logging_giveup_handler, backoff_update_retries_handler],
-        max_value=4.0,
-        base=1.5,
-    )
     async def _federation_request(
         self,
         destination_server_name: str,
@@ -315,6 +305,16 @@ class FederationApi:
 
         return response
 
+    @backoff.on_exception(
+        backoff.expo,
+        PluginTimeout,
+        max_tries=3,
+        logger=None,
+        on_backoff=[backoff_logging_backoff_handler, backoff_update_retries_handler],
+        on_giveup=[backoff_logging_giveup_handler, backoff_update_retries_handler],
+        max_value=4.0,
+        base=1.5,
+    )
     async def federation_request(
         self,
         destination_server_name: str,
