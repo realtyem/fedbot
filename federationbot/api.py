@@ -183,9 +183,9 @@ class FederationApi:
                 raise ServerDiscoveryError(
                     "No DNS entries found", f"No DNS queries had answers for {destination_server_name}"
                 )
-            else:
-                resolved_destination_server = force_ip or host
-                destination_port = int(port)
+
+            resolved_destination_server = force_ip or host
+            destination_port = int(port)
 
             server_hostname_sni = server_result.sni_server_name if server_result.use_sni else None
             request_headers.update({"Host": server_result.host_header})
