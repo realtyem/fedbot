@@ -1,4 +1,5 @@
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from asyncio import sleep
 import json
 import logging
 import time
@@ -140,6 +141,7 @@ class FederationApi:
         force_port: Optional[int] = None,
         content: Optional[Dict[str, Any]] = None,
         timeout: float = 10.0,
+        stagger_requests_by: float = 0.0,
     ) -> ClientResponse:
         """
         Retrieve json response from over federation. This inner function handles
@@ -232,6 +234,8 @@ class FederationApi:
             # ceil_threshold=5.0,
         )
 
+        if stagger_requests_by > 0:
+            await sleep(stagger_requests_by)
         try:
             response = await self.http_client.request(
                 method=method,
