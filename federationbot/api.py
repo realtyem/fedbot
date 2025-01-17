@@ -575,8 +575,8 @@ class FederationApi:
         )
 
         if response.http_code != 200:
-            fedapi_logger.warning(
-                "get_event_auth: %s: got %d: %s %s",
+            fedapi_logger.debug(
+                "get_state_ids: %s: got %d: %s %s",
                 destination_server,
                 response.http_code,
                 response.errcode,
