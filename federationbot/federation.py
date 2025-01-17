@@ -83,8 +83,8 @@ class FederationHandler:
     async def get_server_key_by_id(
         self, for_server_name: str, key_id_needed: str, **kwargs
     ) -> Dict[KeyID, KeyContainer]:
-
         key_id_formatted = KeyID(key_id_needed)
+
         cached_server_keys = self._server_keys_cache.get(for_server_name)
         if cached_server_keys is not None:
             if key_id_formatted in cached_server_keys.verify_keys:
@@ -288,6 +288,9 @@ class FederationHandler:
 
                 queue.task_done()
 
+        fed_handler_logger.debug(
+            f"get_events_from_server: requesting {len(events_list)} events from {destination_server}"
+        )
         event_queue: asyncio.Queue[str] = asyncio.Queue()
         for event_id in events_list:
             await event_queue.put(event_id)
