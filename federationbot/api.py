@@ -386,12 +386,8 @@ class FederationApi:
             # Since there was an exception, cache the result unless it was a timeout error, as that shouldn't count
             server_result.unhealthy = str(e.summary_exception)
 
-            if not isinstance(e, PluginTimeout):
-                # Most all errors will be cached for 5 minutes
-                server_result.retry_time_s = now + 5 * 60
-            else:
-                # Timeout errors get cached for 30 seconds
-                server_result.retry_time_s = now + 30
+            # Errors will be cached for 10 minutes
+            server_result.retry_time_s = now + 10 * 60
 
             self.server_discovery_cache.set(server_result.host, server_result)
 
