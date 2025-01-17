@@ -1,4 +1,4 @@
-from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Type, Union, cast
+from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Type, Union
 from asyncio import QueueEmpty
 from datetime import datetime
 from enum import Enum
@@ -2045,66 +2045,90 @@ class FederationBot(Plugin):
             limit=len(host_list),
         )
 
-        results: Sequence[Tuple[str, MakeJoinResponse | MatrixError] | BaseException] = cast(
-            Sequence[Tuple[str, MakeJoinResponse | MatrixError] | BaseException],
-            await self.reaction_task_controller.tasks_sets[reference_task_key].gather_results(),
+        results: Sequence[Tuple[str, MakeJoinResponse | MatrixError]] = (
+            await self.reaction_task_controller.get_task_results(reference_task_key, return_exceptions=False)
         )
+
+        await self.reaction_task_controller.cancel(reference_task_key)
 
         list_of_buffered_messages: List[str] = []
 
         server_name_dc = DisplayLineColumnConfig("Server Name")
 
-        # Tuple should be event_id and Event
-        last_event_map: Dict[str, Tuple[str, Optional[Event]]] = {}
+        good_results_queue: asyncio.Queue[Tuple[str, MakeJoinResponse]] = asyncio.Queue()
+        bad_results_queue: asyncio.Queue[Tuple[str, MatrixError]] = asyncio.Queue()
+        # Split the results
         for result in results:
-            if isinstance(result, BaseException):
-                raise result
+            try:
+                _host_sort, _result_sort = result
+                server_name_dc.maybe_update_column_width(_host_sort)
 
-            host, fed_response = result
-            server_name_dc.maybe_update_column_width(host)
-            if isinstance(fed_response, MakeJoinResponse):
-                prev_events = fed_response.prev_events
-                retrieved_prev_events = await self.federation_handler.get_events_from_server(
-                    origin_server=origin_server,
-                    destination_server=host,
-                    events_list=prev_events,
+                if isinstance(_result_sort, MatrixError):
+                    bad_results_queue.put_nowait((_host_sort, _result_sort))
+                else:
+                    assert isinstance(_result_sort, MakeJoinResponse)
+                    good_results_queue.put_nowait((_host_sort, _result_sort))
+            except BaseException as e:
+                self.log.warning(f"Found an exception: {e}")
+
+        async def _head_parsing_worker(_queue: asyncio.Queue[Tuple[str, MakeJoinResponse]]) -> None:
+            _host, _result = _queue.get_nowait()
+            prev_events = _result.prev_events
+            # The process to follow:
+            # 1. retrieve all the prev_events
+            # 2. iterate through those to find the event with the latest timestamp
+            retrieved_prev_events = await self.federation_handler.get_events_from_server(
+                origin_server=origin_server,
+                destination_server=_host,
+                events_list=prev_events,
+            )
+
+            timestamp_from_newest = 0
+            event_from_newest = None
+            for (
+                retrieved_event_id,
+                retrieved_event,
+            ) in retrieved_prev_events.items():
+                # Save the initial map entry
+                assert isinstance(retrieved_event, Event)
+                if retrieved_event.origin_server_ts > timestamp_from_newest:
+                    timestamp_from_newest = retrieved_event.origin_server_ts
+                    event_from_newest = retrieved_event
+
+            assert event_from_newest is not None
+            glyph_auth_events = "".join(["A" for _ in event_from_newest.auth_events])
+            glyph_prev_events = "".join(["P" for _ in event_from_newest.prev_events])
+            list_of_buffered_messages.extend(
+                (
+                    f"{server_name_dc.pad(_host)}: {event_from_newest.event_id} | {pretty_print_timestamp(event_from_newest.origin_server_ts)} | {glyph_auth_events}:{glyph_prev_events}",
                 )
+            )
+            _queue.task_done()
 
-                for (
-                    retrieved_event_id,
-                    retrieved_event,
-                ) in retrieved_prev_events.items():
-                    # Save the initial map entry
-                    if isinstance(retrieved_event, Event):
-                        last_event_map.setdefault(host, (retrieved_event_id, retrieved_event))
-                        last_event_entry_id, _ = last_event_map[host]
-                        if (
-                            retrieved_event.origin_server_ts
-                            > retrieved_prev_events[last_event_entry_id].origin_server_ts  # type: ignore[attr-defined]
-                        ):
-                            last_event_map[host] = retrieved_event_id, retrieved_event
+        async def _head_error_worker(_queue: asyncio.Queue[Tuple[str, MatrixError]]) -> None:
+            _host_error, _result_error = _queue.get_nowait()
+            list_of_buffered_messages.extend(
+                (f"{server_name_dc.pad(_host_error)}: {_result_error.http_code}, {_result_error.reason}",)
+            )
+            _queue.task_done()
 
-        for result in results:
-            # self.log.info(f"head_command: result: {result}")
-            if isinstance(result, BaseException):
-                raise result
+        reference_task_key = self.reaction_task_controller.setup_task_set()
 
-            host, fed_response = result
-            if isinstance(fed_response, MatrixError):
-                list_of_buffered_messages.extend(
-                    (f"{server_name_dc.pad(host)}: {fed_response.http_code}, {fed_response.reason}",)
-                )
-            else:
-                le_id, le_event = last_event_map.get(host, ("eventid missing", None))
-                glyph_auth_events = "".join(["A" for _ in range(0, len(fed_response.auth_events))])
-                glyph_prev_events = "".join(["P" for _ in range(0, len(fed_response.prev_events))])
-                if le_event and isinstance(le_event, Event):
+        # These are one-off tasks, not workers. Create as many as we have servers to check
+        self.reaction_task_controller.add_tasks(
+            reference_task_key,
+            _head_parsing_worker,
+            good_results_queue,
+            limit=good_results_queue.qsize(),
+        )
 
-                    list_of_buffered_messages.extend(
-                        (
-                            f"{server_name_dc.pad(host)}: {le_id} | {pretty_print_timestamp(le_event.origin_server_ts)} | {glyph_auth_events}:{glyph_prev_events}",
-                        )
-                    )
+        self.reaction_task_controller.add_tasks(
+            reference_task_key,
+            _head_error_worker,
+            bad_results_queue,
+            limit=bad_results_queue.qsize(),
+        )
+        await self.reaction_task_controller.get_task_results(reference_task_key)
         await self.reaction_task_controller.cancel(reference_task_key)
 
         final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
