@@ -408,6 +408,7 @@ class FederationApi:
             headers = response.headers
             self.server_discovery_cache.set(server_result.host, server_result)
             for ctx in response._traces:  # noqa: W0212  # pylint:disable=protected-access
+                # The tracing context saves it's time in float of seconds
                 diag_info.trace_ctx = ctx._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
                 # self.logger.info(f"Found context info in _traces: {context}")
 

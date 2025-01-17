@@ -507,6 +507,16 @@ class DelegationHandler:
             timeout=2,
         )
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
+        # diag_info.add(f"trace context: {diag_info.trace_ctx}")
+        if diag_info.trace_ctx:
+            end_time = diag_info.trace_ctx.request_end
+            # if context.request_chunk_sent:
+            start_time = diag_info.trace_ctx.request_start
+            # else:
+            #     start_time =
+            calculated_time = (end_time - start_time) * 1000
+            diag_info.add(f"(Request took: {calculated_time} milliseconds)")
+
         if status == 404:
             diag_info.mark_no_well_known()
         elif status != 200 or (status == 200 and content is None):
@@ -556,6 +566,15 @@ class DelegationHandler:
             timeout=2,
         )
 
+        if diag_info.trace_ctx:
+            end_time = diag_info.trace_ctx.request_end
+            # if context.request_chunk_sent:
+            start_time = diag_info.trace_ctx.request_start
+            # else:
+            #     start_time =
+            calculated_time = (end_time - start_time) * 1000
+            diag_info.add(f"(Request took: {calculated_time} milliseconds)")
+
         if status != 200 or (status == 200 and content is None):
             # Don't forget to work around Caddy defaulting to 200 for unknown endpoints. I still believe this is against
             # spec and therefore is an error.
@@ -583,6 +602,9 @@ class DelegationHandler:
         # the request diagnostic message next to it's result. Save it here and add() it after the request is made.
         prerender_diag = f"Making request to {force_ip or hostname}{':' + str(force_port) if force_port else ''}"
         start_time = time.monotonic()
+        # reset the tracing from before, as we reuse the DiagnosticInfo
+        diag_info.trace_ctx = None
+
         try:
             # This will return a context manager called ClientResponse that will need to be parsed below
             response = await self.fed_request_callback(
@@ -604,7 +626,8 @@ class DelegationHandler:
             headers = response.headers
 
             diag_info.add(f"{prerender_diag}, Request status: {status}, reason: {reason}")
-
+            for ctx in response._traces:  # noqa: W0212  # pylint:disable=protected-access
+                diag_info.trace_ctx = ctx._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
             if status == 200:
                 # Potentially anything from 200 up to 500 can have something to say
                 try:
