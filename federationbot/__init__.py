@@ -2637,6 +2637,29 @@ class FederationBot(Plugin):
         event_id: Optional[str],
         server_to_request_from: Optional[str],
     ) -> None:
+        await self._state_command(command_event, room_id_or_alias, event_id, server_to_request_from)
+
+    @fed_command.subcommand(name="state_no_members", help="Request state over federation for a room.")
+    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
+    @command.argument(name="event_id", parser=is_event_id, required=False)
+    @command.argument(name="server_to_request_from", required=False)
+    async def state_no_members_command(
+        self,
+        command_event: MessageEvent,
+        room_id_or_alias: Optional[str],
+        event_id: Optional[str],
+        server_to_request_from: Optional[str],
+    ) -> None:
+        await self._state_command(command_event, room_id_or_alias, event_id, server_to_request_from, no_members=True)
+
+    async def _state_command(
+        self,
+        command_event: MessageEvent,
+        room_id_or_alias: Optional[str],
+        event_id: Optional[str],
+        server_to_request_from: Optional[str],
+        no_members: bool = False,
+    ) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -2723,6 +2746,10 @@ class FederationBot(Plugin):
         # 2. Get the depth's for row ordering
         list_of_event_ids: List[Tuple[int, EventID]] = []
         for event_id, event_id_entry in event_to_event_base.items():
+            # Use the about to be constructed list to curate what will be displayed later
+            if no_members and event_id_entry.event_type == "m.room.member":
+                continue
+
             list_of_event_ids.append((event_id_entry.depth, EventID(event_id)))
 
             dc_depth.maybe_update_column_width(len(str(event_id_entry.depth)))
