@@ -367,30 +367,21 @@ class FederationApi:
                 **kwargs,
             )
 
-        reference_key = self.task_controller.setup_task_set()
-        await self.task_controller.add_threaded_tasks(
-            reference_key,
-            self._federation_request,
-            destination_server_name,
-            path,
-            query_args=query_args,
-            method=method,
-            origin_server=origin_server,
-            server_result=server_result,
-            content=content,
-            **kwargs,
-        )
         try:
-            response_tuple = await self.task_controller.get_task_results(reference_key, threaded=True)
-            response = response_tuple[0]
-            if isinstance(response, BaseException):
-
-                raise response
+            response = await self._federation_request(
+                destination_server_name,
+                path,
+                query_args=query_args,
+                method=method,
+                origin_server=origin_server,
+                server_result=server_result,
+                content=content,
+                **kwargs,
+            )
 
         except FedBotException as e:
             fedapi_logger.warning(f"Problem on {destination_server_name}: {e}")
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
-            await self.task_controller.cancel(reference_key)
             diag_info.error(str(e.long_exception))
             # Since there was an exception, cache the result unless it was a timeout error, as that shouldn't count
             server_result.unhealthy = str(e.summary_exception)
@@ -447,9 +438,6 @@ class FederationApi:
 
             else:
                 result_dict = None
-
-        # Should be done with that threaded task by now, clean it up
-        await self.task_controller.cancel(reference_key)
 
         diag_info.tls_handled_by = headers.get("server", None)
 
