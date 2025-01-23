@@ -504,7 +504,7 @@ class DelegationHandler:
             host,
             "/.well-known/matrix/server",
             diag_info,
-            timeout=2,
+            timeout=3,
         )
         # Mark the DiagnosticInfo, as that's how any error codes get passed out
         # diag_info.add(f"trace context: {diag_info.trace_ctx}")
@@ -563,7 +563,7 @@ class DelegationHandler:
             server_result=server_result,
             force_ip=ip_address,
             force_port=port,
-            timeout=2,
+            timeout=3,
         )
 
         if diag_info.trace_ctx:

@@ -2024,7 +2024,7 @@ class FederationBot(Plugin):
                     _host,
                     room_id,
                     str(self.client.mxid),
-                    timeout=5,
+                    timeout=30,
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
@@ -2717,6 +2717,7 @@ class FederationBot(Plugin):
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id,
+            timeout=600,
         )
 
         prerender_message_2 = await command_event.respond(
