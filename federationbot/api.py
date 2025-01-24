@@ -227,7 +227,7 @@ class FederationApi:
             # the pool as well as establishing the connection itself.
             connect=None,
             # This is the most useful for detecting bad servers
-            sock_connect=SOCKET_TIMEOUT_SECONDS,
+            sock_connect=timeout,
             # This is the one that may have the longest time, as we wait for a server to send a response
             sock_read=timeout,
             # defaults to 5, for roundups on timeouts
