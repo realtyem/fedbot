@@ -1,68 +1,108 @@
-from typing import Any, Dict, List, Optional
+"""
+Response types for Matrix federation API requests.
+
+Provides strongly-typed response classes for handling Matrix federation API responses,
+including error handling and diagnostic information. Response objects include caching
+hints based on success/failure to help reduce federation traffic while maintaining
+reasonable retry periods.
+
+The response classes are used by FederationApi to provide type-safe access to HTTP
+responses, JSON data, error codes and diagnostic information from Matrix homeservers.
+"""
+
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
-from federationbot.server_result import DiagnosticInfo
+if TYPE_CHECKING:
+    from types import SimpleNamespace
 
-# The spec recommends caching responses for a while, to avoid excess traffic
-# For good results, keep for 24 hours
-GOOD_RESULT_TIMEOUT_MS = 24 * 60 * 60 * 1000
-# For bad results, only keep for 5 minutes
-BAD_RESULT_TIMEOUT_MS = 5 * 60 * 1000
+    from federationbot.server_result import DiagnosticInfo
+
+# Matrix spec recommends caching to avoid excess federation traffic
+GOOD_RESULT_TIMEOUT_MS = 24 * 60 * 60 * 1000  # 24 hours for successful responses
+BAD_RESULT_TIMEOUT_MS = 5 * 60 * 1000  # 5 minutes for failed responses
 
 
 @dataclass(kw_only=True)
 class MatrixResponse:
     """
-    The absolute base class for everything returned by requests, including exception information
+    Base class for all Matrix federation API responses.
+
+    Provides common fields for both successful responses and errors. All response types
+    inherit from this class to ensure consistent error handling and diagnostic data.
 
     Attributes:
-        http_code: Integer based status coding, 0 for system/connection level error, http values otherwise
-        reason: String message, either OK or a more verbose error
-        json_response: Any JSON received converted into Dict[str, Any]. Will be {} if nothing was received
-        diag_info: This is usually only included when using the delegation command
-        errcode: If there was an error, the 'errcode' from json
-        error: If there was an error, the 'error' from json
+        http_code: Status code (0 for system errors, otherwise HTTP status)
+        reason: Status message ("OK" or error description)
+        json_response: Parsed JSON response as dict
+        diag_info: Optional diagnostic info from delegation
+        errcode: Matrix protocol error code if error occurred
+        error: Detailed error message if error occurred
+        tracing_context: Request timing data for debugging
     """
 
-    http_code: int = 0
-    reason: str = ""
-    json_response: Dict[str, Any] = field(default_factory=dict)
-    diag_info: Optional[DiagnosticInfo] = None
-    errcode: Optional[str] = None
-    error: Optional[str] = None
-    tracing_context: Optional[SimpleNamespace] = None
+    http_code: int = field(default=0)
+    reason: str = field(default="")
+    json_response: dict[str, Any] = field(default_factory=dict)
+    diag_info: DiagnosticInfo | None = field(default=None)
+    errcode: str | None = field(default=None)
+    error: str | None = field(default=None)
+    tracing_context: SimpleNamespace | None = field(default=None)
 
 
 @dataclass
 class MatrixError(MatrixResponse, Exception):
     """
-    Generic Matrix-related error
+    Exception class for Matrix federation errors.
+
+    Combines MatrixResponse fields with Python's Exception class to allow
+    raising federation errors while preserving response data.
     """
 
 
 @dataclass
 class MatrixFederationResponse(MatrixResponse):
     """
+    Standard response type for Matrix federation API requests.
+
+    Used for federation endpoints that don't require specialized response parsing.
+    Inherits all fields from MatrixResponse without adding additional attributes.
+
     Attributes:
-        http_code:
-        reason:
+        http_code: HTTP status code from federation response
+        reason: Status message from federation response
     """
 
 
 @dataclass
 class MakeJoinResponse(MatrixResponse):
     """
-    Parsed data from a make_join request
+    Specialized response for the make_join federation endpoint.
+
+    Parses and validates the response from a make_join request, which provides
+    the data needed to join a room through federation.
+
+    Note: Room version is received as a string but stored as an integer.
+
+    Attributes:
+        room_version: Version number of the room being joined
+        prev_events: List of parent event IDs in the room's DAG
+        auth_events: List of event IDs needed to authenticate this join
     """
 
     room_version: int = field(default=0, init=False)
-    prev_events: List[str] = field(default_factory=list, init=False)
-    auth_events: List[str] = field(default_factory=list, init=False)
+    prev_events: list[str] = field(default_factory=list, init=False)
+    auth_events: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
-        # room version actually comes in as a string
-        # TODO: find out why it's not an integer
+        """
+        Initialize derived fields from JSON response data.
+
+        Extracts and converts room version, previous events, and auth events
+        from the make_join response JSON. Sets defaults if fields are missing.
+        """
         self.room_version = int(self.json_response.get("room_version", 1))
         self.prev_events = self.json_response.get("event", {}).get("prev_events", [])
         self.auth_events = self.json_response.get("event", {}).get("auth_events", [])
