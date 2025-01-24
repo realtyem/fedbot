@@ -1,0 +1,8 @@
+backoff>=2.2.1
+canonicaljson>=2.0.0
+dnspython>=2.7.0
+maubot>=0.5.1
+mautrix>=0.20.7
+more-itertools>=10.6.0
+signedjson>=1.1.4
+unpaddedbase64>=2.1.0
