@@ -1,21 +1,12 @@
 """
 Timing hooks for Matrix federation request tracing.
 
-This module provides AIOHTTP trace hooks used by FederationApi to monitor and debug
-Matrix federation requests. Each hook records timestamps for different stages of
-request lifecycle:
-- Request lifecycle (start/end/chunks/headers)
-- Connection handling (creation/reuse/queuing)
-- DNS resolution (cache hits/misses, hostname resolution)
+Provides AIOHTTP trace hooks used by FederationApi to monitor and debug Matrix
+federation requests. Records timestamps for request lifecycle stages to help
+diagnose federation connectivity and performance issues.
 
-These hooks are attached to the AIOHTTP client session in FederationApi to:
-- Track timing of federation requests to remote Matrix servers
-- Debug connection and DNS issues with federation requests
-- Monitor request performance and connection reuse
-- Help diagnose federation connectivity problems
-
-The timestamps are stored in the trace context and can be analyzed to understand
-request timing and identify bottlenecks in federation communication.
+The hooks track request timing, connection handling, and DNS resolution to help
+identify bottlenecks in federation communication.
 """
 
 from __future__ import annotations
