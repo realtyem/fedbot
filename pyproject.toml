@@ -24,7 +24,7 @@ disable = [
 
 [tool.poetry]
 name = "federationbot"
-version = "0.0.8"
+version = "0.0.9"
 description = "Maubot plugin for diagnosing Matrix federation response"
 authors = ["Jason Little <realtyem@gmail.com>"]
 repository = "https://github.com/realtyem/federationbot"
