@@ -21,7 +21,7 @@ ServerName = NewType("ServerName", str)  # Type for Matrix server names
 KeyID = NewType("KeyID", str)  # Type for Matrix key identifiers
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Signature:
     """Container for a Matrix digital signature."""
 
