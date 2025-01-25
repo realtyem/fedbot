@@ -21,7 +21,7 @@ ServerName = NewType("ServerName", str)  # Type for Matrix server names
 KeyID = NewType("KeyID", str)  # Type for Matrix key identifiers
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class Signature:
     """Container for a Matrix digital signature."""
 
@@ -33,37 +33,29 @@ class Signature:
         object.__setattr__(self, "decoded_signature", decode_base64(self.signature))
 
 
-@dataclass
+@dataclass(slots=True)
 class SignatureContainer:
     """Container mapping key IDs to their signatures."""
 
-    keyid: dict[KeyID, Signature] = field(default_factory=dict)
+    keyid: dict[KeyID, Signature] = field(default_factory=dict, init=False)
+    _raw_dict: dict[str, str] = field(default_factory=dict, repr=False)
 
-    def __init__(self, container_data: dict[str, str]) -> None:
-        """
-        Create signature container from raw signature data.
-
-        Args:
-            container_data: Dictionary mapping key IDs to signature strings
-        """
-        for key_id, signature in container_data.items():
+    def __post_init__(self) -> None:
+        """Create signature container from raw signature data."""
+        for key_id, signature in self._raw_dict.items():
             self.keyid[KeyID(key_id)] = Signature(signature)
 
 
-@dataclass
+@dataclass(slots=True)
 class Signatures:
     """Top-level container for all signatures from all servers."""
 
-    servers: dict[ServerName, SignatureContainer] = field(default_factory=dict)
+    servers: dict[ServerName, SignatureContainer] = field(default_factory=dict, init=False)
+    _raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
 
-    def __init__(self, data: dict[str, Any]) -> None:
-        """
-        Create signatures container from raw signature data.
-
-        Args:
-            data: Dictionary mapping server names to signature data
-        """
-        for server, container in data.items():
+    def __post_init__(self) -> None:
+        """Create signatures container from raw signature data."""
+        for server, container in self._raw_data.items():
             self.servers[ServerName(server)] = SignatureContainer(container)
 
 
@@ -102,7 +94,7 @@ class ServerKey:
         object.__setattr__(self, "decoded_key", decode_base64(self.encoded_key))
 
 
-@dataclass
+@dataclass(init=False)
 class KeyContainer:
     """Container for a server key and its validity period."""
 
@@ -146,30 +138,19 @@ class ServerVerifyKeys:
         }
     """
 
-    verify_keys: dict[KeyID, KeyContainer] = field(default_factory=dict)
+    verify_keys: dict[KeyID, KeyContainer] = field(default_factory=dict, init=False)
     _raw_data: dict[str, Any] = field(default_factory=dict, repr=False)
 
-    def __init__(self, data: dict[str, Any]) -> None:
-        """
-        Initialize server verify keys from raw key data.
-
-        Creates containers for both current and old verification keys.
-        Current keys use valid_until_ts from data, old keys use their expired_ts.
-
-        Args:
-            data: Dictionary containing verify_keys and old_verify_keys mappings
-        """
-        valid_until_ts = data.get("valid_until_ts")
+    def __post_init__(self) -> None:
+        valid_until_ts = self._raw_data.get("valid_until_ts")
 
         # Process current keys
-        for key_id, key_data in data.get("verify_keys", {}).items():
+        for key_id, key_data in self._raw_data.get("verify_keys", {}).items():
             self.verify_keys[KeyID(key_id)] = KeyContainer(key_data, valid_until_ts)
 
         # Process old keys
-        for key_id, key_data in data.get("old_verify_keys", {}).items():
+        for key_id, key_data in self._raw_data.get("old_verify_keys", {}).items():
             self.verify_keys[KeyID(key_id)] = KeyContainer(key_data, None)
-
-        self._raw_data = full_dict_copy(data)
 
     def update_key_data_from_dict(self, data: dict[str, Any]) -> None:
         """
