@@ -2305,7 +2305,7 @@ class FederationBot(Plugin):
             reference_key,
             _delegation_worker,
             delegation_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
 
         started_at = time.monotonic()
@@ -3132,7 +3132,7 @@ class FederationBot(Plugin):
             reference_key,
             _version_worker,
             version_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
         await version_queue.join()
 
@@ -3249,7 +3249,7 @@ class FederationBot(Plugin):
             reference_key,
             _server_keys_worker,
             keys_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
 
         started_at = time.monotonic()
@@ -3512,7 +3512,7 @@ class FederationBot(Plugin):
             reference_key,
             _server_keys_from_notary_worker,
             keys_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
 
         started_at = time.monotonic()
