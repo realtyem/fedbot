@@ -18,10 +18,10 @@ Type Parameters:
 
 from __future__ import annotations
 
+from typing import Callable, Generic, TypeVar
+from threading import Lock
 import asyncio
 import time
-from threading import Lock
-from typing import Callable, Generic, TypeVar
 
 KT = TypeVar("KT")
 VT = TypeVar("VT")

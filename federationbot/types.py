@@ -9,9 +9,9 @@ Provides strongly-typed classes for handling Matrix federation data structures:
 
 from __future__ import annotations
 
+from typing import Any, NewType
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, NewType
 
 from unpaddedbase64 import decode_base64
 
@@ -126,9 +126,7 @@ class KeyContainer:
             valid_until_ts: Timestamp when key expires, or None for old keys
         """
         self.key = ServerKey(key_data.get("key", ""))
-        self.valid_until_ts = (
-            valid_until_ts if valid_until_ts is not None else int(key_data.get("expired_ts", 0))
-        )
+        self.valid_until_ts = valid_until_ts if valid_until_ts is not None else int(key_data.get("expired_ts", 0))
 
 
 @dataclass

@@ -10,8 +10,8 @@ Provides classes and functions for formatting tabular data with configurable:
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
+from enum import Enum
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

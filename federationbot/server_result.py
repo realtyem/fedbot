@@ -13,9 +13,9 @@ Key classes:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from federationbot.errors import ServerUnreachable
 

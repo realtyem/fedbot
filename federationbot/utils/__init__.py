@@ -16,12 +16,7 @@ to maintain backward compatibility with the original utils.py module.
 
 from .bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle, ProgressBar
 from .colors import Colors
-from .display import (
-    DataSet,
-    DisplayLineColumnConfig,
-    Justify,
-    pad,
-)
+from .display import DataSet, DisplayLineColumnConfig, Justify, pad
 from .formatting import (
     add_color,
     bold,
@@ -33,11 +28,7 @@ from .formatting import (
 )
 from .matrix import get_domain_from_id
 from .numbers import round_down, round_half_up, round_up, truncate
-from .structures import (
-    extract_max_key_len_from_dict,
-    extract_max_value_len_from_dict,
-    full_dict_copy,
-)
+from .structures import extract_max_key_len_from_dict, extract_max_value_len_from_dict, full_dict_copy
 from .time import pretty_print_timestamp
 
 __all__ = [

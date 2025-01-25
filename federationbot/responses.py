@@ -12,8 +12,8 @@ responses, JSON data, error codes and diagnostic information from Matrix homeser
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
 
 if TYPE_CHECKING:
     from types import SimpleNamespace

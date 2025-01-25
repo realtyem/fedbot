@@ -8,8 +8,8 @@ Helper functions for working with Python data structures:
 
 from __future__ import annotations
 
-import json
 from typing import Any
+import json
 
 json_decoder = json.JSONDecoder()
 
