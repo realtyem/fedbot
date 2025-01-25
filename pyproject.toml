@@ -58,6 +58,8 @@ ignore = [
   "PLR0913", # too-many-arguments
   "PLR0915", # too-many-statements
   "PLR0904", # too-many-public-methods
+  "PLR0913", # too-many-arguments
+  "PLR0917", # too-many-positional-arguments
 ]
 
 [tool.ruff.lint.isort]
