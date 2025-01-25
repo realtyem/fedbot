@@ -11,15 +11,15 @@ target-version = ["py310"]
 
 [tool.pylint]
 disable = [
-	"line-too-long",
-	"missing-function-docstring",
-	"missing-module-docstring",
-	"missing-class-docstring",
-	"too-few-public-methods",
-	"too-many-arguments",
-	"too-many-instance-attributes",
-	"too-many-return-statements",
-	"too-many-statements",
+  "line-too-long",
+  "missing-function-docstring",
+  "missing-module-docstring",
+  "missing-class-docstring",
+  "too-few-public-methods",
+  "too-many-arguments",
+  "too-many-instance-attributes",
+  "too-many-return-statements",
+  "too-many-statements",
 ]
 
 [tool.poetry]
@@ -50,16 +50,17 @@ aiodns = "^3.2.0"
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-lint.ignore = [
-    "PLR0911",  # too-many-return-statements
-    "PLR0912",  # too-many-branches
-    "PLR0913",  # too-many-arguments
-    "PLR0915",  # too-many-statements
-    "PLR0904",  # too-many-public-methods
-    "PLR0902",  # too-many-instance-attributes
+
+[tool.ruff.lint]
+ignore = [
+  "PLR0911", # too-many-return-statements
+  "PLR0912", # too-many-branches
+  "PLR0913", # too-many-arguments
+  "PLR0915", # too-many-statements
+  "PLR0904", # too-many-public-methods
 ]
 
 [tool.ruff.lint.isort]
-profile = "black"
 force-to-top = ["typing"]
 combine-as-imports = true
+from-first = true
