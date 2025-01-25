@@ -680,9 +680,9 @@ class DelegationHandler:
 
             # Literal IP address names will not have any DNS resolution done
             return ServerResult(
-                ip4_address_port_tuples,
-                ip6_address_port_tuples,
-                _resolved_port,
+                list_of_ip4_port_tuples=ip4_address_port_tuples,
+                list_of_ip6_port_tuples=ip6_address_port_tuples,
+                port=_resolved_port,
                 host=original_host,
                 well_known_host=well_known_host,
                 host_header=f"{well_known_host}:{_resolved_port}",
@@ -704,9 +704,9 @@ class DelegationHandler:
             ) = self.check_dns_from_list_for_reg_records([(well_known_host, well_known_port)], diag_info=diag_info)
 
             return ServerResult(
-                _ip4_address_port_tuples,
-                _ip6_address_port_tuples,
-                well_known_port,
+                list_of_ip4_port_tuples=_ip4_address_port_tuples,
+                list_of_ip6_port_tuples=_ip6_address_port_tuples,
+                port=well_known_port,
                 host=original_host,
                 well_known_host=well_known_host,
                 host_header=f"{well_known_host}:{well_known_port}",
@@ -740,9 +740,9 @@ class DelegationHandler:
         if ip4_address_port_tuples or ip6_address_port_tuples:
             # If there are no SRV records, both of these will be empty Lists
             return ServerResult(
-                ip4_address_port_tuples,
-                ip6_address_port_tuples,
-                "",
+                list_of_ip4_port_tuples=ip4_address_port_tuples,
+                list_of_ip6_port_tuples=ip6_address_port_tuples,
+                port="",
                 host=original_host,
                 well_known_host=well_known_host,
                 host_header=well_known_host,
@@ -763,9 +763,9 @@ class DelegationHandler:
         ) = self.check_dns_from_list_for_reg_records([(well_known_host, "8448")], diag_info=diag_info)
 
         return ServerResult(
-            ip4_addresses,
-            ip6_addresses,
-            "8448",
+            list_of_ip4_port_tuples=ip4_addresses,
+            list_of_ip6_port_tuples=ip6_addresses,
+            port="8448",
             host=original_host,
             well_known_host=well_known_host,
             host_header=well_known_host,
@@ -840,9 +840,9 @@ class DelegationHandler:
                 ip6_address_port_tuples = [(host, _resolved_port)]
 
             return ServerResult(
-                ip4_address_port_tuples,
-                ip6_address_port_tuples,
-                _resolved_port,
+                list_of_ip4_port_tuples=ip4_address_port_tuples,
+                list_of_ip6_port_tuples=ip6_address_port_tuples,
+                port=_resolved_port,
                 host=host,
                 # Remember that the HOST header only gets a port if one was included in the server name
                 host_header=f"{host}{':' + port if port else ''}",
@@ -862,9 +862,9 @@ class DelegationHandler:
             ) = self.check_dns_from_list_for_reg_records([(host, port)], diag_info=diag_info)
 
             return ServerResult(
-                ip4_address_port_tuples,
-                ip6_address_port_tuples,
-                port,
+                list_of_ip4_port_tuples=ip4_address_port_tuples,
+                list_of_ip6_port_tuples=ip6_address_port_tuples,
+                port=port,
                 host=host,
                 host_header=f"{host}:{port}",
                 sni_server_name=host,
@@ -924,9 +924,9 @@ class DelegationHandler:
                 )
 
             return ServerResult(
-                ip4_address_port_tuples,
-                ip6_address_port_tuples,
-                "",
+                list_of_ip4_port_tuples=ip4_address_port_tuples,
+                list_of_ip6_port_tuples=ip6_address_port_tuples,
+                port="",
                 host=host,
                 well_known_host=host,
                 host_header=host,
@@ -945,9 +945,9 @@ class DelegationHandler:
 
         # if ip4_address_port_tuples or ip6_address_port_tuples:
         return ServerResult(
-            ip4_address_port_tuples,
-            ip6_address_port_tuples,
-            "",
+            list_of_ip4_port_tuples=ip4_address_port_tuples,
+            list_of_ip6_port_tuples=ip6_address_port_tuples,
+            port="",
             host=host,
             host_header=host,
             sni_server_name=host,
