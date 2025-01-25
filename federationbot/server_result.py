@@ -41,20 +41,16 @@ class DiagnosticInfo:
     """
 
     diagnostics_enabled: bool
-    list_of_results: list[str] = field(default_factory=list)
-    well_known_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE)
-    srv_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE)
-    srv_test_result: bool = field(default=False)
-    dns_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE)
-    dns_test_result: bool = field(default=False)
-    connection_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE)
-    tls_handled_by: str | None = field(default=None)
-    retries: int = field(default_factory=int)
-    trace_ctx: SimpleNamespace | None = field(default=None)
-
-    def __init__(self, enable_diagnostics: bool) -> None:
-        """Initialize DiagnosticInfo with enable_diagnostics."""
-        self.diagnostics_enabled = enable_diagnostics
+    list_of_results: list[str] = field(default_factory=list, init=True)
+    well_known_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE, init=False)
+    srv_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE, init=False)
+    srv_test_result: bool = field(default=False, init=False)
+    dns_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE, init=False)
+    dns_test_result: bool = field(default=False, init=False)
+    connection_test_status: ResponseStatusType = field(default=ResponseStatusType.NONE, init=False)
+    tls_handled_by: str | None = field(default=None, init=False)
+    retries: int = field(default=0, init=False)
+    trace_ctx: SimpleNamespace | None = field(default=None, init=False)
 
     def error(self, comment: str, front_pad: str = "   ") -> None:
         """Add an error message to diagnostic results."""
