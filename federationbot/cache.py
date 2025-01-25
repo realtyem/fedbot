@@ -1,4 +1,24 @@
-from typing import Callable, Dict, Generic, Optional, TypeVar
+"""
+LRU caching for Matrix federation request results.
+
+Provides caching for federation API responses to reduce load on remote Matrix servers
+and improve response times for repeated requests. Used by FederationApi to cache:
+- DNS lookup results
+- Server key responses
+- Well-known delegation results
+- Version API responses
+
+The cache automatically removes stale entries through a background cleanup task.
+
+Type Parameters:
+    Throughout this module, generic type variables are used:
+    - KT: Type of cache keys (usually str or EventID)
+    - VT: Type of cached values (server responses, DNS results etc)
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Generic, TypeVar
 from threading import Lock
 import asyncio
 import time
@@ -10,40 +30,62 @@ CACHE_CLEANUP_SLEEP_TIME_SECONDS = 30.0  # 30 seconds
 
 
 class CacheEntry(Generic[VT]):
+    """
+    Base cache entry container for storing values.
+
+    Attributes:
+        cache_value: The stored value
+    """
+
     cache_value: VT
 
 
 class LRUCacheEntry(CacheEntry[VT]):
+    """
+    LRU cache entry that tracks access time.
+
+    Attributes:
+        last_access_time_ms: Timestamp of last access
+        cache_value: The stored value (inherited)
+    """
+
     last_access_time_ms: float
 
 
 class LRUCache(Generic[KT, VT]):
     """
+    Thread-safe LRU cache with background cleanup.
+
+    Provides a generic cache implementation with configurable expiry and cleanup.
+    Thread-safe access is ensured via Lock.
+
+    Args:
+        KT: Type of cache keys
+        VT: Type of cache values
 
     Attributes:
-        time_cb: A saved reference to time.time(). Gives a float
-        eviction_condition_cb: The condition to check for eviction.
-        expire_time_seconds: The time(float) an entry is allowed to stay for(default
-            30 minutes)
-        cleanup_iteration_sleep_seconds: How long the background cleanup task should
-            sleep for between iterations(default 30.0 seconds)
-        _cleanup_task:
+        time_cb: Function that returns current time as float
+        eviction_condition_cb: Function that determines if entry should be evicted
+        expire_time_seconds: Time in seconds before entries expire (default 30 minutes)
+        cleanup_iteration_sleep_seconds: Seconds between cleanup runs (default 30.0 seconds)
+        _cleanup_task: Background task that removes expired entries
     """
 
     def __init__(
         self,
         expire_after_seconds: float = CACHE_EXPIRY_TIME_SECONDS,
         cleanup_task_sleep_time_seconds: float = CACHE_CLEANUP_SLEEP_TIME_SECONDS,
-        eviction_condition_func: Optional[Callable[[LRUCacheEntry], bool]] = None,
+        eviction_condition_func: Callable[[LRUCacheEntry], bool] | None = None,
     ) -> None:
         """
+        Initialize new LRU cache.
 
         Args:
-            expire_after_seconds:
-            cleanup_task_sleep_time_seconds:
+            expire_after_seconds: Time in seconds before entries expire
+            cleanup_task_sleep_time_seconds: Seconds between cleanup runs
+            eviction_condition_func: Optional custom eviction condition
         """
-        cache: Dict[KT, LRUCacheEntry[VT]] = {}
-        self._cache = cache
+        self._cache: dict[KT, LRUCacheEntry[VT]] = {}
         self._lock = Lock()
         self.time_cb = time.time
         self.eviction_condition_cb = eviction_condition_func or self.default_expiry_condition
@@ -54,38 +96,75 @@ class LRUCache(Generic[KT, VT]):
         self.set = self.__setitem__
 
     def __setitem__(self, key: KT, value: VT) -> None:
+        """
+        Set cache entry and update access time.
+
+        Args:
+            key: Cache key
+            value: Value to store
+        """
         with self._lock:
             cache_entry = self._cache.setdefault(key, LRUCacheEntry())
             cache_entry.cache_value = value
             cache_entry.last_access_time_ms = self.time_cb()
             self._cache[key] = cache_entry
 
-    def __getitem__(self, item: KT, _default: Optional[VT] = None) -> Optional[VT]:
-        with self._lock:
-            if item in self._cache:
-                self._cache[item].last_access_time_ms = self.time_cb()
-                cache_entry = self._cache.get(item)
-                assert cache_entry is not None
-                return cache_entry.cache_value
+    def __getitem__(self, item: KT, _default: VT | None = None) -> VT | None:
+        """
+        Get cache entry and update access time.
 
+        Args:
+            item: Cache key to retrieve
+            _default: Value to return if key not found
+
+        Returns:
+            Cached value or default if not found
+        """
+        with self._lock:
+            if cache_entry := self._cache.get(item):
+                cache_entry.last_access_time_ms = self.time_cb()
+                return cache_entry.cache_value
         return _default
 
     def __len__(self) -> int:
+        """
+        Get number of cache entries.
+
+        Returns:
+            Current number of entries in cache
+        """
         return len(self._cache)
 
     def default_expiry_condition(self, cache_entry: LRUCacheEntry) -> bool:
+        """
+        Check if cache entry has exceeded its expiry time.
+
+        Args:
+            cache_entry: Entry to check for expiry
+
+        Returns:
+            True if entry has exceeded expiry time, False if still valid
+        """
         return self.time_cb() > cache_entry.last_access_time_ms + self.expire_time_seconds
 
     async def _cleanup_cache_task(self) -> None:
+        """
+        Remove expired entries from cache periodically.
+
+        Runs in background, sleeping between iterations to avoid early CPU spikes.
+        Uses a dict copy during iteration since the cache view may change during cleanup.
+        """
         while True:
-            # Wait for the sleep time defined at the start, to avoid an early spike
             await asyncio.sleep(self.cleanup_iteration_sleep_seconds)
-            # Take a copy of the dict, as items() doesn't like it's view being changed
-            # while it's still watching
             for cache_key, cache_entry in dict(self._cache).items():
                 if self.eviction_condition_cb(cache_entry):
                     self._cache.pop(cache_key, None)
 
     async def stop(self) -> None:
+        """
+        Stop the background cleanup task.
+
+        Should be called when cache is no longer needed to clean up resources.
+        """
         self._cleanup_task.cancel()
         await asyncio.gather(self._cleanup_task, return_exceptions=True)
