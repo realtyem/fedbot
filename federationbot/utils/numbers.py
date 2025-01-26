@@ -7,7 +7,24 @@ Provides consistent rounding and truncation functions with decimal place support
 - Decimal truncation
 """
 
+from __future__ import annotations
+
 import math
+
+
+def is_int(maybe_int: str) -> int | None:
+    """
+    Check if a string is a valid integer.
+
+    Returns:
+        Integer if valid, None otherwise
+    """
+    try:
+        result = int(maybe_int)
+    except ValueError:
+        return None
+
+    return result
 
 
 def round_up(n: float, decimals: int = 0) -> float:
