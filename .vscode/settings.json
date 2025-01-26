@@ -1,3 +1,15 @@
 {
-  "ruff.lineLength": 120
+  "ruff.lineLength": 120,
+  "ruff.lint.ignore": [
+    "CPY001",
+    "D212",
+    "D413",
+    "FBT001",
+    "FBT002",
+    "FBT003",
+    "PLR0904",
+    "PLR0913",
+    "PLR0917",
+    "TD002"
+  ]
 }
