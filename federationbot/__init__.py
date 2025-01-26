@@ -367,10 +367,14 @@ class FederationBot(RoomWalkCommand):
         )
         # The initial starting point for the room walk
         event_id = ts_response.json_response.get("event_id", None)
-        assert isinstance(event_id, str)
+        if not isinstance(event_id, str):
+            msg = "event_id must be a string"
+            raise TypeError(msg)
         event_result = await self.federation_handler.get_event_from_server(origin_server, origin_server, event_id)
         event = event_result.get(event_id, None)
-        assert event is not None
+        if not event:
+            msg = "event must be present in result"
+            raise ValueError(msg)
         room_depth = event.depth
         seen_depths_for_progress = set()
 
@@ -1057,7 +1061,10 @@ class FederationBot(RoomWalkCommand):
             return
 
         # One way or another, we have a room id by now
-        assert room_id is not None
+        if not room_id:
+            msg = "room_id must be set by this point"
+            raise ValueError(msg)
+
         await command_event.respond(f"Collecting last event from room {room_id}")
         # Try to use a server from the room alias response, but if there was none use something else
         head_data = await self.federation_handler.make_join_to_server(
@@ -2421,8 +2428,10 @@ class FederationBot(RoomWalkCommand):
             # If nothing was passed in, or it wasn't a server name,
             # then it must be a room or use the current room
             # TODO: try and find a way to not use the client API for this
+            if not isinstance(room_to_check, str):
+                msg = "room_to_check must be a string"
+                raise TypeError(msg)
             try:
-                assert isinstance(room_to_check, str)
                 joined_members = await self.client.get_joined_members(RoomID(room_to_check))
 
             except MForbidden:
@@ -3858,7 +3867,9 @@ class FederationBot(RoomWalkCommand):
             # ts_response.http_code == 200
             event_id = ts_response.json_response.get("event_id", None)
 
-        assert event_id is not None
+        if event_id is None:
+            msg = "event_id cannot be None at this point"
+            raise ValueError(msg)
         event_result = await self.federation_handler.get_event_from_server(origin_server, destination_server, event_id)
         event = event_result.get(event_id, None)
         if event:
@@ -3873,5 +3884,7 @@ class FederationBot(RoomWalkCommand):
                 room_id = event.room_id
                 origin_server_ts = event.origin_server_ts
 
-        assert isinstance(origin_server_ts, int)
+        if not isinstance(origin_server_ts, int):
+            msg = "origin_server_ts must be an integer"
+            raise TypeError(msg)
         return room_id, event_id, origin_server_ts
