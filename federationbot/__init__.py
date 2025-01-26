@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .commands.common import MessageEvent
 
 from asyncio import QueueEmpty
+from contextlib import suppress
 from datetime import datetime
 from itertools import chain
 import asyncio
@@ -76,10 +77,13 @@ class FederationBot(RoomWalkCommand):
         command_event: MessageEvent,
     ) -> None:
         """
-        Respond to the status command.
+        Display bot status information.
+
+        Shows cache sizes, task counts, and other runtime statistics.
+        Updates the display periodically until stopped.
 
         Args:
-            command_event: The event that triggered the command.
+            command_event: The event that triggered the command
         """
         pinned_message = cast("EventID", await command_event.respond(f"Received Status Command on: {self.client.mxid}"))
         await self.reaction_task_controller.setup_control_reactions(
@@ -136,14 +140,40 @@ class FederationBot(RoomWalkCommand):
         self,
         command_event: MessageEvent,
     ) -> None:
+        """
+        Handle test commands.
+
+        A simple test command that confirms the bot is responding.
+
+        Args:
+            command_event: The event that triggered the command
+        """
         await command_event.respond(f"Received Test Command on: {self.client.mxid}")
 
     @command.new(name="fed", help="`!fed`: Federation requests for information")
     async def fed_command(self, command_event: MessageEvent) -> None:
+        """
+        Handle federation info commands.
+
+        Parent command for federation-related subcommands.
+        Does nothing on its own.
+
+        Args:
+            command_event: The event that triggered the command
+        """
         pass
 
     @test_command.subcommand(name="color", help="Test color palette and layout")
     async def color_subcommand(self, command_event: MessageEvent) -> None:
+        """
+        Test color formatting and display.
+
+        Shows test messages with different color combinations to verify
+        color formatting is working correctly.
+
+        Args:
+            command_event: The event that triggered the command
+        """
         await command_event.mark_read()
         test_message_list = []
         test_message_list.extend(["OKAY"])
@@ -184,6 +214,17 @@ class FederationBot(RoomWalkCommand):
         event_id: str,
         limit: str,
     ) -> None:
+        """
+        Get event context from federation API.
+
+        Retrieves events before and after the specified event.
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room ID or alias to query
+            event_id: Event ID to get context around
+            limit: Maximum number of events to retrieve
+        """
         stuff = await self.client.get_event_context(
             room_id=RoomID(room_id_or_alias),
             event_id=EventID(event_id),
@@ -203,6 +244,16 @@ class FederationBot(RoomWalkCommand):
         room_id_or_alias: str,
         target_server: str | None,
     ) -> None:
+        """
+        Look up room alias information.
+
+        Gets room alias directory information from a target server.
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room alias to look up
+            target_server: Optional server to query, defaults to alias's server
+        """
         origin_server = self.federation_handler.hosting_server
         destination_server = target_server or room_id_or_alias.split(":", maxsplit=1)[1]
         self.log.warning(f"alias: {destination_server}, alias: {room_id_or_alias}")
@@ -228,12 +279,24 @@ class FederationBot(RoomWalkCommand):
         room_id_or_alias: str | None,
         server_to_fix: str | None,
     ) -> None:
+        """
+        Use federation API to selectively download missing events.
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room ID or alias to walk through
+            server_to_fix: Optional server to target for fixes
+
+        Raises:
+            ValueError: If the room ID or alias is not valid
+            TypeError: If the event ID is not a string
+        """
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
         if get_domain_from_id(command_event.sender) != get_domain_from_id(self.client.mxid):
             await command_event.reply(
-                "I'm sorry, running this command from a user not on the same server as the bot will not help"
+                "I'm sorry, running this command from a user not on the same server as the bot will not help",
             )
             return
 
@@ -244,14 +307,11 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_fix:
-            destination_server = server_to_fix
-        else:
-            destination_server = get_domain_from_id(command_event.sender)
+        destination_server = server_to_fix or get_domain_from_id(command_event.sender)
 
         # Sort out the room id
         if room_id_or_alias:
@@ -315,15 +375,14 @@ class FederationBot(RoomWalkCommand):
         ) -> tuple[set[str], set[str]]:
             """
             Condense and parse given Event IDs from the prev_event and auth_event fields
-             into a batches representing found on target server and not found
+            into batches representing found and not found events on target server.
 
             Args:
-                worker_name: string name for logging
-                event_id_list_of_ancestors: Event ID's to look for
+                worker_name: String name for logging
+                event_id_list_of_ancestors: Event IDs to look for
 
-            Returns: a Tuple of:
-                (events that were found, events that were not)
-
+            Returns:
+                Tuple of (events_found, events_not_found) as sets of event IDs
             """
             next_batch: set[str] = set()
             error_batch: set[str] = set()
@@ -355,7 +414,7 @@ class FederationBot(RoomWalkCommand):
         )
         if ts_response.http_code != 200:
             await command_event.respond(
-                f"Something went wrong while getting last event in room\n* {ts_response.reason}"
+                f"Something went wrong while getting last event in room\n* {ts_response.reason}",
             )
             return
 
@@ -381,7 +440,11 @@ class FederationBot(RoomWalkCommand):
         # Prep the host list, just in case we need it later on so the worker doesn't
         # have to do it on-demand, increasing its complexity
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server, destination_server, room_id, event_id, timeout=self.command_conn_timeouts["state"] or 10
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
+            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         good_host_list: list[str] = []
@@ -409,6 +472,15 @@ class FederationBot(RoomWalkCommand):
         roomwalk_lines: list[str] = []
 
         def _combine_lines_for_backwalk() -> str:
+            """
+            Combine different sections of lines into a single formatted string.
+
+            Combines header lines, static lines, discovery lines, progress bar,
+            and roomwalk lines with appropriate newlines.
+
+            Returns:
+                Combined string with all sections formatted with newlines
+            """
             combined_lines = ""
             for line in header_lines:
                 combined_lines += line + "\n"
@@ -525,7 +597,7 @@ class FederationBot(RoomWalkCommand):
                         # TODO: maybe add a backfill of two at this point, to skip over gaps?
                         if not prev_good_events:
                             self.log.warning(
-                                f"{worker_name}: Unexpectedly found an empty prev_good_events on {next_event_id}"
+                                f"{worker_name}: Unexpectedly found an empty prev_good_events on {next_event_id}",
                             )
                         next_list_to_get.update(prev_good_events)
                         next_list_to_get.update(auth_good_events)
@@ -589,11 +661,11 @@ class FederationBot(RoomWalkCommand):
 
                 if next_event_id in event_id_ok_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found room walk fetch event in OK list {next_event_id}"
+                        f"{worker_name}: Unexpectedly found room walk fetch event in OK list {next_event_id}",
                     )
                 if next_event_id in event_id_resolved_error_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found room walk fetch event in RESOLVED list {next_event_id}"
+                        f"{worker_name}: Unexpectedly found room walk fetch event in RESOLVED list {next_event_id}",
                     )
 
                 # start_time = time.time()
@@ -623,7 +695,9 @@ class FederationBot(RoomWalkCommand):
                     # 4. Check the found Event for ancestor Events that are not on the
                     #    target server
                     server_to_event_result_map = await self.federation_handler.find_event_on_servers(
-                        origin_server, popped_event_id, good_host_list
+                        origin_server,
+                        popped_event_id,
+                        good_host_list,
                     )
 
                     for server_name, event_base in server_to_event_result_map.items():
@@ -632,7 +706,9 @@ class FederationBot(RoomWalkCommand):
                             if not room_version:
                                 try:
                                     room_version = await self.federation_handler.discover_room_version(
-                                        origin_server, server_name, event_base.room_id
+                                        origin_server,
+                                        server_name,
+                                        event_base.room_id,
                                     )
                                 except MatrixError:
                                     pass  # until find something better. Should move this up anyways
@@ -651,7 +727,7 @@ class FederationBot(RoomWalkCommand):
                                 self.log.info(
                                     f"{worker_name}: found {popped_event_id} on "
                                     f"{server_name} after "
-                                    f"{count_of_how_many_servers_tried - 1} other servers"
+                                    f"{count_of_how_many_servers_tried - 1} other servers",
                                 )
                                 # But, do we need more
 
@@ -669,7 +745,7 @@ class FederationBot(RoomWalkCommand):
                                         continue
                                     self.log.warning(
                                         f"{worker_name}: for: "
-                                        f"{_event_base.event_id}, need prev_event: {_ancestor_event_id}"
+                                        f"{_event_base.event_id}, need prev_event: {_ancestor_event_id}",
                                     )
                                     already_searching_for_event_id.add(_ancestor_event_id)
 
@@ -681,7 +757,7 @@ class FederationBot(RoomWalkCommand):
                                         continue
                                     self.log.warning(
                                         f"{worker_name}: for: "
-                                        f"{_event_base.event_id}, need auth_event: {_ancestor_event_id}"
+                                        f"{_event_base.event_id}, need auth_event: {_ancestor_event_id}",
                                     )
                                     already_searching_for_event_id.add(_ancestor_event_id)
 
@@ -689,13 +765,13 @@ class FederationBot(RoomWalkCommand):
 
                                 if not prev_bad_events and not auth_bad_events:
                                     self.log.info(
-                                        f"{worker_name}: All events for {_event_base.event_id} were found locally"
+                                        f"{worker_name}: All events for {_event_base.event_id} were found locally",
                                     )
                                 # The event was found, we can skip the rest of the host list on this iteration
 
                             else:
                                 self.log.warning(
-                                    f"{worker_name}: Event did not pass signature check, {_event_base.event_id}"
+                                    f"{worker_name}: Event did not pass signature check, {_event_base.event_id}",
                                 )
                         # else:
                         #     self.log.warning(
@@ -713,7 +789,7 @@ class FederationBot(RoomWalkCommand):
                 # Need to do these in reverse, or the destination server will barf
                 list_of_server_and_event_id_to_send.reverse()
                 self.log.info(
-                    f"{worker_name}: Size of PDU list about to send: {len(list_of_server_and_event_id_to_send)} for {next_event_id}"
+                    f"{worker_name}: Size of PDU list about to send: {len(list_of_server_and_event_id_to_send)} for {next_event_id}",
                 )
                 list_of_pdus_to_send = []
                 for (event_base,) in list_of_server_and_event_id_to_send:
@@ -741,7 +817,7 @@ class FederationBot(RoomWalkCommand):
                     ) in response_break_down.items():
                         if pdu_received_result:
                             self.log.info(
-                                f"{worker_name}: Received error from {pdu_event_id} got response of {pdu_received_result}"
+                                f"{worker_name}: Received error from {pdu_event_id} got response of {pdu_received_result}",
                             )
 
                 # Update for the render
@@ -822,7 +898,7 @@ class FederationBot(RoomWalkCommand):
                     self.log.info(
                         f"{worker_name}: Potentially found event on roomwalk(after "
                         f"{retry_counter} attempts), sending {event_id_to_check} back "
-                        "to event fetcher"
+                        "to event fetcher",
                     )
                     # The back off mech shouldn't need to wait in this instance, as the
                     # event will already be in the cache. This is considered a 'retry'
@@ -831,7 +907,7 @@ class FederationBot(RoomWalkCommand):
 
             if not_found:
                 self.log.warning(
-                    f"{worker_name}: Not found after {retry_counter} tries, giving up on {event_id_to_check}"
+                    f"{worker_name}: Not found after {retry_counter} tries, giving up on {event_id_to_check}",
                 )
             # Register the bot as not working, so the render loop knows it's not waiting
             # for anything.
@@ -984,7 +1060,7 @@ class FederationBot(RoomWalkCommand):
         await command_event.respond(
             make_into_text_event(
                 wrap_in_code_block_markdown(event_ids_that_errored_message),
-            )
+            ),
         )
 
     @test_command.subcommand(
@@ -1001,18 +1077,27 @@ class FederationBot(RoomWalkCommand):
         event_id: str | None,
         server_to_fix: str | None = None,
     ) -> None:
-        # The process:
-        # 1. The event ID that was provided, prove it's not already on the target server
-        # 2. Get the hosts in the room, test which ones are live and filter out the dead
-        # 3. Hunt for the event on those hosts, start at the top. Make a note when
-        #   you've passed the 5th one that didn't have it.
-        # 4. Check the found Event for ancestor Events that are not on the target server
-        # 5. Add to a List, so we can clearly walk backwards(filling them in order)
-        # 6. Repeat from 3 until no more ancestor Events are found that are missing
-        # 7. Walk backwards through that list 'send'ing those events to the target
-        # server. Check each result for errors, only do one at a time to wait for
-        # responses.
+        """
+        Find an event and inject any necessary ancestors into the target server.
 
+        The process:
+        1. Verify event isn't already on target server
+        2. Get hosts in room, filter out unresponsive ones
+        3. Hunt for event on remaining hosts
+        4. Check found event for missing ancestor events
+        5. Add to ordered list for backfilling
+        6. Repeat until no more missing ancestors found
+        7. Walk backwards through list sending events to target
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room ID or alias containing the event
+            event_id: Event ID to repair
+            server_to_fix: Optional target server to fix, defaults to origin server
+
+        Raises:
+            ValueError: If the event ID is not a string
+        """
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -1023,14 +1108,11 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_fix:
-            destination_server = server_to_fix
-        else:
-            destination_server = origin_server
+        destination_server = server_to_fix or origin_server
 
         # 1. The event ID that was provided, prove it's not already on the target server
         if not event_id:
@@ -1047,14 +1129,16 @@ class FederationBot(RoomWalkCommand):
         if not isinstance(sampled_event, EventError):
             await command_event.reply(
                 f"It appears that the Event referenced by '{event_id}' is already "
-                f"on the target server: {destination_server}"
+                f"on the target server: {destination_server}",
             )
             return
 
         # This does place a request, so need to use origin for auth
         await command_event.respond("Resolving room alias(if it was one)")
         room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
+            room_id_or_alias,
+            command_event,
+            origin_server,
         )
         if not room_id:
             # The user facing error message was already sent
@@ -1102,7 +1186,7 @@ class FederationBot(RoomWalkCommand):
         room_version_of_found_event = head_data.room_version
         if not room_version_of_found_event:
             room_version_of_found_event = int(
-                await self.federation_handler.discover_room_version(origin_server, destination_server, room_id)
+                await self.federation_handler.discover_room_version(origin_server, destination_server, room_id),
             )
 
         list_of_server_and_event_id_to_send = []
@@ -1113,7 +1197,9 @@ class FederationBot(RoomWalkCommand):
             popped_event_id = await event_ids_to_try_next.get()
             # 4. Check the found Event for ancestor Events that are not on the target server
             server_to_event_result_map = await self.federation_handler.find_event_on_servers(
-                origin_server, popped_event_id, good_host_list
+                origin_server,
+                popped_event_id,
+                good_host_list,
             )
 
             await command_event.respond(f"Found event {popped_event_id} on {len(server_to_event_result_map)} servers")
@@ -1121,7 +1207,8 @@ class FederationBot(RoomWalkCommand):
                 # But first, verify the events are valid
                 if isinstance(event_base, Event):
                     await self.federation_handler.verify_signatures_and_annotate_event(
-                        event_base, room_version_of_found_event
+                        event_base,
+                        room_version_of_found_event,
                     )
 
             # count_of_how_many_servers_tried = 0
@@ -1133,7 +1220,9 @@ class FederationBot(RoomWalkCommand):
                         # But, do we need more
                         for _prev_event_id in event_base.prev_events:
                             response_check_for_this_event = await self.federation_handler.get_event_from_server(
-                                origin_server, destination_server, _prev_event_id
+                                origin_server,
+                                destination_server,
+                                _prev_event_id,
                             )
                             _inner_event_base_check = response_check_for_this_event.get(_prev_event_id)
                             if isinstance(_inner_event_base_check, EventError):
@@ -1144,7 +1233,7 @@ class FederationBot(RoomWalkCommand):
                                 self.log.info(f"repair_event: adding event_id to next to try: {_prev_event_id}")
                             elif isinstance(_inner_event_base_check, Event):
                                 self.log.warning(
-                                    f"event retrieved during inner check: {_inner_event_base_check.raw_data}"
+                                    f"event retrieved during inner check: {_inner_event_base_check.raw_data}",
                                 )
 
                         break
@@ -1176,7 +1265,7 @@ class FederationBot(RoomWalkCommand):
                 )
                 self.log.info(f"SENT, got response of {response.json_response}")
                 list_of_buffer_lines.extend([
-                    f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}"
+                    f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}",
                 ])
             else:
                 self.log.info(f"Unexpectedly not sent {event_base}")
@@ -1232,17 +1321,18 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_request_from:
-            destination_server = server_to_request_from
-        else:
-            destination_server = origin_server
+        destination_server = server_to_request_from or origin_server
 
         discovered_info = await self._discover_event_ids_and_room_ids(
-            origin_server, destination_server, command_event, room_id_or_alias, event_id
+            origin_server,
+            destination_server,
+            command_event,
+            room_id_or_alias,
+            event_id,
         )
         if not discovered_info:
             # The user facing error message was already sent
@@ -1266,7 +1356,7 @@ class FederationBot(RoomWalkCommand):
             f"Retrieving Hosts for \n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
-            f"* From {destination_server} using {origin_server}"
+            f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([preresponse_message])
 
@@ -1274,7 +1364,11 @@ class FederationBot(RoomWalkCommand):
         assert event_id is not None
 
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server, destination_server, room_id, event_id, timeout=self.command_conn_timeouts["state"] or 10
+            origin_server,
+            destination_server,
+            room_id,
+            event_id,
+            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         # Time to start rendering. Build the header lines first
@@ -1316,6 +1410,17 @@ class FederationBot(RoomWalkCommand):
         style: str | None,
         seconds_to_run_for: str | None,
     ) -> None:
+        """
+        Demonstrate progress bar rendering.
+
+        Shows an animated progress bar with configurable parameters.
+
+        Args:
+            command_event: The event that triggered the command
+            max_size: Maximum size of the progress bar
+            style: Progress bar style ('linear' or 'scatter')
+            seconds_to_run_for: How long to run the demo
+        """
         if not max_size:
             max_size = "50"
         if not seconds_to_run_for:
@@ -1324,10 +1429,7 @@ class FederationBot(RoomWalkCommand):
         seconds_float = float(seconds_to_run_for)
         interval_float = 5.0
         num_of_intervals = seconds_float / interval_float
-        if style == "linear":
-            style_type = BitmapProgressBarStyle.LINEAR
-        else:
-            style_type = BitmapProgressBarStyle.SCATTER
+        style_type = BitmapProgressBarStyle.LINEAR if style == "linear" else BitmapProgressBarStyle.SCATTER
         how_many_to_pull = max(int(max_size_int / num_of_intervals), 1)
         progress_bar = BitmapProgressBar(30, max_size_int, style=style_type)
         range_list = []
@@ -1343,8 +1445,8 @@ class FederationBot(RoomWalkCommand):
                 f"fullb char: {constants_display_string}\n"
                 f"other char: '{progress_bar.blank}'\n"
                 f"space char: {spaces_display_string}\n"
-                f"segment_size: {progress_bar._segment_size}\n"
-            )  #
+                f"segment_size: {progress_bar._segment_size}\n",
+            ),
         )
         list_of_message_ids.extend([debug_message])
 
@@ -1387,7 +1489,7 @@ class FederationBot(RoomWalkCommand):
                 wrap_in_code_block_markdown(
                     rendered_bar + f"\n size of range_list: {len(range_list)}\n"
                     f" how many to pull: {how_many_to_pull}\n"
-                    f" time to render: {finished_time - start_time}\n"
+                    f" time to render: {finished_time - start_time}\n",
                 ),
                 edits=pinned_message,
             )
@@ -1401,6 +1503,15 @@ class FederationBot(RoomWalkCommand):
     @test_command.subcommand(name="room_version", help="experiment to get room version from room id")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
     async def room_version_command(self, command_event: MessageEvent, room_id_or_alias: str | None) -> None:
+        """
+        Get room version information.
+
+        Retrieves and displays the Matrix protocol version used by a room.
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room ID or alias to check version for
+        """
         await command_event.mark_read()
 
         # The only way to request from a different server than what the bot is on is to
@@ -1410,12 +1521,14 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
         room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
+            room_id_or_alias,
+            command_event,
+            origin_server,
         )
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
@@ -1445,6 +1558,17 @@ class FederationBot(RoomWalkCommand):
         from_server: str | None,
         room_version: str | None,
     ) -> None:
+        """
+        Discover information about an event ID.
+
+        Gets event details and calculates reference hashes for verification.
+
+        Args:
+            command_event: The event that triggered the command
+            event_id: Event ID to look up
+            from_server: Optional server to query
+            room_version: Optional room version to use for hash calculation
+        """
         await command_event.mark_read()
 
         # The only way to request from a different server than what the bot is on is to
@@ -1454,13 +1578,13 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
         if not event_id:
             await command_event.respond(
-                "I need you to supply an actual existing event_id to use as a reference for this experiment."
+                "I need you to supply an actual existing event_id to use as a reference for this experiment.",
             )
             return
 
@@ -1469,10 +1593,8 @@ class FederationBot(RoomWalkCommand):
             from_server = origin_server
         else:
             # in case they skipped a from_server and just used a room_version
-            try:
+            with suppress(ValueError):
                 room_version_int = int(from_server)
-            except ValueError:
-                pass
 
         event_map = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
@@ -1483,7 +1605,7 @@ class FederationBot(RoomWalkCommand):
         if isinstance(event, EventError):
             await command_event.respond(
                 f"I don't think {event_id} is a legitimate event, or {origin_server} is"
-                f" not in that room, so I can not access it.\n\n{event.errcode}"
+                f" not in that room, so I can not access it.\n\n{event.errcode}",
             )
             return
 
@@ -1496,7 +1618,7 @@ class FederationBot(RoomWalkCommand):
                 room_version_int = int(room_version)
             except ValueError:
                 await command_event.reply(
-                    f"You passed me a room version to use that couldn't be converted to an integer: {room_version}"
+                    f"You passed me a room version to use that couldn't be converted to an integer: {room_version}",
                 )
                 return
 
@@ -1508,7 +1630,7 @@ class FederationBot(RoomWalkCommand):
                         origin_server=origin_server,
                         destination_server=origin_server,
                         room_id=room_id,
-                    )
+                    ),
                 )
             except ValueError as e:
                 await command_event.reply(f"Error getting room version from room {room_id}: {str(e)}")
@@ -1524,7 +1646,7 @@ class FederationBot(RoomWalkCommand):
         redacted_data.pop("signatures", None)
         redacted_data.pop("unsigned", None)
         current_message = await command_event.respond(
-            f"Redacted:\n{wrap_in_code_block_markdown(json.dumps(redacted_data, indent=4))}"
+            f"Redacted:\n{wrap_in_code_block_markdown(json.dumps(redacted_data, indent=4))}",
         )
         list_of_message_ids.extend([current_message])
 
@@ -1540,10 +1662,21 @@ class FederationBot(RoomWalkCommand):
     @fed_command.subcommand(name="head", help="experiment for retrieving information about a room")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     async def head_command(self, command_event: MessageEvent, room_id_or_alias: str) -> None:
+        """
+        Get room head information.
+
+        Retrieves information about the current head of a room's event graph.
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room ID or alias to get head for
+        """
         await command_event.mark_read()
         origin_server = get_domain_from_id(self.client.mxid)
         room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
-            room_id_or_alias, command_event, origin_server
+            room_id_or_alias,
+            command_event,
+            origin_server,
         )
         if not room_id:
             # The user facing error message was already sent
@@ -1584,7 +1717,7 @@ class FederationBot(RoomWalkCommand):
             # occurred. Fall back to the client api with current state. Obviously there
             # are problems with this, but it will allow forward progress.
             current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, falling back to client API"
+                "Failed getting hosts from State over federation, falling back to client API",
             )
             list_of_message_ids.extend([current_message])
             try:
@@ -1721,7 +1854,7 @@ class FederationBot(RoomWalkCommand):
         final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
         for message in final_buffer_messages:
             current_message = await command_event.respond(
-                make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True)
+                make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True),
             )
             list_of_message_ids.extend([current_message])
         for message_id in list_of_message_ids:
@@ -1776,7 +1909,7 @@ class FederationBot(RoomWalkCommand):
                     "       hostname and use port 8448\n"
                     "4. (no well-known) Check SRV record(same as 3c above)\n"
                     "5. (deprecated) Check other SRV record(same as 3d above)\n"
-                    "6. Use the supplied server_name and try port 8448\n"
+                    "6. Use the supplied server_name and try port 8448\n",
                 ),
             ),
         )
@@ -1792,7 +1925,7 @@ class FederationBot(RoomWalkCommand):
             # Only sub commands display the 'help' text field(for now at least). Tell
             # them how it works.
             await command_event.reply(
-                "**Usage**: !delegation <server_name>\n - Some simple diagnostics around federation server discovery"
+                "**Usage**: !delegation <server_name>\n - Some simple diagnostics around federation server discovery",
             )
             return
 
@@ -1803,6 +1936,16 @@ class FederationBot(RoomWalkCommand):
         command_event: MessageEvent,
         server_to_check: str,
     ) -> None:
+        """
+        Check server delegation information.
+
+        Checks server discovery and delegation setup including well-known
+        records and SRV records.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check delegation for
+        """
         list_of_servers_to_check = set()
 
         await command_event.mark_read()
@@ -1855,7 +1998,7 @@ class FederationBot(RoomWalkCommand):
         prerender_message = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} "
             f"server{'s.' if number_of_servers > 1 else '.'}\n"
-            "This may take up to 30 seconds to complete."
+            "This may take up to 30 seconds to complete.",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2036,14 +2179,11 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_request_from:
-            destination_server = server_to_request_from
-        else:
-            destination_server = origin_server
+        destination_server = server_to_request_from or origin_server
 
         # Sometimes have to just make things a little more useful
         extra_info = ""
@@ -2053,7 +2193,7 @@ class FederationBot(RoomWalkCommand):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving{extra_info}: {event_id} from {destination_server} using {origin_server}"
+            f"Retrieving{extra_info}: {event_id} from {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2107,7 +2247,7 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
@@ -2129,7 +2269,7 @@ class FederationBot(RoomWalkCommand):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving{extra_info}: {event_id} from {destination_server} using {origin_server}"
+            f"Retrieving{extra_info}: {event_id} from {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2249,6 +2389,19 @@ class FederationBot(RoomWalkCommand):
         server_to_request_from: str | None,
         no_members: bool = False,
     ) -> None:
+        """
+        Get and display room state information.
+
+        Fetches state events for a room and displays them in a formatted table,
+        optionally filtering out member events.
+
+        Args:
+            command_event: Event that triggered the command
+            room_id_or_alias: Room ID or alias to get state for
+            event_id: Event ID to get state at, defaults to latest
+            server_to_request_from: Server to query, defaults to origin server
+            no_members: Whether to filter out member events
+        """
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -2259,17 +2412,18 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_request_from:
-            destination_server = server_to_request_from
-        else:
-            destination_server = origin_server
+        destination_server = server_to_request_from or origin_server
 
         discovered_info = await self._discover_event_ids_and_room_ids(
-            origin_server, destination_server, command_event, room_id_or_alias, event_id
+            origin_server,
+            destination_server,
+            command_event,
+            room_id_or_alias,
+            event_id,
         )
         if not discovered_info:
             # The user facing error message was already sent
@@ -2290,7 +2444,7 @@ class FederationBot(RoomWalkCommand):
             f"Retrieving State for:\n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
-            f"* From {destination_server} using {origin_server}"
+            f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2310,7 +2464,7 @@ class FederationBot(RoomWalkCommand):
         )
 
         prerender_message_2 = await command_event.respond(
-            f"Retrieving {len(pdu_list)} events from {destination_server}"
+            f"Retrieving {len(pdu_list)} events from {destination_server}",
         )
         list_of_message_ids.extend([prerender_message_2])
 
@@ -2320,7 +2474,9 @@ class FederationBot(RoomWalkCommand):
 
         started_at = time.monotonic()
         event_to_event_base = await self.federation_handler.get_events_from_server(
-            origin_server, destination_server, pdu_list
+            origin_server,
+            destination_server,
+            pdu_list,
         )
         total_time = time.monotonic() - started_at
 
@@ -2397,6 +2553,16 @@ class FederationBot(RoomWalkCommand):
     )
     @command.argument(name="thing_to_test", label="Server or Room to test", required=False)
     async def ping_command(self, command_event: MessageEvent, thing_to_test: str | None) -> None:
+        """
+        Check federation response time for a server or room's servers.
+
+        Args:
+            command_event: The event that triggered the command
+            thing_to_test: Server name or room ID/alias to test
+
+        Raises:
+            TypeError: If the event ID is not a string
+        """
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -2447,7 +2613,7 @@ class FederationBot(RoomWalkCommand):
 
         current_message_id = await command_event.respond(
             f"Testing federation response time of `/version` for {number_of_servers} server"
-            f"{'s' if number_of_servers > 1 else ''}"
+            f"{'s' if number_of_servers > 1 else ''}",
         )
         list_of_message_ids.extend([current_message_id])
 
@@ -2522,7 +2688,9 @@ class FederationBot(RoomWalkCommand):
         list_of_result_data.extend([footer_message])
 
         final_list_of_data = combine_lines_to_fit_event_html(
-            list_of_result_data, header_messages, insert_new_lines=True
+            list_of_result_data,
+            header_messages,
+            insert_new_lines=True,
         )
 
         # Wrap in code block markdown before sending
@@ -2546,7 +2714,7 @@ class FederationBot(RoomWalkCommand):
     async def version_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed version <server_name>\n - Check a server in the room for version info"
+                "**Usage**: !fed version <server_name>\n - Check a server in the room for version info",
             )
             return
 
@@ -2597,7 +2765,7 @@ class FederationBot(RoomWalkCommand):
         number_of_servers = len(list_of_servers_to_check)
 
         current_message_id = await command_event.respond(
-            f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}"
+            f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}",
         )
         list_of_message_ids.extend([current_message_id])
 
@@ -2687,6 +2855,17 @@ class FederationBot(RoomWalkCommand):
         self,
         servers_to_check: Collection[str],
     ) -> dict[str, MatrixResponse]:
+        """
+        Get version information from a collection of servers in parallel.
+
+        Makes concurrent /version requests to each server and collects responses.
+
+        Args:
+            servers_to_check: Collection of server names to query
+
+        Returns:
+            Dict mapping server names to their version response objects
+        """
         # map of server name -> (server brand, server version)
         # Return this at the end
         server_to_version_data: dict[str, MatrixResponse] = {}
@@ -2725,7 +2904,7 @@ class FederationBot(RoomWalkCommand):
     async def server_keys_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info"
+                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info",
             )
             return
         await self._server_keys(command_event, server_to_check)
@@ -2735,7 +2914,7 @@ class FederationBot(RoomWalkCommand):
     async def server_keys_raw_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info"
+                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info",
             )
             return
         await self._server_keys(command_event, server_to_check, display_raw=True)
@@ -2746,6 +2925,17 @@ class FederationBot(RoomWalkCommand):
         server_to_check: str,
         display_raw: bool = False,
     ) -> None:
+        """
+        Get and display server key information.
+
+        Fetches server signing keys and displays them in a formatted table,
+        optionally showing raw JSON.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check keys for
+            display_raw: Whether to display raw JSON response
+        """
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -2789,7 +2979,7 @@ class FederationBot(RoomWalkCommand):
         number_of_servers = len(list_of_servers_to_check)
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the response would be super spammy)."
+                "Only can see raw JSON data if a single server is selected(as the response would be super spammy).",
             )
             return
 
@@ -2797,7 +2987,7 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 f"To many servers in this room: {number_of_servers}. Please select "
                 "a specific server instead.\n\n(This command can have a very large"
-                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})"
+                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})",
             )
             return
 
@@ -2805,7 +2995,7 @@ class FederationBot(RoomWalkCommand):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}"
+            f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -2953,7 +3143,7 @@ class FederationBot(RoomWalkCommand):
         if not server_to_check:
             await command_event.reply(
                 "**Usage**: !fed notary_server_keys <server_name> [notary_to_ask]\n"
-                " - Check a server in the room for version info"
+                " - Check a server in the room for version info",
             )
             return
         await self._server_keys_from_notary(command_event, server_to_check, notary_server_to_use=notary_server_to_use)
@@ -2970,7 +3160,7 @@ class FederationBot(RoomWalkCommand):
         if not server_to_check:
             await command_event.reply(
                 "**Usage**: !fed notary_server_keys <server_name> [notary_to_ask]\n"
-                " - Check a server in the room for version info"
+                " - Check a server in the room for version info",
             )
             return
         await self._server_keys_from_notary(
@@ -2987,6 +3177,18 @@ class FederationBot(RoomWalkCommand):
         notary_server_to_use: str | None,
         display_raw: bool = False,
     ) -> None:
+        """
+        Get and display server key information from a notary server.
+
+        Fetches server signing keys via a notary server and displays them
+        in a formatted table, optionally showing raw JSON.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check keys for
+            notary_server_to_use: Notary server to query, defaults to sender's server
+            display_raw: Whether to display raw JSON response
+        """
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
@@ -3030,7 +3232,7 @@ class FederationBot(RoomWalkCommand):
         number_of_servers = len(list_of_servers_to_check)
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the response would be super spammy)."
+                "Only can see raw JSON data if a single server is selected(as the response would be super spammy).",
             )
             return
 
@@ -3038,13 +3240,13 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 f"To many servers in this room: {number_of_servers}. Please select "
                 "a specific server instead.\n\n(This command can have a very large"
-                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})"
+                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})",
             )
             return
 
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the response would be super spammy)."
+                "Only can see raw JSON data if a single server is selected(as the response would be super spammy).",
             )
             return
 
@@ -3059,7 +3261,7 @@ class FederationBot(RoomWalkCommand):
             f"Retrieving data {about_statement}from federation for "
             f"{number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}\n"
-            f"Using {notary_server_to_use}"
+            f"Using {notary_server_to_use}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -3073,7 +3275,9 @@ class FederationBot(RoomWalkCommand):
                 worker_server_name = await _queue.get()
 
                 result = await self.federation_handler.api.get_server_notary_keys(
-                    worker_server_name, notary_server_to_use, minimum_valid_until_ts
+                    worker_server_name,
+                    notary_server_to_use,
+                    minimum_valid_until_ts,
                 )
 
                 server_to_server_data[worker_server_name] = result
@@ -3229,17 +3433,18 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_request_from:
-            destination_server = server_to_request_from
-        else:
-            destination_server = origin_server
+        destination_server = server_to_request_from or origin_server
 
         discovered_info = await self._discover_event_ids_and_room_ids(
-            origin_server, destination_server, command_event, room_id_or_alias, event_id
+            origin_server,
+            destination_server,
+            command_event,
+            room_id_or_alias,
+            event_id,
         )
         if not discovered_info:
             # The user facing error message was already sent
@@ -3260,7 +3465,7 @@ class FederationBot(RoomWalkCommand):
             f"Retrieving last {limit} Events for \n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
-            f"* From {destination_server} using {origin_server}"
+            f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -3357,17 +3562,18 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
-        if server_to_request_from:
-            destination_server = server_to_request_from
-        else:
-            destination_server = origin_server
+        destination_server = server_to_request_from or origin_server
 
         discovered_info = await self._discover_event_ids_and_room_ids(
-            origin_server, destination_server, command_event, room_id_or_alias, event_id
+            origin_server,
+            destination_server,
+            command_event,
+            room_id_or_alias,
+            event_id,
         )
         if not discovered_info:
             # The user facing error message was already sent
@@ -3388,7 +3594,7 @@ class FederationBot(RoomWalkCommand):
             "Retrieving the chain of Auth Events for:\n"
             f"* Event ID: {event_id}{special_time_formatting}\n"
             f"* in Room: {room_id_or_alias or room_id}\n"
-            f"* From {destination_server} using {origin_server}"
+            f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -3398,7 +3604,11 @@ class FederationBot(RoomWalkCommand):
         started_at = time.monotonic()
         try:
             list_of_event_bases = await self.federation_handler.get_event_auth(
-                origin_server, destination_server, room_id, event_id, timeout=self.command_conn_timeouts["state"] or 10
+                origin_server,
+                destination_server,
+                room_id,
+                event_id,
+                timeout=self.command_conn_timeouts["state"] or 10,
             )
         except MatrixError as e:
             await command_event.respond(f"Some kind of error\n{e.http_code}:{e.reason}")
@@ -3488,7 +3698,7 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
@@ -3496,7 +3706,7 @@ class FederationBot(RoomWalkCommand):
 
         list_of_message_ids = []
         prerender_message = await command_event.respond(
-            f"Retrieving user devices for {user_mxid}\n* From {destination_server} using {origin_server}"
+            f"Retrieving user devices for {user_mxid}\n* From {destination_server} using {origin_server}",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -3509,7 +3719,7 @@ class FederationBot(RoomWalkCommand):
         if response.http_code != 200:
             await command_event.respond(
                 f"Some kind of error\n{response.http_code}:{response.reason}\n\n"
-                f"{json.dumps(response.json_response, indent=4)}"
+                f"{json.dumps(response.json_response, indent=4)}",
             )
             return
 
@@ -3550,7 +3760,7 @@ class FederationBot(RoomWalkCommand):
             await command_event.respond(
                 "This bot does not seem to have the necessary clearance to make "
                 f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first."
+                "server signing keys to it's config first.",
             )
             return
 
@@ -3567,7 +3777,7 @@ class FederationBot(RoomWalkCommand):
             f"for:\n"
             f"* Event ID: {event_id}\n"
             f"* Using {origin_server}\n\n"
-            "Note: if there are more than 1,000 servers in this room, this may fail or take a long time."
+            "Note: if there are more than 1,000 servers in this room, this may fail or take a long time.",
         )
         list_of_message_ids.extend([prerender_message])
 
@@ -3577,7 +3787,10 @@ class FederationBot(RoomWalkCommand):
         # Can not assume that the event_id supplied is in the room requested to search
         # hosts of. Get the current hosts in the room
         ts_response = await self.federation_handler.api.get_timestamp_to_event(
-            origin_server, origin_server, room_id, int(time.time() * 1000)
+            origin_server,
+            origin_server,
+            room_id,
+            int(time.time() * 1000),
         )
         if ts_response.http_code != 200:
             host_list = []
@@ -3601,7 +3814,7 @@ class FederationBot(RoomWalkCommand):
             # occurred. Fall back to the client api with current state. Obviously there
             # are problems with this, but it will allow forward progress.
             current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, falling back to client API"
+                "Failed getting hosts from State over federation, falling back to client API",
             )
             list_of_message_ids.extend([current_message])
             try:
@@ -3618,7 +3831,9 @@ class FederationBot(RoomWalkCommand):
 
         started_at = time.time()
         host_to_event_status_map = await self.federation_handler.find_event_on_servers(
-            origin_server, event_id, host_list
+            origin_server,
+            event_id,
+            host_list,
         )
         total_time = time.time() - started_at
 
@@ -3706,6 +3921,16 @@ class FederationBot(RoomWalkCommand):
         target_server: str | None,
         since: str | None,
     ) -> None:
+        """
+        Get raw public rooms list.
+
+        Retrieves and displays raw JSON response of public rooms list.
+
+        Args:
+            command_event: The event that triggered the command
+            target_server: Server to query public rooms from
+            since: Optional pagination token
+        """
         await command_event.mark_read()
         if not target_server:
             await command_event.reply("I need a target server to look at")
@@ -3721,6 +3946,15 @@ class FederationBot(RoomWalkCommand):
     @fed_command.subcommand(name="publicrooms")
     @command.argument(name="target_server", required=False)
     async def publicrooms_subcommand(self, command_event: MessageEvent, target_server: str | None) -> None:
+        """
+        Get formatted public rooms list.
+
+        Retrieves and displays public rooms list in a formatted table.
+
+        Args:
+            command_event: The event that triggered the command
+            target_server: Server to query public rooms from
+        """
         await command_event.mark_read()
         if not target_server:
             await command_event.reply("I need a target server to look at")
@@ -3748,11 +3982,11 @@ class FederationBot(RoomWalkCommand):
             )
             if public_room_result.http_code != 200:
                 self.log.warning(
-                    f"Hit an error on public rooms: {public_room_result.http_code} {public_room_result.reason}"
+                    f"Hit an error on public rooms: {public_room_result.http_code} {public_room_result.reason}",
                 )
                 if retry_count > 3:
                     await command_event.respond(
-                        f"Hit an error on public rooms after {retry_count + 1} retry attempts: {public_room_result.http_code}: {public_room_result.reason} on {target_server}"
+                        f"Hit an error on public rooms after {retry_count + 1} retry attempts: {public_room_result.http_code}: {public_room_result.reason} on {target_server}",
                     )
                     return
                 retry_count += 1
@@ -3808,7 +4042,7 @@ class FederationBot(RoomWalkCommand):
                 f"{join_rule_dc.pad(join_rule)} "
                 f"{guest_can_join_dc.pad(guest_can_join)} "
                 f"{world_readable_dc.pad(world_readable)} "
-                f"{avatar_url_dc.pad(avatar_url)}"
+                f"{avatar_url_dc.pad(avatar_url)}",
             ])
 
         header_message = (
@@ -3825,7 +4059,7 @@ class FederationBot(RoomWalkCommand):
         list_of_message_ids = []
         for line in final_lines:
             message_id = await command_event.respond(
-                make_into_text_event(wrap_in_code_block_markdown(line), ignore_body=True)
+                make_into_text_event(wrap_in_code_block_markdown(line), ignore_body=True),
             )
             list_of_message_ids.extend([message_id])
         for message_id in list_of_message_ids:
@@ -3839,6 +4073,24 @@ class FederationBot(RoomWalkCommand):
         room_id_or_alias: str | None,
         event_id: str | None,
     ) -> tuple[str, str, int] | None:
+        """
+        Resolve room IDs and event IDs, fetching latest event if needed.
+
+        Args:
+            origin_server: Server making the request
+            destination_server: Server to query
+            command_event: Event that triggered the command
+            room_id_or_alias: Room ID or alias to resolve
+            event_id: Optional event ID to resolve
+
+        Returns:
+            Tuple of (room_id, event_id, origin_server_ts) if successful,
+            None if resolution failed
+
+        Raises:
+            ValueError: If the event ID is not a string
+            TypeError: If the room ID or alias is not valid
+        """
         room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
@@ -3859,7 +4111,7 @@ class FederationBot(RoomWalkCommand):
                 await command_event.respond(
                     "Something went wrong while getting last event in room("
                     f"{ts_response.http_code}: {ts_response.reason}"
-                    "). Please supply an event_id instead at the place in time of query"
+                    "). Please supply an event_id instead at the place in time of query",
                 )
                 return None
 
@@ -3876,11 +4128,11 @@ class FederationBot(RoomWalkCommand):
             if isinstance(event, EventError):
                 await command_event.reply(
                     "The Event ID supplied doesn't appear to be on the origin "
-                    f"server({origin_server}). Try query a different server for it."
+                    f"server({origin_server}). Try query a different server for it.",
                 )
                 return None
 
-            if isinstance(event, (Event, GenericStateEvent)):
+            if isinstance(event, Event | GenericStateEvent):
                 room_id = event.room_id
                 origin_server_ts = event.origin_server_ts
 
