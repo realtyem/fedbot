@@ -143,7 +143,7 @@ class ServerResult:
     sni_server_name: str = field(default_factory=str)
     errors: list[str] = field(default_factory=list)
     diag_info: DiagnosticInfo = field(
-        default_factory=lambda: DiagnosticInfo(enable_diagnostics=False),
+        default_factory=lambda: DiagnosticInfo(diagnostics_enabled=False),
     )
     list_of_ip4_port_tuples: list[tuple[str, str]] = field(default_factory=list)
     list_of_ip6_port_tuples: list[tuple[str, str]] = field(default_factory=list)
