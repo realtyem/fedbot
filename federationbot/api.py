@@ -46,7 +46,7 @@ backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
 
 SOCKET_TIMEOUT_SECONDS = 5.0
-USER_AGENT_STRING = "Sir FederationInspector 0.0.8"
+USER_AGENT_STRING = "PeekingAtYourServerBits 0.0.9"
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
 # the /_matrix urlspace. 'bot' and 'Python' trigger it, so use a different name
 # "Maubot/Fedbot 0.0.7"
@@ -227,7 +227,7 @@ class FederationApi:
             # the pool as well as establishing the connection itself.
             connect=None,
             # This is the most useful for detecting bad servers
-            sock_connect=SOCKET_TIMEOUT_SECONDS,
+            sock_connect=timeout,
             # This is the one that may have the longest time, as we wait for a server to send a response
             sock_read=timeout,
             # defaults to 5, for roundups on timeouts

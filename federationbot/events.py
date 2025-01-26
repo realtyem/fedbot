@@ -406,7 +406,6 @@ class RelatesTo:
         event_id_header = "Relates to Event ID"
         rel_type_header = "Relation Type"
         in_reply_to_header = "In Reply To"
-        new_content_header = "New Content"
         reaction_key_header = "Reaction Key"
         dc.maybe_update_column_width(len(event_id_header))
         summary = ""

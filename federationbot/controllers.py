@@ -1,5 +1,20 @@
-from typing import Any, Callable, Coroutine, Dict, Generic, Hashable, List, Optional, Sequence, Set, TypeVar
-from asyncio import AbstractEventLoop, Task
+from typing import (
+    Any,
+    Callable,
+    Coroutine,
+    Dict,
+    Generic,
+    Hashable,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    overload,
+)
+from asyncio import AbstractEventLoop, Future, Task
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 import asyncio
@@ -155,8 +170,13 @@ class TaskSetEntry(Generic[T]):
     Mainly used for cleaning up any running Task coroutines if they need to be stopped, like during a bot restart.
     """
 
+    # Signatures
+    # Callable[[ArgType1, ArgType2,...], T]  used to specify the typing of the function to create another function
+    #                                       a Callable can return an Awaitable
+    # Coroutine[Any, Any, T]
+    # Awaitable[T]     the typing for a thing that will produce T as a result
     tasks: List[Task[T]]
-    coros: List[Coroutine[Any, Any, T]]
+    coros: List[Future[T]]
     loop: AbstractEventLoop
 
     def __init__(self) -> None:
@@ -187,7 +207,7 @@ class TaskSetEntry(Generic[T]):
 
     async def add_threaded_tasks(
         self,
-        new_task: Callable[..., Coroutine[Any, Any, T]],
+        new_task,
         *args,
         executor: ThreadPoolExecutor,
         limit: int = 1,
@@ -208,7 +228,7 @@ class TaskSetEntry(Generic[T]):
         for _ in range(limit):
             self.coros.append(await self.loop.run_in_executor(executor, functools.partial(new_task, *args, **kwargs)))
 
-    async def gather_results(self, return_exceptions: bool = True) -> Sequence[T | BaseException]:
+    async def gather_results(self, return_exceptions: bool = True) -> Sequence[T]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
 
@@ -222,9 +242,10 @@ class TaskSetEntry(Generic[T]):
         Returns: Tuple of results collected
 
         """
-        return await asyncio.gather(*self.tasks, return_exceptions=return_exceptions)
+        thing = await asyncio.gather(*self.tasks, return_exceptions=return_exceptions)
+        return thing
 
-    async def gather_threaded_results(self, return_exceptions: bool = True) -> Sequence[T | BaseException]:
+    async def gather_threaded_results(self, return_exceptions: bool = True) -> Tuple[BaseException | T]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
 
@@ -239,7 +260,8 @@ class TaskSetEntry(Generic[T]):
 
         """
 
-        return await asyncio.gather(*self.coros, return_exceptions=return_exceptions)
+        result = tuple(await asyncio.gather(*self.coros, return_exceptions=return_exceptions))
+        return result
 
     async def clear_all_tasks(self) -> None:
         """
@@ -249,7 +271,7 @@ class TaskSetEntry(Generic[T]):
         for task in self.tasks:
             task.cancel()
         for coro in self.coros:
-            coro.close()
+            coro.cancel()
         # Use return_exceptions set to True so all tasks actually are finished before exiting the system(or some
         # get left behind and keep running as orphans)
         await self.gather_results()
@@ -383,7 +405,7 @@ class ReactionTaskController(Generic[T]):
     def add_tasks(
         self,
         reference_key: Hashable,
-        new_task: Callable[..., Coroutine[Any, Any, T | None]],
+        new_task,
         *args,
         limit: int = 1,
         **kwargs,
@@ -396,7 +418,7 @@ class ReactionTaskController(Generic[T]):
     async def add_threaded_tasks(
         self,
         reference_key: Hashable,
-        new_task: Callable[..., Coroutine[Any, Any, T]],
+        new_task,
         *args,
         limit: int = 1,
         **kwargs,
@@ -423,6 +445,24 @@ class ReactionTaskController(Generic[T]):
             executor=self.executor,
             **kwargs,
         )
+
+    @overload
+    async def get_task_results(
+        self,
+        reference_key: Hashable,
+        threaded: bool = False,
+        return_exceptions: Literal[True] = True,
+    ) -> Sequence[T | BaseException]:
+        pass
+
+    @overload
+    async def get_task_results(
+        self,
+        reference_key: Hashable,
+        threaded: bool = False,
+        return_exceptions: Literal[False] = False,
+    ) -> Sequence[T]:
+        pass
 
     async def get_task_results(
         self,

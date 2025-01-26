@@ -9,3 +9,7 @@ server_signing_keys:
 
 # Number of threads to create for the thread pool, only created on startup of plugin
 thread_pool_max_workers: 10
+
+command_connection_timeouts:
+  head: 30
+  state: 600

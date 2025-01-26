@@ -148,6 +148,7 @@ class FederationBot(Plugin):
     cached_servers: Dict[str, str]
     server_signing_keys: Dict[str, str]
     federation_handler: FederationHandler
+    command_conn_timeouts: Dict[str, int]
 
     @classmethod
     def get_config_class(cls) -> Union[Type[BaseProxyConfig], None]:
@@ -158,12 +159,15 @@ class FederationBot(Plugin):
         self.server_signing_keys = {}
         # Set the default, in case the config file got lost somehow
         max_workers: int = 10
+        self.command_conn_timeouts = {}
 
         if self.config:
             self.config.load_and_update()
             max_workers = self.config["thread_pool_max_workers"]
             for server, key_data in self.config["server_signing_keys"].items():
                 self.server_signing_keys[server] = key_data
+            for _command, _timeout in self.config["command_connection_timeouts"].items():
+                self.command_conn_timeouts[_command] = _timeout
 
         self.reaction_task_controller = ReactionTaskController(self.client, max_workers)
 
@@ -800,10 +804,7 @@ class FederationBot(Plugin):
         # Prep the host list, just in case we need it later on so the worker doesn't
         # have to do it on-demand, increasing its complexity
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server,
-            destination_server,
-            room_id,
-            event_id,
+            origin_server, destination_server, room_id, event_id, timeout=self.command_conn_timeouts["state"] or 10
         )
 
         good_host_list: List[str] = []
@@ -1494,6 +1495,7 @@ class FederationBot(Plugin):
             list_of_room_alias_servers[0] if list_of_room_alias_servers else destination_server,
             room_id,
             str(self.client.mxid),
+            timeout=self.command_conn_timeouts["head"] or 10,
         )
         # 2. Get the hosts in the room, test which ones are live and filter out the dead
         await command_event.respond("Retrieving list of hosts in room")
@@ -1502,6 +1504,7 @@ class FederationBot(Plugin):
             destination_server,
             room_id,
             head_data.prev_events[0],
+            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         good_host_list: List[str] = []
@@ -1694,10 +1697,7 @@ class FederationBot(Plugin):
         assert event_id is not None
 
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server,
-            destination_server,
-            room_id,
-            event_id,
+            origin_server, destination_server, room_id, event_id, timeout=self.command_conn_timeouts["state"] or 10
         )
 
         # Time to start rendering. Build the header lines first
@@ -1976,7 +1976,11 @@ class FederationBot(Plugin):
         list_of_message_ids = []
         try:
             head_response = await self.federation_handler.make_join_to_server(
-                origin_server, destination_server, room_id, str(self.client.mxid)
+                origin_server,
+                destination_server,
+                room_id,
+                str(self.client.mxid),
+                timeout=self.command_conn_timeouts["head"] or 10,
             )
         except MatrixError as e:
             message_id = await command_event.reply(
@@ -1988,7 +1992,11 @@ class FederationBot(Plugin):
         # room_version = head_response.room_version
         self.log.info(f"head: {head_response.prev_events}")
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server, destination_server, room_id, head_response.prev_events[0]
+            origin_server,
+            destination_server,
+            room_id,
+            head_response.prev_events[0],
+            timeout=self.command_conn_timeouts["state"] or 10,
         )
         if not host_list:
             # Either the origin server doesn't have the state, or some other problem
@@ -2024,7 +2032,7 @@ class FederationBot(Plugin):
                     _host,
                     room_id,
                     str(self.client.mxid),
-                    timeout=5,
+                    timeout=self.command_conn_timeouts["head"] or 10,
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
@@ -2297,7 +2305,7 @@ class FederationBot(Plugin):
             reference_key,
             _delegation_worker,
             delegation_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
 
         started_at = time.monotonic()
@@ -2717,6 +2725,7 @@ class FederationBot(Plugin):
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id,
+            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         prerender_message_2 = await command_event.respond(
@@ -3123,7 +3132,7 @@ class FederationBot(Plugin):
             reference_key,
             _version_worker,
             version_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
         await version_queue.join()
 
@@ -3240,7 +3249,7 @@ class FederationBot(Plugin):
             reference_key,
             _server_keys_worker,
             keys_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
 
         started_at = time.monotonic()
@@ -3503,7 +3512,7 @@ class FederationBot(Plugin):
             reference_key,
             _server_keys_from_notary_worker,
             keys_queue,
-            limit=10,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
         )
 
         started_at = time.monotonic()
@@ -3813,10 +3822,7 @@ class FederationBot(Plugin):
         started_at = time.monotonic()
         try:
             list_of_event_bases = await self.federation_handler.get_event_auth(
-                origin_server,
-                destination_server,
-                room_id,
-                event_id,
+                origin_server, destination_server, room_id, event_id, timeout=self.command_conn_timeouts["state"] or 10
             )
         except MatrixError as e:
             await command_event.respond(f"Some kind of error\n{e.http_code}:{e.reason}")
@@ -4005,7 +4011,11 @@ class FederationBot(Plugin):
             self.log.debug(f"Timestamp to event responded with event_id: {event_id_from_room_right_now}")
             # Get all the hosts in the supplied room
             host_list = await self.federation_handler.get_hosts_in_room_ordered(
-                origin_server, origin_server, room_id, event_id_from_room_right_now
+                origin_server,
+                origin_server,
+                room_id,
+                event_id_from_room_right_now,
+                timeout=self.command_conn_timeouts["state"] or 10,
             )
 
         use_ordered_list = True
