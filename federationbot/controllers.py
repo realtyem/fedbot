@@ -1,4 +1,5 @@
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Coroutine,
@@ -14,6 +15,10 @@ from typing import (
     TypeVar,
     overload,
 )
+
+if TYPE_CHECKING:
+    from .commands.common import MessageEvent
+
 from asyncio import AbstractEventLoop, Future, Task
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
@@ -24,7 +29,7 @@ import random
 import time
 
 from maubot.matrix import MaubotMatrixClient
-from mautrix.types import EventID, MessageEvent, ReactionEvent, RoomID
+from mautrix.types import EventID, ReactionEvent, RoomID
 
 from federationbot.errors import (
     MessageAlreadyHasReactions,
