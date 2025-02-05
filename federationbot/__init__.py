@@ -2011,13 +2011,15 @@ class FederationBot(RoomWalkCommand):
 
                 # The 'get_server_version' function was written with the capability of
                 # collecting diagnostic data.
-                server_to_server_data[worker_server_name] = await self.federation_handler.api.get_server_version(
-                    worker_server_name,
-                    force_rediscover=True,
-                    diagnostics=True,
-                    timeout=10.0,
-                )
-
+                try:
+                    server_to_server_data[worker_server_name] = await self.federation_handler.api.get_server_version(
+                        worker_server_name,
+                        force_rediscover=True,
+                        diagnostics=True,
+                        timeout=10.0,
+                    )
+                except Exception as e:
+                    self.log.debug(f"delegation worker error: {e}")
                 queue.task_done()
 
         delegation_queue: asyncio.Queue[str] = asyncio.Queue()
