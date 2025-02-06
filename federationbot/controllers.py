@@ -1,5 +1,4 @@
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     Coroutine,
@@ -15,10 +14,6 @@ from typing import (
     TypeVar,
     overload,
 )
-
-if TYPE_CHECKING:
-    from .commands.common import MessageEvent
-
 from asyncio import AbstractEventLoop, Future, Task
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
@@ -37,6 +32,7 @@ from federationbot.errors import (
     ReferenceKeyAlreadyExists,
     ReferenceKeyNotFound,
 )
+from federationbot.types import MessageEvent
 
 T = TypeVar("T")
 task_control_logger = logging.getLogger("task_control")

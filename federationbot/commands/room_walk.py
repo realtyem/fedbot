@@ -8,7 +8,6 @@ progress tracking and detailed event analysis.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
 import asyncio
 import time
 
@@ -19,13 +18,11 @@ from mautrix.util.logging import TraceLogger
 
 from federationbot.constants import BACKOFF_MULTIPLIER, SECONDS_BETWEEN_EDITS
 from federationbot.errors import FedBotException
+from federationbot.types import MessageEvent
 from federationbot.utils.formatting import wrap_in_code_block_markdown
 from federationbot.utils.matrix import get_domain_from_id, make_into_text_event
 
 from .common import FederationBotCommandBase
-
-if TYPE_CHECKING:
-    from .common import MessageEvent
 
 logger = TraceLogger("federationbot.commands.room_walk")
 
@@ -368,12 +365,9 @@ class RoomWalkCommand(FederationBotCommandBase):
             f"Room Depth reported as: {room_depth}",
         ]
 
-        pinned_message = cast(
-            "EventID",
-            await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown("\n".join(header_lines + static_lines)),
-                ),
+        pinned_message = await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown("\n".join(header_lines + static_lines)),
             ),
         )
 

@@ -9,10 +9,12 @@ Provides strongly-typed classes for handling Matrix federation data structures:
 
 from __future__ import annotations
 
-from typing import Any, NewType
+from typing import Any, NewType, Protocol
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
+from aiohttp import ClientSession
+from mautrix.types import EventID, RoomID, TextMessageEventContent
 from unpaddedbase64 import decode_base64
 
 from federationbot.utils import full_dict_copy
@@ -205,3 +207,34 @@ class ServerVerifyKeys:
         for entry in server_keys:
             self.update_key_data_from_dict(entry)
         self._raw_data = full_dict_copy(data_from_notary_response)
+
+
+class MessageEvent(Protocol):
+    """
+    Type protocol for maubot's MessageEvent class.
+
+    This protocol defines the expected interface for message events that commands
+    will receive and interact with.
+    """
+
+    room_id: RoomID
+    event_id: EventID
+    sender: str
+    client: ClientSession
+
+    async def respond(
+        self,
+        content: str | TextMessageEventContent,
+        edits: EventID | str | None = None,
+        allow_html: bool = False,
+    ) -> EventID:
+        """Send a response message to the room where this event was received."""
+        ...
+
+    async def mark_read(self) -> None:
+        """Mark this event as read."""
+        ...
+
+    async def reply(self, content: str | TextMessageEventContent, allow_html: bool = False) -> EventID:
+        """Send a reply to this event."""
+        ...

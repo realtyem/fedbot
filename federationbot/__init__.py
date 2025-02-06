@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
-
-if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
-
-    from .commands.common import MessageEvent
-
+from typing import Any, Collection, Sequence, cast
 from asyncio import QueueEmpty
 from contextlib import suppress
 from datetime import datetime
@@ -26,8 +20,8 @@ from mautrix.types import EventID, Membership, RoomID
 from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
-from .commands.room_walk import RoomWalkCommand
-from .constants import (
+from federationbot.commands.room_walk import RoomWalkCommand
+from federationbot.constants import (
     BACKOFF_MULTIPLIER,
     MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
     NOT_IN_ROOM_ERROR,
@@ -36,7 +30,9 @@ from .constants import (
     SERVER_SOFTWARE,
     SERVER_VERSION,
 )
-from .controllers import EmojiReactionCommandStatus
+from federationbot.controllers import EmojiReactionCommandStatus
+from federationbot.types import MessageEvent
+
 from .events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
 from .responses import MakeJoinResponse, MatrixError, MatrixResponse
 from .utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
