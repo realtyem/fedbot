@@ -8,63 +8,23 @@ shared functionality for command handling.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from aiohttp import ClientSession
-    from mautrix.types import EventID, RoomID, TextMessageEventContent
-    from mautrix.util.config import ConfigUpdateHelper
-    from typing_extensions import Protocol
-
-    class MessageEvent(Protocol):
-        """
-        Type protocol for maubot's MessageEvent class.
-
-        This protocol defines the expected interface for message events that commands
-        will receive and interact with.
-        """
-
-        async def respond(
-            self,
-            content: str | TextMessageEventContent,
-            edits: EventID | str | None = None,
-            allow_html: bool = False,
-        ) -> EventID | None:
-            """Send a response message to the room where this event was received."""
-            ...
-
-        async def mark_read(self) -> None:
-            """Mark this event as read."""
-            ...
-
-        async def reply(self, content: str | TextMessageEventContent, allow_html: bool = False) -> EventID | None:
-            """Send a reply to this event."""
-            ...
-
-        room_id: RoomID
-        event_id: EventID
-        sender: str
-        client: ClientSession
-
-
 from time import time
 
-from maubot.handlers import command
 from maubot.plugin_base import Plugin
 from mautrix.types import EventType
-from mautrix.util.config import BaseProxyConfig
+from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
 from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.federation import FederationHandler
+from federationbot.types import MessageEvent
 
 
 class MaubotConfig(BaseProxyConfig):
     """Configuration for the Maubot plugin."""
 
-    @staticmethod
-    def do_update(helper: ConfigUpdateHelper) -> None:
+    def do_update(self, helper: ConfigUpdateHelper) -> None:
         """Update the configuration."""
         helper.copy("whitelist")
         helper.copy("server_signing_keys")
@@ -216,20 +176,16 @@ class FederationBotCommandBase(Plugin):
                         room_alias=room_id_or_alias,
                     )
                 except MalformedRoomAliasError as e:
-                    message_id = cast(
-                        "EventID",
-                        await command_event.reply(f"{e.summary_exception}: '{room_id_or_alias}'"),
-                    )
+                    message_id = await command_event.reply(f"{e.summary_exception}: '{room_id_or_alias}'")
+
                     await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
                     return None, None
                 except FedBotException as e:
-                    message_id = cast(
-                        "EventID",
-                        await command_event.reply(
-                            "Received an error while querying for room alias:\n\n"
-                            f"{e.summary_exception}: '{room_id_or_alias}'",
-                        ),
+                    message_id = await command_event.reply(
+                        "Received an error while querying for room alias:\n\n"
+                        f"{e.summary_exception}: '{room_id_or_alias}'",
                     )
+
                     await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
                     return None, None
 

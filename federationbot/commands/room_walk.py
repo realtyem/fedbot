@@ -8,7 +8,6 @@ progress tracking and detailed event analysis.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
 import asyncio
 import time
 
@@ -17,15 +16,12 @@ from mautrix.errors.request import MatrixRequestError
 from mautrix.types import EventID, PaginatedMessages, PaginationDirection, RoomID, SyncToken
 from mautrix.util.logging import TraceLogger
 
+from federationbot.commands.common import FederationBotCommandBase
 from federationbot.constants import BACKOFF_MULTIPLIER, SECONDS_BETWEEN_EDITS
 from federationbot.errors import FedBotException
+from federationbot.types import MessageEvent
 from federationbot.utils.formatting import wrap_in_code_block_markdown
 from federationbot.utils.matrix import get_domain_from_id, make_into_text_event
-
-from .common import FederationBotCommandBase
-
-if TYPE_CHECKING:
-    from .common import MessageEvent
 
 logger = TraceLogger("federationbot.commands.room_walk")
 
@@ -99,8 +95,9 @@ class RoomWalkCommand(FederationBotCommandBase):
                 iter_time_spent = iter_finish_time - iter_start_time
                 response_list.extend([(iter_time_spent, worker_response)])
 
-                if worker_response.end:
-                    queue.put_nowait((iter_time_spent * BACKOFF_MULTIPLIER, worker_response.end))
+                # type ignore: worker_response is a PagingatedMessages so is a NamedTuple and it doesn't register.
+                if worker_response.end:  # type: ignore[attr-defined]
+                    queue.put_nowait((iter_time_spent * BACKOFF_MULTIPLIER, worker_response.end))  # type: ignore[attr-defined]
 
                 queue.task_done()
 
@@ -211,11 +208,14 @@ class RoomWalkCommand(FederationBotCommandBase):
 
                 # Process responses
                 new_event_ids = {
-                    event.event_id for time_spent, response in new_responses_to_work_on for event in response.events
+                    # PaginatedMessages is a NamedTuple. 'events' is there but mypy doesn't know that
+                    event.event_id
+                    for time_spent, response in new_responses_to_work_on
+                    for event in response.events  # type: ignore[attr-defined]
                 }
                 cumulative_iter_time += sum(time_spent for time_spent, _ in new_responses_to_work_on)
                 iterations += len(new_responses_to_work_on)
-                finish = any(not response.end for _, response in new_responses_to_work_on)
+                finish = any(not response.end for _, response in new_responses_to_work_on)  # type: ignore[attr-defined]
 
                 if discovery_collection_of_event_ids is not None:
                     # Backwalk phase
@@ -368,12 +368,9 @@ class RoomWalkCommand(FederationBotCommandBase):
             f"Room Depth reported as: {room_depth}",
         ]
 
-        pinned_message = cast(
-            "EventID",
-            await command_event.respond(
-                make_into_text_event(
-                    wrap_in_code_block_markdown("\n".join(header_lines + static_lines)),
-                ),
+        pinned_message = await command_event.respond(
+            make_into_text_event(
+                wrap_in_code_block_markdown("\n".join(header_lines + static_lines)),
             ),
         )
 
