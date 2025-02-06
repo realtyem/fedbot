@@ -95,8 +95,9 @@ class RoomWalkCommand(FederationBotCommandBase):
                 iter_time_spent = iter_finish_time - iter_start_time
                 response_list.extend([(iter_time_spent, worker_response)])
 
-                if worker_response.end:
-                    queue.put_nowait((iter_time_spent * BACKOFF_MULTIPLIER, worker_response.end))
+                # type ignore: worker_response is a PagingatedMessages so is a NamedTuple and it doesn't register.
+                if worker_response.end:  # type: ignore[attr-defined]
+                    queue.put_nowait((iter_time_spent * BACKOFF_MULTIPLIER, worker_response.end))  # type: ignore[attr-defined]
 
                 queue.task_done()
 
@@ -207,11 +208,14 @@ class RoomWalkCommand(FederationBotCommandBase):
 
                 # Process responses
                 new_event_ids = {
-                    event.event_id for time_spent, response in new_responses_to_work_on for event in response.events
+                    # PaginatedMessages is a NamedTuple. 'events' is there but mypy doesn't know that
+                    event.event_id
+                    for time_spent, response in new_responses_to_work_on
+                    for event in response.events  # type: ignore[attr-defined]
                 }
                 cumulative_iter_time += sum(time_spent for time_spent, _ in new_responses_to_work_on)
                 iterations += len(new_responses_to_work_on)
-                finish = any(not response.end for _, response in new_responses_to_work_on)
+                finish = any(not response.end for _, response in new_responses_to_work_on)  # type: ignore[attr-defined]
 
                 if discovery_collection_of_event_ids is not None:
                     # Backwalk phase
