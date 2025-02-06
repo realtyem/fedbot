@@ -24,3 +24,7 @@ This modular approach allows commands to be easily added or removed from the
 bot by adjusting the inheritance chain, while ensuring each command's methods
 remain isolated through consistent naming conventions.
 """
+
+from .common import FederationBotCommandBase
+
+__all__ = ["FederationBotCommandBase"]
