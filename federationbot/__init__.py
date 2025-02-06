@@ -613,11 +613,13 @@ class FederationBot(RoomWalkCommand):
                     # The queue item is:
                     # (new_back_off_time, is_this_a_retry, next_event_ids)
                     # Note that BACKOFF_MULTIPLIER is a reducing multiplier
-                    _event_fetch_queue.put_nowait((
-                        _time_spent * BACKOFF_MULTIPLIER,
-                        False,
-                        next_list_to_get,
-                    ))
+                    _event_fetch_queue.put_nowait(
+                        (
+                            _time_spent * BACKOFF_MULTIPLIER,
+                            False,
+                            next_list_to_get,
+                        )
+                    )
 
                 # Tuple of time spent(for calculating backoff) and if we are done
                 render_list.extend([(total_time_spent, False)])
@@ -1260,9 +1262,11 @@ class FederationBot(RoomWalkCommand):
                     [event_base.raw_data],
                 )
                 self.log.info(f"SENT, got response of {response.json_response}")
-                list_of_buffer_lines.extend([
-                    f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}",
-                ])
+                list_of_buffer_lines.extend(
+                    [
+                        f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}",
+                    ]
+                )
             else:
                 self.log.info(f"Unexpectedly not sent {event_base}")
 
@@ -1347,14 +1351,13 @@ class FederationBot(RoomWalkCommand):
         # One way or another, we have a room id by now
         # assert room_id is not None
 
-        list_of_message_ids = []
         preresponse_message = await command_event.respond(
             f"Retrieving Hosts for \n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
             f"* From {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([preresponse_message])
+        list_of_message_ids: list[EventID] = [preresponse_message]
 
         # This will be assigned by now
         assert event_id is not None
@@ -1385,10 +1388,10 @@ class FederationBot(RoomWalkCommand):
         final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
 
         for chunk in final_list_of_data:
-            current_message = await command_event.respond(
+            current_message_id = await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
-            list_of_message_ids.extend([current_message])
+            list_of_message_ids.extend([current_message_id])
         for message_id in list_of_message_ids:
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
@@ -1435,7 +1438,6 @@ class FederationBot(RoomWalkCommand):
             constants_display_string += f"'{value}', "
         spaces_display_string = "' ', ' ', ' ', ' ', ' '"
 
-        list_of_message_ids = []
         debug_message = await command_event.respond(
             wrap_in_code_block_markdown(
                 f"fullb char: {constants_display_string}\n"
@@ -1444,7 +1446,7 @@ class FederationBot(RoomWalkCommand):
                 f"segment_size: {progress_bar._segment_size}\n",
             ),
         )
-        list_of_message_ids.extend([debug_message])
+        list_of_message_ids: list[EventID] = [debug_message]
 
         if style_type == BitmapProgressBarStyle.SCATTER:
             for i in range(1, max_size_int + 1):
@@ -1634,9 +1636,8 @@ class FederationBot(RoomWalkCommand):
 
         assert room_version_int is not None
 
-        list_of_message_ids = []
         current_message = await command_event.respond(f"Original:\n{wrap_in_code_block_markdown(event.to_json())}")
-        list_of_message_ids.extend([current_message])
+        list_of_message_ids: list[EventID] = [current_message]
 
         redacted_data = redact_event(room_version_int, event.raw_data)
         redacted_data.pop("signatures", None)
@@ -1682,7 +1683,6 @@ class FederationBot(RoomWalkCommand):
         if list_of_room_alias_servers:
             destination_server = list_of_room_alias_servers[0]
 
-        list_of_message_ids = []
         try:
             head_response = await self.federation_handler.make_join_to_server(
                 origin_server,
@@ -1708,6 +1708,8 @@ class FederationBot(RoomWalkCommand):
             head_response.prev_events[0],
             timeout=self.command_conn_timeouts["state"] or 10,
         )
+        list_of_message_ids: list[EventID] = []
+
         if not host_list:
             # Either the origin server doesn't have the state, or some other problem
             # occurred. Fall back to the client api with current state. Obviously there
@@ -1763,9 +1765,9 @@ class FederationBot(RoomWalkCommand):
             limit=len(host_list),
         )
 
-        results: Sequence[
-            tuple[str, MakeJoinResponse | MatrixError]
-        ] = await self.reaction_task_controller.get_task_results(reference_task_key, return_exceptions=False)
+        results: Sequence[tuple[str, MakeJoinResponse | MatrixError]] = (
+            await self.reaction_task_controller.get_task_results(reference_task_key, return_exceptions=False)
+        )
 
         await self.reaction_task_controller.cancel(reference_task_key)
 
@@ -1816,16 +1818,18 @@ class FederationBot(RoomWalkCommand):
             assert event_from_newest is not None
             glyph_auth_events = "".join(["A" for _ in event_from_newest.auth_events])
             glyph_prev_events = "".join(["P" for _ in event_from_newest.prev_events])
-            list_of_buffered_messages.extend((
-                f"{server_name_dc.pad(_host)}: {event_from_newest.event_id} | {pretty_print_timestamp(event_from_newest.origin_server_ts)} | {glyph_auth_events}:{glyph_prev_events}",
-            ))
+            list_of_buffered_messages.extend(
+                (
+                    f"{server_name_dc.pad(_host)}: {event_from_newest.event_id} | {pretty_print_timestamp(event_from_newest.origin_server_ts)} | {glyph_auth_events}:{glyph_prev_events}",
+                )
+            )
             _queue.task_done()
 
         async def _head_error_worker(_queue: asyncio.Queue[tuple[str, MatrixError]]) -> None:
             _host_error, _result_error = _queue.get_nowait()
-            list_of_buffered_messages.extend((
-                f"{server_name_dc.pad(_host_error)}: {_result_error.http_code}, {_result_error.reason}",
-            ))
+            list_of_buffered_messages.extend(
+                (f"{server_name_dc.pad(_host_error)}: {_result_error.http_code}, {_result_error.reason}",)
+            )
             _queue.task_done()
 
         reference_task_key = self.reaction_task_controller.setup_task_set()
@@ -1989,14 +1993,13 @@ class FederationBot(RoomWalkCommand):
 
         number_of_servers = len(list_of_servers_to_check)
 
-        list_of_message_ids = []
         # Some quality of life niceties
         prerender_message = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} "
             f"server{'s.' if number_of_servers > 1 else '.'}\n"
             "This may take up to 30 seconds to complete.",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # map of server name -> (server brand, server version)
         server_to_server_data: dict[str, MatrixResponse] = {}
@@ -2189,11 +2192,10 @@ class FederationBot(RoomWalkCommand):
             event_id = command_event.event_id
             extra_info = " last event in this room"
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Retrieving{extra_info}: {event_id} from {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # Collect all the Federation Responses as well as the EventBases.
         # Errors can be found in the Responses.
@@ -2265,11 +2267,10 @@ class FederationBot(RoomWalkCommand):
             event_id = command_event.event_id
             extra_info = " last event in this room"
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Retrieving{extra_info}: {event_id} from {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # TODO: test by modifying the object. Have to reach into the data as it comes in and
         #  modify that, as the attrib versions will have already been parsed and
@@ -2437,14 +2438,13 @@ class FederationBot(RoomWalkCommand):
         else:
             special_time_formatting = ""
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Retrieving State for:\n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
             f"* From {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # This will be assigned by now
         assert event_id is not None
@@ -2565,7 +2565,6 @@ class FederationBot(RoomWalkCommand):
         await command_event.mark_read()
 
         list_of_servers_to_check = set()
-        list_of_message_ids = []
 
         room_to_check: str | None = str(command_event.room_id)
 
@@ -2613,7 +2612,7 @@ class FederationBot(RoomWalkCommand):
             f"Testing federation response time of `/version` for {number_of_servers} server"
             f"{'s' if number_of_servers > 1 else ''}",
         )
-        list_of_message_ids.extend([current_message_id])
+        list_of_message_ids: list[EventID] = [current_message_id]
 
         started_at = time.monotonic()
         server_to_version_data = await self._get_versions_from_servers(list_of_servers_to_check)
@@ -2720,7 +2719,6 @@ class FederationBot(RoomWalkCommand):
         await command_event.mark_read()
 
         list_of_servers_to_check = set()
-        list_of_message_ids = []
 
         # It may be that they are using their mxid as the server to check, parse that
         maybe_user_mxid = is_mxid(server_to_check)
@@ -2765,7 +2763,7 @@ class FederationBot(RoomWalkCommand):
         current_message_id = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}",
         )
-        list_of_message_ids.extend([current_message_id])
+        list_of_message_ids: list[EventID] = [current_message_id]
 
         started_at = time.monotonic()
         server_to_version_data = await self._get_versions_from_servers(list_of_servers_to_check)
@@ -2991,11 +2989,10 @@ class FederationBot(RoomWalkCommand):
 
         server_to_server_data: dict[str, MatrixResponse] = {}
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Retrieving data from federation for {number_of_servers} server{'s' if number_of_servers > 1 else ''}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         async def _server_keys_worker(queue: asyncio.Queue[str]) -> None:
             while True:
@@ -3251,7 +3248,6 @@ class FederationBot(RoomWalkCommand):
         if not notary_server_to_use:
             notary_server_to_use = get_domain_from_id(command_event.sender)
 
-        list_of_message_ids = []
         about_statement = ""
         if number_of_servers == 1:
             about_statement = f"about {list_of_servers_to_check} "
@@ -3261,7 +3257,7 @@ class FederationBot(RoomWalkCommand):
             f"{'s' if number_of_servers > 1 else ''}\n"
             f"Using {notary_server_to_use}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         server_to_server_data: dict[str, MatrixResponse] = {}
         minimum_valid_until_ts = int(time.time() * 1000) + (30 * 60 * 1000)  # Add 30 minutes
@@ -3458,14 +3454,13 @@ class FederationBot(RoomWalkCommand):
         else:
             special_time_formatting = ""
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Retrieving last {limit} Events for \n"
             f"* Room: {room_id_or_alias or room_id}\n"
             f"* at Event ID: {event_id}{special_time_formatting}\n"
             f"* From {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # This will be assigned by now
         assert event_id is not None
@@ -3587,14 +3582,13 @@ class FederationBot(RoomWalkCommand):
         else:
             special_time_formatting = ""
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             "Retrieving the chain of Auth Events for:\n"
             f"* Event ID: {event_id}{special_time_formatting}\n"
             f"* in Room: {room_id_or_alias or room_id}\n"
             f"* From {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # This will be assigned by now
         assert event_id is not None
@@ -3702,11 +3696,10 @@ class FederationBot(RoomWalkCommand):
 
         _, destination_server = user_mxid.split(":", maxsplit=1)
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Retrieving user devices for {user_mxid}\n* From {destination_server} using {origin_server}",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         response = await self.federation_handler.api.get_user_devices(
             origin_server,
@@ -3768,7 +3761,6 @@ class FederationBot(RoomWalkCommand):
             # function
             return
 
-        list_of_message_ids = []
         prerender_message = await command_event.respond(
             f"Checking all hosts:\n"
             f"* from Room: {room_id_or_alias or room_id}\n\n"
@@ -3777,7 +3769,7 @@ class FederationBot(RoomWalkCommand):
             f"* Using {origin_server}\n\n"
             "Note: if there are more than 1,000 servers in this room, this may fail or take a long time.",
         )
-        list_of_message_ids.extend([prerender_message])
+        list_of_message_ids: list[EventID] = [prerender_message]
 
         # This will be assigned by now
         assert event_id is not None
@@ -3900,7 +3892,6 @@ class FederationBot(RoomWalkCommand):
         # to fit into the size limit of an Event.
         final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
-        list_of_message_ids = []
         for chunk in final_list_of_data:
             message_id = await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
@@ -4032,16 +4023,18 @@ class FederationBot(RoomWalkCommand):
             world_readable = chunk.get("world_readable", "")
             guest_can_join = chunk.get("guest_can_join", "")
             avatar_url = chunk.get("avatar_url", "")
-            list_of_buffered_lines.extend([
-                f"{room_id_dc.pad(room_id)}: "
-                f"{alias_dc.pad(alias)} "
-                f"{name_dc.pad(name)} "
-                f"{num_joined_members_dc.pad(num_joined_members)} "
-                f"{join_rule_dc.pad(join_rule)} "
-                f"{guest_can_join_dc.pad(guest_can_join)} "
-                f"{world_readable_dc.pad(world_readable)} "
-                f"{avatar_url_dc.pad(avatar_url)}",
-            ])
+            list_of_buffered_lines.extend(
+                [
+                    f"{room_id_dc.pad(room_id)}: "
+                    f"{alias_dc.pad(alias)} "
+                    f"{name_dc.pad(name)} "
+                    f"{num_joined_members_dc.pad(num_joined_members)} "
+                    f"{join_rule_dc.pad(join_rule)} "
+                    f"{guest_can_join_dc.pad(guest_can_join)} "
+                    f"{world_readable_dc.pad(world_readable)} "
+                    f"{avatar_url_dc.pad(avatar_url)}",
+                ]
+            )
 
         header_message = (
             f"{room_id_dc.pad()}: "
@@ -4054,7 +4047,7 @@ class FederationBot(RoomWalkCommand):
             f"{avatar_url_dc.pad()}"
         )
         final_lines = combine_lines_to_fit_event(list_of_buffered_lines, header_message, insert_new_lines=True)
-        list_of_message_ids = []
+        list_of_message_ids: list[EventID] = []
         for line in final_lines:
             message_id = await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(line), ignore_body=True),
