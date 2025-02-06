@@ -12,7 +12,7 @@ from time import time
 
 from maubot.plugin_base import Plugin
 from mautrix.types import EventType
-from mautrix.util.config import BaseProxyConfig
+from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
 from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
@@ -24,8 +24,7 @@ from federationbot.types import MessageEvent
 class MaubotConfig(BaseProxyConfig):
     """Configuration for the Maubot plugin."""
 
-    @staticmethod
-    def do_update(helper: ConfigUpdateHelper) -> None:
+    def do_update(self, helper: ConfigUpdateHelper) -> None:
         """Update the configuration."""
         helper.copy("whitelist")
         helper.copy("server_signing_keys")
