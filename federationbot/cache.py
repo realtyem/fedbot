@@ -169,3 +169,41 @@ class LRUCache(Generic[KT, VT]):
         """
         self._cleanup_task.cancel()
         await asyncio.gather(self._cleanup_task, return_exceptions=True)
+
+
+@dataclass(slots=True)
+class TTLCacheEntry(CacheEntry[VT]):
+    ttl: int
+
+
+class TTLCache(Generic[KT, VT]):
+    _cache: dict[KT, TTLCacheEntry[VT]]
+    _ttl_default_ms: int
+    _time_cb: Callable[..., float]
+
+    def __init__(self, ttl_default_ms: int = 1 * 60 * 60 * 1000):
+        self._time_cb = time.time
+        self._cache = {}
+        self._ttl_default_ms = ttl_default_ms
+        self.get = self.__getitem__
+        self.set = self.__setitem__
+
+    def __setitem__(self, key: KT, value: VT, ttl_displacer_ms: int | None = None) -> None:
+        ttl = int(self._time_cb() * 1000)
+        if ttl_displacer_ms:
+            ttl = ttl + ttl_displacer_ms
+        else:
+            ttl = ttl + self._ttl_default_ms
+        self._cache[key] = TTLCacheEntry(cache_value=value, ttl=ttl)
+
+    def __getitem__(self, key: KT, _return_raw: bool = False) -> TTLCacheEntry[VT] | VT | None:
+        cache_entry = self._cache.get(key, None)
+        if _return_raw:
+            return cache_entry
+        if cache_entry and cache_entry.ttl >= self._time_cb():
+            return cache_entry.cache_value
+        self._cache.pop(key)
+        return None
+
+    def __len__(self) -> int:
+        return len(self._cache)
