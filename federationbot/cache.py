@@ -19,6 +19,7 @@ Type Parameters:
 from __future__ import annotations
 
 from typing import Callable, Generic, TypeVar
+from dataclasses import dataclass
 from threading import Lock
 import asyncio
 import time
@@ -29,6 +30,7 @@ CACHE_EXPIRY_TIME_SECONDS = 30 * 60  # 30 minutes
 CACHE_CLEANUP_SLEEP_TIME_SECONDS = 30.0  # 30 seconds
 
 
+@dataclass(slots=True)
 class CacheEntry(Generic[VT]):
     """
     Base cache entry container for storing values.
@@ -40,6 +42,7 @@ class CacheEntry(Generic[VT]):
     cache_value: VT
 
 
+@dataclass(slots=True)
 class LRUCacheEntry(CacheEntry[VT]):
     """
     LRU cache entry that tracks access time.
@@ -60,8 +63,9 @@ class LRUCache(Generic[KT, VT]):
     Thread-safe access is ensured via Lock.
 
     Args:
-        KT: Type of cache keys
-        VT: Type of cache values
+        expire_after_seconds:
+        cleanup_task_sleep_time_seconds:
+        eviction_condition_func:
 
     Attributes:
         time_cb: Function that returns current time as float
@@ -104,10 +108,7 @@ class LRUCache(Generic[KT, VT]):
             value: Value to store
         """
         with self._lock:
-            cache_entry = self._cache.setdefault(key, LRUCacheEntry())
-            cache_entry.cache_value = value
-            cache_entry.last_access_time_ms = self.time_cb()
-            self._cache[key] = cache_entry
+            self._cache[key] = LRUCacheEntry(cache_value=value, last_access_time_ms=self.time_cb())
 
     def __getitem__(self, item: KT, _default: VT | None = None) -> VT | None:
         """
