@@ -1,2 +1,2 @@
 #!/bin/bash
-zip -9r ../fedbot-test.mbp ./federationbot/*
+zip -9r ../fedbot-test.mbp ./*
