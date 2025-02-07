@@ -31,14 +31,13 @@ from federationbot.constants import (
     SERVER_VERSION,
 )
 from federationbot.controllers import EmojiReactionCommandStatus
+from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
+from federationbot.responses import MakeJoinResponse, MatrixError, MatrixResponse
 from federationbot.types import MessageEvent
-
-from .events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
-from .responses import MakeJoinResponse, MatrixError, MatrixResponse
-from .utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
-from .utils.colors import Colors
-from .utils.display import DisplayLineColumnConfig, Justify, pad
-from .utils.formatting import (
+from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
+from federationbot.utils.colors import Colors
+from federationbot.utils.display import DisplayLineColumnConfig, Justify, pad
+from federationbot.utils.formatting import (
     add_color,
     bold,
     combine_lines_to_fit_event,
@@ -46,7 +45,7 @@ from .utils.formatting import (
     wrap_in_code_block_markdown,
     wrap_in_details,
 )
-from .utils.matrix import (
+from federationbot.utils.matrix import (
     get_domain_from_id,
     is_event_id,
     is_mxid,
@@ -54,8 +53,8 @@ from .utils.matrix import (
     is_room_id_or_alias,
     make_into_text_event,
 )
-from .utils.numbers import is_int, round_half_up
-from .utils.time import pretty_print_timestamp
+from federationbot.utils.numbers import is_int, round_half_up
+from federationbot.utils.time import pretty_print_timestamp
 
 json_decoder = json.JSONDecoder()
 
