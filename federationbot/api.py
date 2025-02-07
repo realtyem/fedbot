@@ -4,7 +4,7 @@ import json
 import logging
 import time
 
-from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, TraceConfig, client_exceptions
+from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, client_exceptions
 from backoff._typing import Details
 from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
@@ -23,24 +23,7 @@ from federationbot.errors import (
 )
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
-from federationbot.tracing import (
-    on_connection_create_end,
-    on_connection_create_start,
-    on_connection_queued_end,
-    on_connection_queued_start,
-    on_connection_reuseconn,
-    on_dns_cache_hit,
-    on_dns_cache_miss,
-    on_dns_resolvehost_end,
-    on_dns_resolvehost_start,
-    on_request_chunk_sent,
-    on_request_end,
-    on_request_exception,
-    on_request_headers_sent,
-    on_request_redirect,
-    on_request_start,
-    on_response_chunk_received,
-)
+from federationbot.tracing import make_fresh_trace_config
 
 backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
@@ -94,29 +77,11 @@ class FederationApi:
         # Map this cache to server_name -> ServerResult
         self.server_discovery_cache: LRUCache[str, ServerResult] = LRUCache(expire_after_seconds=60 * 30)
 
-        trace_config = TraceConfig()
-        trace_config.on_request_start.append(on_request_start)
-        trace_config.on_request_end.append(on_request_end)
-        trace_config.on_request_chunk_sent.append(on_request_chunk_sent)
-        trace_config.on_request_redirect.append(on_request_redirect)
-        trace_config.on_request_exception.append(on_request_exception)
-        trace_config.on_request_headers_sent.append(on_request_headers_sent)
-        trace_config.on_response_chunk_received.append(on_response_chunk_received)
-        trace_config.on_connection_create_end.append(on_connection_create_end)
-        trace_config.on_connection_create_start.append(on_connection_create_start)
-        trace_config.on_connection_reuseconn.append(on_connection_reuseconn)
-        trace_config.on_connection_queued_end.append(on_connection_queued_end)
-        trace_config.on_connection_queued_start.append(on_connection_queued_start)
-        trace_config.on_dns_cache_hit.append(on_dns_cache_hit)
-        trace_config.on_dns_cache_miss.append(on_dns_cache_miss)
-        trace_config.on_dns_resolvehost_end.append(on_dns_resolvehost_end)
-        trace_config.on_dns_resolvehost_start.append(on_dns_resolvehost_start)
-
         connector = TCPConnector(ttl_dns_cache=60 * 60 * 5, limit=10000, limit_per_host=1, force_close=True)
         # TODO: Make a custom Resolver to handle server discovery
         self.http_client = ClientSession(
             connector=connector,
-            trace_configs=[trace_config],
+            trace_configs=[make_fresh_trace_config()],
         )
         self.delegation_handler = DelegationHandler(self._federation_request)
 
