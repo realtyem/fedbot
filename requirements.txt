@@ -7,3 +7,6 @@ mautrix>=0.20.7
 more-itertools>=10.6.0
 signedjson>=1.1.4
 unpaddedbase64>=2.1.0
+
+aiohttp~=3.11.11
+yarl~=1.18.3
