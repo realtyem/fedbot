@@ -17,7 +17,7 @@ from federationbot.delegation import DelegationHandler
 from federationbot.errors import (
     FedBotException,
     PluginTimeout,
-    ServerDiscoveryError,
+    ServerDiscoveryDNSError,
     ServerSSLException,
     ServerUnreachable,
 )
@@ -147,9 +147,7 @@ class FederationApi:
             try:
                 host, port = ip_port_tuple
             except TypeError:
-                raise ServerDiscoveryError(
-                    "No DNS entries found", f"No DNS queries had answers for {destination_server_name}"
-                )
+                raise ServerDiscoveryDNSError(destination_server_name)
 
             resolved_destination_server = force_ip or host
             destination_port = int(port)
@@ -348,12 +346,16 @@ class FederationApi:
                 **kwargs,
             )
 
-        except FedBotException as e:
+        except (FedBotException, ServerDiscoveryDNSError) as e:
             fedapi_logger.warning(f"Problem on {destination_server_name}: {e}")
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
-            diag_info.error(str(e.long_exception))
+            if isinstance(e, FedBotException):
+                diag_info.error(str(e.long_exception))
+                server_result.unhealthy = str(e.summary_exception)
+            else:
+                diag_info.error("DNS error")
+                server_result.unhealthy = "DNS error"
             # Since there was an exception, cache the result unless it was a timeout error, as that shouldn't count
-            server_result.unhealthy = str(e.summary_exception)
 
             # Errors will be cached for 10 minutes
             server_result.retry_time_s = now + 10 * 60
@@ -363,7 +365,7 @@ class FederationApi:
             return MatrixError(
                 http_code=0,
                 errcode=str(0),
-                reason=str(e.summary_exception),
+                reason=str(e),
                 diag_info=diag_info if diagnostics else None,
                 json_response={},
             )

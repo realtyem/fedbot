@@ -6,7 +6,7 @@ This module defines the exception hierarchy used throughout the federation bot:
 Federation Errors:
 - ServerDiscoveryError: Problems finding/connecting to Matrix servers
 - WellKnownError: Issues with .well-known federation discovery
-- SchemeError: Invalid server name formatting
+- WellKnownSchemeError: Invalid server name formatting
 - ServerSSLException: SSL/TLS connection failures
 - ServerUnreachable: Server offline or unreachable
 
@@ -71,15 +71,24 @@ class ServerUnreachable(FedBotException):
     """Server was offline last time we checked, and temporarily blocked from retries."""
 
 
-class ServerDiscoveryError(FedBotException):
+class ServerDiscoveryError(Exception):
     """Error during Matrix server discovery process."""
+
+    server_name: str
+
+    def __init__(self, server_name: str) -> None:
+        self.server_name = server_name
+
+
+class ServerDiscoveryDNSError(ServerDiscoveryError):
+    """Error during DNS query"""
 
 
 class WellKnownError(ServerDiscoveryError):
     """Error during .well-known federation discovery."""
 
 
-class SchemeError(ServerDiscoveryError):
+class WellKnownSchemeError(WellKnownError):
     """Invalid server name format (contains scheme)."""
 
 
