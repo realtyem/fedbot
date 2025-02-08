@@ -18,7 +18,7 @@ Type Parameters:
 
 from __future__ import annotations
 
-from typing import Callable, Generic, TypeVar
+from typing import Callable, Generic, Literal, TypeVar, overload
 from dataclasses import dataclass
 from threading import Lock
 import asyncio
@@ -177,6 +177,21 @@ class TTLCacheEntry(CacheEntry[VT]):
 
 
 class TTLCache(Generic[KT, VT]):
+    """
+    A basic TTLCache, with on-the-fly changes to TTL during entry creation.
+
+    Initialize with a TTL for entries, or a default of 1 hour will be used. While
+    setting new entries, you can change that value to be more or less. This way you
+    can set a custom TTL for a given entry
+
+    Attributes:
+        _cache:
+        _ttl_default_ms:
+        _time_cb: the time callback to get the current time, returns time in seconds as a float
+        get:
+        set:
+
+    """
     _cache: dict[KT, TTLCacheEntry[VT]]
     _ttl_default_ms: int
     _time_cb: Callable[..., float]
@@ -196,13 +211,19 @@ class TTLCache(Generic[KT, VT]):
             ttl = ttl + self._ttl_default_ms
         self._cache[key] = TTLCacheEntry(cache_value=value, ttl=ttl)
 
+    @overload
+    def __getitem__(self, key: KT, _return_raw: Literal[False] = False) -> VT | None: ...
+
+    @overload
+    def __getitem__(self, key: KT, _return_raw: Literal[True] = True) -> TTLCacheEntry[VT] | None: ...
+
     def __getitem__(self, key: KT, _return_raw: bool = False) -> TTLCacheEntry[VT] | VT | None:
-        cache_entry = self._cache.get(key, None)
-        if _return_raw:
-            return cache_entry
-        if cache_entry and cache_entry.ttl >= self._time_cb():
+        if cache_entry := self._cache.get(key, None):
+            if cache_entry.ttl < self._time_cb():
+                self._cache.pop(key)
+            if _return_raw:
+                return cache_entry
             return cache_entry.cache_value
-        self._cache.pop(key)
         return None
 
     def __len__(self) -> int:
