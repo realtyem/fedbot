@@ -28,6 +28,7 @@ error handling and reporting in the bot's federation inspection commands.
 from __future__ import annotations
 
 
+# General or legacy exceptions
 class FedBotException(Exception):
     """Base exception for federation-specific errors."""
 
@@ -71,6 +72,7 @@ class ServerUnreachable(FedBotException):
     """Server was offline last time we checked, and temporarily blocked from retries."""
 
 
+# Errors during the discovery process
 class ServerDiscoveryError(Exception):
     """Error during Matrix server discovery process."""
 
@@ -98,6 +100,7 @@ class WellKnownParsingError(WellKnownError):
     """Error occurred while parsing the well-known response."""
 
 
+# Internal Fedbot exceptions
 class MessageAlreadyHasReactions(Exception):
     """The Message given already has Reactions attached."""
 
