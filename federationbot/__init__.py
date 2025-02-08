@@ -32,7 +32,7 @@ from federationbot.constants import (
 )
 from federationbot.controllers import EmojiReactionCommandStatus
 from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
-from federationbot.resolver import WellKnownDiagnosticResult, WellKnownLookupResult
+from federationbot.resolver import WellKnownDiagnosticResult, WellKnownLookupFailure, WellKnownLookupResult
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixResponse
 from federationbot.types import MessageEvent
 from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
@@ -4134,10 +4134,8 @@ class FederationBot(RoomWalkCommand):
                 # The 'get_server_version' function was written with the capability of
                 # collecting diagnostic data.
                 try:
-                    server_to_server_data[worker_server_name] = (
-                        await self.experimental_resolver.get_well_known(
-                            worker_server_name,
-                        )
+                    server_to_server_data[worker_server_name] = await self.experimental_resolver.get_well_known(
+                        worker_server_name,
                     )
                 except Exception as e:
                     self.log.warning(f"delegation worker error: {e}", exc_info=True)
@@ -4162,27 +4160,91 @@ class FederationBot(RoomWalkCommand):
         await delegation_queue.join()
         total_time = time.monotonic() - started_at
 
+        # Want the full room version it to look like this for now
+        #
+        #   Server Name | Status | Host                 | Port  | TLS served by  |
+        # ------------------------------------------------------------------
+        #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
+        # somewhere.net |    404 | None                 | Error | resty          | Long error....
+        #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
+
+        # The single server version will be the same in that a single line like above
+        # will be printed, then the rendered diagnostic data
+
+        # Create the columns to be used
+        server_name_col = DisplayLineColumnConfig("Server Name")
+        status_col = DisplayLineColumnConfig("Status")
+        host_col = DisplayLineColumnConfig("Host")
+        port_col = DisplayLineColumnConfig("Port")
+        tls_served_by_col = DisplayLineColumnConfig("TLS served by")
+        # errors_col = DisplayLineColumnConfig("Errors")
+
+        # Iterate through the server names to widen the column, if necessary.
+        for server_name, response in server_to_server_data.items():
+            # Only if it's not obnoxiously long, saw an over 66 once(you know who you are)
+            if not len(server_name) > 30:
+                server_name_col.maybe_update_column_width(len(server_name))
+            if isinstance(response, WellKnownDiagnosticResult):
+                host_col.maybe_update_column_width(response.host)
+                port_col.maybe_update_column_width(response.port)
+                if maybe_tls_server := response.headers.get("server", None):
+                    tls_served_by_col.maybe_update_column_width(len(maybe_tls_server))
+
+        # Just use a fixed width for the results. Should never be larger than 5 for most
+        status_col.maybe_update_column_width(6)
+
+        # Begin constructing the message
+        #
+        # Use a sorted list of server names, so it displays in alphabetical order.
+        server_results_sorted = sorted(server_to_server_data.keys())
+
+        # Build the header line
+        header_message = (
+            f"{server_name_col.front_pad()} | "
+            f"{status_col.pad()} | "
+            f"{host_col.pad()} | "
+            f"{port_col.pad()} | "
+            f"{tls_served_by_col.pad()} | "
+            f"Errors\n"
+        )
+
+        # Need the total of the width for the code block table to make the delimiter
+        header_line_size = len(header_message)
+
+        # Create the delimiter line under the header
+        header_message += f"{pad('', header_line_size, pad_with='-')}\n"
+
         list_of_result_data = []
         # Use the sorted list from earlier, alphabetical looks nicer
-        for server_name, response in server_to_server_data.items():
-            # response = server_to_server_data[server_name]
+        for server_name in server_results_sorted:
+            response = server_to_server_data[server_name]
 
+            # Want the full room version it to look like this for now
+            #
+            #   Server Name | Status | Host                 | Port  | TLS served by  | Errors
+            # ------------------------------------------------------------------
+            #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
+            # somewhere.net |    404 | None                 | Error | resty          | Long error....
+            #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
+
+            buffered_message = f"{server_name_col.front_pad(server_name)} | "
             if isinstance(response, WellKnownDiagnosticResult):
+                buffered_message += f"{status_col.pad(response.status_code)} | "
+                buffered_message += f"{host_col.pad(response.host)} | "
+                buffered_message += f"{port_col.pad(response.port)} | "
 
-                buffered_message = f"server_name: {server_name}\nDelegatedServer: {response.delegated_server}\n"
-                buffered_message += f"status code: {response.status_code}\ncontent type: {response.content_type}\n"
-                buffered_message += f"context trace: {response.context_trace}"
+                maybe_tls_server = response.headers.get("server")
+                buffered_message += f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')} | "
+
                 buffered_message += "\n"
-                # if number_of_servers == 1:
-                #     # Print the diagnostic summary, since there is only one server there
-                #     # is no need to be brief.
-                #     buffered_message += f"{pad('', header_line_size, pad_with='-')}\n"
-                #     for line in diag_info.list_of_results:
-                #         buffered_message += f"{pad('', 3)}{line}\n"
-                #
-                #     buffered_message += f"{pad('', header_line_size, pad_with='-')}\n"
 
-                list_of_result_data.extend([buffered_message])
+            else:
+                assert isinstance(response, WellKnownLookupFailure)
+                # Sometimes status_code can be None, but if we let that ride it shows up as the header name of the column
+                buffered_message += f"{status_col.pad(response.status_code or '')} | "
+                buffered_message += f"{response.reason}\n"
+
+            list_of_result_data.extend([buffered_message])
 
         footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
         list_of_result_data.extend([footer_message])
@@ -4190,7 +4252,7 @@ class FederationBot(RoomWalkCommand):
         # For a single server test, the response will fit into a single message block.
         # However, for a roomful it could be several pages long. Chunk those responses
         # to fit into the size limit of an Event.
-        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, "header_message\n")
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
 
         for chunk in final_list_of_data:
             current_message = await command_event.respond(
