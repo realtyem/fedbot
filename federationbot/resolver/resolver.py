@@ -210,17 +210,17 @@ class ServerDiscoveryResolver:
             async with response:
                 status_code = response.status
                 headers = response.headers
-                content_type = headers.get("content_type", None)
+                # Default to this, but if there is another it will be overwritten below
+                content_type = "application/json"
                 context_tracing = response._traces[0]  # noqa: W0212  # pylint:disable=protected-access
 
                 if status_code != 200:
                     return WellKnownLookupFailure(status_code=status_code, reason="Not found")
                 try:
-                    content = await response.json(
-                        encoding="utf-8", loads=self.json_decoder.decode, content_type=content_type
-                    )
+                    content = await response.json(encoding="utf-8", loads=self.json_decoder.decode)
                 except ContentTypeError:
-                    for other_content_type in ["application/octet-stream", "text/html"]:
+                    # TODO: do we need to tell someone? Also check that 'text/html' is usable
+                    for other_content_type in ["application/octet-stream", "text/plain"]:
                         content = await response.json(
                             encoding="utf-8", loads=self.json_decoder.decode, content_type=other_content_type
                         )
