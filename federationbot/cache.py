@@ -192,6 +192,7 @@ class TTLCache(Generic[KT, VT]):
         set:
 
     """
+
     _cache: dict[KT, TTLCacheEntry[VT]]
     _ttl_default_ms: int
     _time_cb: Callable[..., float]
@@ -212,10 +213,10 @@ class TTLCache(Generic[KT, VT]):
         self._cache[key] = TTLCacheEntry(cache_value=value, ttl=ttl)
 
     @overload
-    def __getitem__(self, key: KT, _return_raw: Literal[False] = False) -> VT | None: ...
+    def __getitem__(self, key: KT, _return_raw: Literal[False] = False) -> VT | None: ...  # noqa: E704
 
     @overload
-    def __getitem__(self, key: KT, _return_raw: Literal[True] = True) -> TTLCacheEntry[VT] | None: ...
+    def __getitem__(self, key: KT, _return_raw: Literal[True] = True) -> TTLCacheEntry[VT] | None: ...  # noqa: E704
 
     def __getitem__(self, key: KT, _return_raw: bool = False) -> TTLCacheEntry[VT] | VT | None:
         if cache_entry := self._cache.get(key, None):
