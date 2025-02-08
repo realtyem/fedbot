@@ -37,24 +37,21 @@ class WellKnownDiagnosticResult(WellKnownLookupResult):
     headers: CIMultiDictProxy
 
 
+@dataclass(slots=True)
 class WellKnownLookupFailure(WellKnownLookupResult):
     """
     There was a well known request failure. Base class
     """
+
+    status_code: int | None
+    reason: str
 
 
 @dataclass(slots=True)
 class WellKnownSchemeFailure(WellKnownLookupFailure):
     """
     The well known request had a scheme attached, which is against spec
-
-    Attributes:
-        error: The human-readable string of what this failure means
-        result: Usually ends up being the server name that caused the error
     """
-
-    error: str = field(default="Scheme was present on delegated host", init=False)
-    result: str = field(init=True)
 
 
 def check_and_maybe_split_server_name(server_name: str) -> tuple[str, str | None]:
@@ -75,7 +72,7 @@ def check_and_maybe_split_server_name(server_name: str) -> tuple[str, str | None
     server_port: str | None = None
 
     if server_name.startswith(("http:", "https")) or "://" in server_name:
-        raise WellKnownSchemeError(server_name)
+        raise WellKnownSchemeError(reason=server_name)
 
     # str.split() will raise a ValueError if the value to split by isn't there
     try:
