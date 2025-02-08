@@ -146,8 +146,13 @@ class AsyncResolver(AbstractResolver):
         self._resolver.cancel()
 
 
+# Both are in seconds(float)
 WELL_KNOWN_SOCKET_CONNECT_TIMEOUT = 10
 WELL_KNOWN_SOCKET_READ_TIMEOUT = 10
+# 1 hour
+WELL_KNOWN_LOOKUP_GOOD_TTL_MS = 1000 * 60 * 60 * 1
+# 5 minutes
+WELL_KNOWN_LOOKUP_BAD_TTL_MS = 1000 * 60 * 5
 
 
 class ServerDiscoveryResolver:
@@ -156,7 +161,7 @@ class ServerDiscoveryResolver:
     """
 
     _had_well_known_cache: TTLCache[str, str]
-    _well_known_cache: TTLCache[str, str]
+    _well_known_cache: TTLCache[str, WellKnownLookupResult]
     http_client: ClientSession
     json_decoder: JSONDecoder
 
@@ -168,16 +173,25 @@ class ServerDiscoveryResolver:
         )
         self.json_decoder = json.JSONDecoder()
         self._had_well_known_cache = TTLCache()
-        self._well_known_cache = TTLCache()
+        # well known should have a rather long time on it by default, failures will have
+        # a shorter time to prevent consistent "re-lookups"
+        self._well_known_cache = TTLCache(ttl_default_ms=WELL_KNOWN_LOOKUP_GOOD_TTL_MS)
 
-    async def get_well_known(self, server_name: str) -> None:
+    async def get_well_known(self, server_name: str) -> WellKnownLookupResult:
         """
         Retrieve a cached entry if it was found, or begin the actual lookup
         """
-        had_valid_well_known = self._had_well_known_cache.get(server_name)
-        cached_result = self._well_known_cache.get(server_name)
-        if cached_result:
-            return
+        # had_valid_well_known = self._had_well_known_cache.get(server_name)
+        if cached_result := self._well_known_cache.get(server_name):
+            logger.debug("Found cached result for '%s': %r", (server_name, cached_result))
+            return cached_result
+        result = await self.make_well_known_request(server_name)
+        if isinstance(result, WellKnownDiagnosticResult):
+            self._well_known_cache.set(server_name, result)
+        elif isinstance(result, WellKnownLookupFailure):
+            self._well_known_cache.set(server_name, result, ttl_displacer_ms=30 * 1000)
+        logger.debug("Got result from '%s': %r", (server_name, result))
+        return result
 
     async def make_well_known_request(self, server_name: str) -> WellKnownLookupResult:
         response = await self._fetch_well_known(server_name)
