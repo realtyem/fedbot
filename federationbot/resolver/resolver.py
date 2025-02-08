@@ -237,11 +237,11 @@ class ServerDiscoveryResolver:
         try:
             host, port = parse_and_check_well_known_response(content)
         except WellKnownSchemeError as e:
-            logger.error("Well known result had a scheme error: '%s'", (e.server_name,), exc_info=True)
-            return WellKnownSchemeFailure(delegated_server=None, result=server_name)
+            logger.error("Well known result had a scheme error: '%s'", (e.reason,), exc_info=True)
+            return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
 
         if not host:
-            return WellKnownLookupFailure(delegated_server=None)
+            return WellKnownLookupFailure(status_code=status_code, reason="No host found")
         # TODO: Remember to set the SNI header
         # TODO: parse the headers for the cache control stuff, sort out ttl options
 
