@@ -18,6 +18,7 @@ from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.federation import FederationHandler
+from federationbot.resolver.resolver import ServerDiscoveryResolver
 from federationbot.types import MessageEvent
 
 
@@ -43,6 +44,7 @@ class FederationBotCommandBase(Plugin):
     server_signing_keys: dict[str, str]
     federation_handler: FederationHandler
     command_conn_timeouts: dict[str, int]
+    experimental_resolver: ServerDiscoveryResolver
 
     @classmethod
     def get_config_class(cls) -> type[BaseProxyConfig] | None:
@@ -79,6 +81,8 @@ class FederationBotCommandBase(Plugin):
             server_signing_keys=self.server_signing_keys,
             task_controller=self.reaction_task_controller,
         )
+
+        self.experimental_resolver = ServerDiscoveryResolver()
 
     async def pre_stop(self) -> None:
         """Stop the plugin and clean up resources."""

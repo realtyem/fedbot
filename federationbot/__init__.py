@@ -32,6 +32,7 @@ from federationbot.constants import (
 )
 from federationbot.controllers import EmojiReactionCommandStatus
 from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
+from federationbot.resolver import WellKnownDiagnosticResult, WellKnownLookupResult
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixResponse
 from federationbot.types import MessageEvent
 from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
@@ -4054,6 +4055,151 @@ class FederationBot(RoomWalkCommand):
             list_of_message_ids.extend([message_id])
         for message_id in list_of_message_ids:
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+
+    @test_command.subcommand(name="wellknown")
+    @command.argument(name="server_to_check", label="Server To Check", required=True)
+    async def well_know_command(self, command_event: MessageEvent, server_to_check: str = "littlevortex.net") -> None:
+        """
+        Check server delegation information.
+
+        Checks server discovery and delegation setup including well-known
+        records and SRV records.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check delegation for
+        """
+        list_of_servers_to_check = set()
+
+        await command_event.mark_read()
+
+        # It may be that they are using their mxid as the server to check, parse that
+        maybe_user_mxid = is_mxid(server_to_check)
+        if maybe_user_mxid:
+            server_to_check = get_domain_from_id(maybe_user_mxid)
+
+        # As an undocumented option, allow passing in a room_id to check an entire room.
+        # This can be rather long(and time consuming) so we'll place limits later.
+        maybe_room_id = is_room_id_or_alias(server_to_check)
+        if maybe_room_id:
+            origin_server = get_domain_from_id(self.client.mxid)
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
+            # Need to cancel server_to_check, but can't use None
+            server_to_check = ""
+            if not room_to_check:
+                # Don't need to actually display an error, that's handled in the above
+                # function
+                return
+        else:
+            # with server_to_check being set, this will be ignored any way
+            room_to_check = command_event.room_id
+
+        # server_to_check has survived this far, add it to the set of servers to search
+        # for. Since we allow for searching an entire room, it will be the only server
+        # in the set.
+        if server_to_check:
+            list_of_servers_to_check.add(server_to_check)
+
+        # The list of servers was empty. This implies that a room_id was provided,
+        # let's check.
+        if not list_of_servers_to_check:
+            try:
+                assert room_to_check is not None
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+
+            except MForbidden:
+                await command_event.respond(NOT_IN_ROOM_ERROR)
+                return
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
+        number_of_servers = len(list_of_servers_to_check)
+
+        # Some quality of life niceties
+        prerender_message = await command_event.respond(
+            f"Retrieving data from federation for {number_of_servers} "
+            f"server{'s.' if number_of_servers > 1 else '.'}\n"
+            "This may take up to 30 seconds to complete.",
+        )
+        list_of_message_ids: list[EventID] = [prerender_message]
+
+        # map of server name -> (server brand, server version)
+        server_to_server_data: dict[str, WellKnownLookupResult] = {}
+
+        async def _delegation_worker(queue: asyncio.Queue[str]) -> None:
+            while True:
+                worker_server_name = await queue.get()
+
+                # The 'get_server_version' function was written with the capability of
+                # collecting diagnostic data.
+                try:
+                    server_to_server_data[worker_server_name] = (
+                        await self.experimental_resolver.get_well_known(
+                            worker_server_name,
+                        )
+                    )
+                except Exception as e:
+                    self.log.warning(f"delegation worker error: {e}", exc_info=True)
+                    raise
+                queue.task_done()
+
+        delegation_queue: asyncio.Queue[str] = asyncio.Queue()
+        for server_name in list_of_servers_to_check:
+            self.log.debug("adding server to look for %s", (server_name,))
+            delegation_queue.put_nowait(server_name)
+
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
+
+        self.reaction_task_controller.add_tasks(
+            reference_key,
+            _delegation_worker,
+            delegation_queue,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
+        )
+
+        started_at = time.monotonic()
+        await delegation_queue.join()
+        total_time = time.monotonic() - started_at
+
+        list_of_result_data = []
+        # Use the sorted list from earlier, alphabetical looks nicer
+        for server_name, response in server_to_server_data.items():
+            # response = server_to_server_data[server_name]
+
+            if isinstance(response, WellKnownDiagnosticResult):
+
+                buffered_message = f"server_name: {server_name}\nDelegatedServer: {response.delegated_server}\n"
+                buffered_message += f"status code: {response.status_code}\ncontent type: {response.content_type}\n"
+                buffered_message += f"context trace: {response.context_trace}"
+                buffered_message += "\n"
+                # if number_of_servers == 1:
+                #     # Print the diagnostic summary, since there is only one server there
+                #     # is no need to be brief.
+                #     buffered_message += f"{pad('', header_line_size, pad_with='-')}\n"
+                #     for line in diag_info.list_of_results:
+                #         buffered_message += f"{pad('', 3)}{line}\n"
+                #
+                #     buffered_message += f"{pad('', header_line_size, pad_with='-')}\n"
+
+                list_of_result_data.extend([buffered_message])
+
+        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\n"
+        list_of_result_data.extend([footer_message])
+
+        # For a single server test, the response will fit into a single message block.
+        # However, for a roomful it could be several pages long. Chunk those responses
+        # to fit into the size limit of an Event.
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, "header_message\n")
+
+        for chunk in final_list_of_data:
+            current_message = await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for current_message in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
 
     async def _discover_event_ids_and_room_ids(
         self,

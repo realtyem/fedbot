@@ -75,9 +75,11 @@ class ServerDiscoveryError(Exception):
     """Error during Matrix server discovery process."""
 
     server_name: str
+    reason: str | None
 
-    def __init__(self, server_name: str) -> None:
+    def __init__(self, server_name: str, reason: str | None = None) -> None:
         self.server_name = server_name
+        self.reason = reason
 
 
 class ServerDiscoveryDNSError(ServerDiscoveryError):
