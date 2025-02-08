@@ -6,12 +6,18 @@ import json
 import logging
 import socket
 
-from aiohttp import ClientResponse, ClientSession, ClientTimeout, ContentTypeError, TCPConnector
+from aiohttp import ClientResponse, ClientSession, ClientTimeout, ContentTypeError, TCPConnector, client_exceptions
 from aiohttp.abc import ResolveResult
 import aiodns
 
 from federationbot.cache import TTLCache
-from federationbot.errors import WellKnownSchemeError
+from federationbot.errors import (
+    WellKnownClientError,
+    WellKnownError,
+    WellKnownSchemeError,
+    WellKnownServerError,
+    WellKnownServerTimeout,
+)
 from federationbot.resolver import (
     DelegatedServer,
     WellKnownDiagnosticResult,
@@ -241,7 +247,7 @@ class ServerDiscoveryResolver:
             headers=headers,
         )
 
-    # TODO: maybe apply backoff here for retries
+    # TODO: maybe apply backoff here for retries, WellKnownServerTimeout is what to watch for
     async def _fetch_well_known(self, server_name: str) -> ClientResponse:
         url = f"https://{server_name}/.well-known/matrix/server"
         client_timeouts = ClientTimeout(
@@ -260,7 +266,60 @@ class ServerDiscoveryResolver:
 
         try:
             return await self.http_client.get(url, timeout=client_timeouts)
-        # TODO: check the api.py for the exceptions we watch for here
-        except Exception:
-            logger.warning("Had a problem while placing well known REQUEST to %s", (server_name,), exc_info=True)
-            raise
+
+        # Split the different exceptions up based on where the information is extracted from
+        except client_exceptions.ClientConnectorCertificateError as e:
+            # This is one of the errors I found while probing for SNI TLS
+            raise WellKnownServerError(  # pylint: disable=bad-exception-cause
+                reason="%s, %s" % (e.__class__.__name__, str(e.certificate_error)),
+            ) from e
+
+        except (
+            client_exceptions.ClientConnectorSSLError,
+            client_exceptions.ClientSSLError,
+        ) as e:
+            # This is one of the errors I found while probing for SNI TLS
+            raise WellKnownServerError(reason="%s, %s" % (e.__class__.__name__, e.strerror)) from e
+
+        except (
+            # e is an OSError, may have e.strerror, possibly e.os_error.strerror
+            client_exceptions.ClientProxyConnectionError,
+            # e is an OSError, may have e.strerror, possibly e.os_error.strerror
+            client_exceptions.ClientConnectorError,
+            # e is an OSError, may have e.strerror
+            client_exceptions.ClientOSError,
+        ) as e:
+            if hasattr(e, "os_error"):
+                # This gets type ignored, as it is defined but for some reason mypy can't figure that out
+                raise WellKnownClientError(reason="%s, %s" % (e.__class__.__name__, e.os_error.strerror)) from e  # type: ignore[attr-defined]
+
+            raise WellKnownClientError(reason="%s, %s" % (e.__class__.__name__, e.strerror)) from e
+
+        except (
+            # For exceptions during http proxy handling(non-200 responses)
+            client_exceptions.ClientHttpProxyError,  # e.message
+            # For exceptions after getting a response, maybe unexpected termination?
+            client_exceptions.ClientResponseError,  # e.message, base class, possibly e.status too
+            # For exceptions where the server disconnected early
+            client_exceptions.ServerDisconnectedError,  # e.message
+        ) as e:
+            raise WellKnownError(reason="%s, %s" % (e.__class__.__name__, str(e.message))) from e
+
+        except client_exceptions.ServerTimeoutError as e:
+            # ServerTimeoutError is asyncio.TimeoutError under it's hood
+            raise WellKnownServerTimeout(
+                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_READ_TIMEOUT} seconds"
+            ) from e
+
+        except (
+            ConnectionRefusedError,
+            client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
+            client_exceptions.InvalidURL,  # e.url
+            client_exceptions.ClientPayloadError,  # e
+            client_exceptions.ServerConnectionError,  # e
+            client_exceptions.ClientConnectionError,  # e
+            client_exceptions.ClientError,  # e
+            Exception,  # e
+        ) as e:
+            logger.error("Had a problem while placing well known REQUEST to %s", (server_name,), exc_info=True)
+            raise WellKnownError(reason="%s, %s" % (e.__class__.__name__, str(e))) from e

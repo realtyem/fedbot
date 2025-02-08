@@ -147,7 +147,7 @@ class FederationApi:
             try:
                 host, port = ip_port_tuple
             except TypeError:
-                raise ServerDiscoveryDNSError(destination_server_name, "No IP Address found")
+                raise ServerDiscoveryDNSError("No IP Address found")
 
             resolved_destination_server = force_ip or host
             destination_port = int(port)

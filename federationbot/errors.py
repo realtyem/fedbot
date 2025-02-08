@@ -76,11 +76,9 @@ class ServerUnreachable(FedBotException):
 class ServerDiscoveryError(Exception):
     """Error during Matrix server discovery process."""
 
-    server_name: str
-    reason: str | None
+    reason: str
 
-    def __init__(self, server_name: str, reason: str | None = None) -> None:
-        self.server_name = server_name
+    def __init__(self, reason: str) -> None:
         self.reason = reason
 
 
