@@ -213,6 +213,8 @@ class ServerDiscoveryResolver:
                 content_type = headers.get("content_type", None)
                 context_tracing = response._traces[0]  # noqa: W0212  # pylint:disable=protected-access
 
+                if status_code != 200:
+                    return WellKnownLookupFailure(status_code=status_code, reason="Not found")
                 try:
                     content = await response.json(
                         encoding="utf-8", loads=self.json_decoder.decode, content_type=content_type
