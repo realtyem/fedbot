@@ -202,7 +202,10 @@ class ServerDiscoveryResolver:
         return result
 
     async def make_well_known_request(self, server_name: str) -> WellKnownLookupResult:
-        response = await self._fetch_well_known(server_name)
+        try:
+            response = await self._fetch_well_known(server_name)
+        except WellKnownError as e:
+            return WellKnownLookupFailure(status_code=None, reason=e.reason)
         try:
             async with response:
                 status_code = response.status
