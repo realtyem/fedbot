@@ -19,7 +19,6 @@ from federationbot.errors import (
     WellKnownServerTimeout,
 )
 from federationbot.resolver import (
-    DelegatedServer,
     WellKnownDiagnosticResult,
     WellKnownLookupFailure,
     WellKnownLookupResult,
@@ -237,10 +236,10 @@ class ServerDiscoveryResolver:
             return WellKnownLookupFailure(delegated_server=None)
         # TODO: Remember to set the SNI header
         # TODO: parse the headers for the cache control stuff, sort out ttl options
-        delegated_server = DelegatedServer(host=host, port=port, sni_header_string="")
 
         return WellKnownDiagnosticResult(
-            delegated_server=delegated_server,
+            host=host,
+            port=port,
             status_code=status_code,
             content_type=content_type,
             context_trace=context_tracing,

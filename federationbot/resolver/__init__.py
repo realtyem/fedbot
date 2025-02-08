@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from aiohttp.client_reqrep import CIMultiDictProxy
 from aiohttp.tracing import Trace
@@ -10,32 +10,11 @@ from federationbot.errors import WellKnownSchemeError
 
 
 @dataclass(slots=True)
-class DelegatedServer:
-    """
-    A parsed server result
-
-    Attributes:
-        host: The hostname or IP
-        port: The port, if one was found
-        sni_header_string: The specific header string to use for SNI
-    """
-
-    host: str
-    port: str | None
-    sni_header_string: str
-
-
-@dataclass(slots=True)
 class WellKnownLookupResult:
     """
     When the result is from a well known request, it goes in here. Base class
     for all well known request responses(including errors)
-
-    Attributes:
-        delegated_server: The DelegatedServer object with the relevant info
     """
-
-    delegated_server: DelegatedServer | None
 
 
 @dataclass(slots=True)
@@ -43,12 +22,15 @@ class WellKnownDiagnosticResult(WellKnownLookupResult):
     """
     Adds to WellKnownLookupResult with additional data from the result
 
-    Attributes:
+        host: The hostname or IP
+        port: The port, if one was found
         status_code: The HTTP status code from the lookup
         content_type: If it was 'application/json' or something else
         context_trace: For the response times
     """
 
+    host: str
+    port: str | None
     status_code: int
     content_type: str
     context_trace: Trace
