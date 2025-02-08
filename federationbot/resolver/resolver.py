@@ -1,7 +1,6 @@
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 from abc import ABC, abstractmethod
 from json import JSONDecoder
-import asyncio
 import json
 import logging
 import socket
@@ -54,13 +53,17 @@ class AsyncResolver(AbstractResolver):
     def __init__(
         self,
         *args: Any,
-        loop: Optional[asyncio.AbstractEventLoop] = None,
         **kwargs: Any,
     ) -> None:
+        """
+        is a kwarg that can be passed in
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+
+        """
         if aiodns is None:
             raise RuntimeError("Resolver requires aiodns library")
 
-        self._resolver = aiodns.DNSResolver(*args, loop, **kwargs)
+        self._resolver = aiodns.DNSResolver(*args, **kwargs)
 
         if not hasattr(self._resolver, "gethostbyname"):
             # aiodns 1.1 is not available, fallback to DNSResolver.query
