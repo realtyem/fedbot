@@ -22,6 +22,7 @@ from federationbot.resolver import (
     WellKnownDiagnosticResult,
     WellKnownLookupFailure,
     WellKnownLookupResult,
+    WellKnownParseFailure,
     WellKnownSchemeFailure,
     parse_and_check_well_known_response,
 )
@@ -243,15 +244,8 @@ class ServerDiscoveryResolver:
             logger.error("Well known result had a scheme error: '%s'", (e.reason,), exc_info=True)
             return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
         except WellKnownParsingError as e:
-            logger.error(
-                "Parsing error on '%s': '%s'",
-                (
-                    server_name,
-                    e.reason,
-                ),
-                exc_info=True,
-            )
-            return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
+            # logger.warning("Parsing error on '%s': '%s'", server_name, e.reason, exc_info=True)
+            return WellKnownParseFailure(status_code=status_code, reason=e.reason)
 
         if not host:
             return WellKnownLookupFailure(status_code=status_code, reason="No host found")

@@ -54,6 +54,13 @@ class WellKnownSchemeFailure(WellKnownLookupFailure):
     """
 
 
+@dataclass(slots=True)
+class WellKnownParseFailure(WellKnownLookupFailure):
+    """
+    The well known request had a parsing error, which is against spec
+    """
+
+
 def check_and_maybe_split_server_name(server_name: str) -> tuple[str, str | None]:
     """
     Checks that a server name does not have a scheme prepended to it(something seen
@@ -109,6 +116,6 @@ def parse_and_check_well_known_response(response: dict[str, Any]) -> tuple[str |
         # have to cover the basics by hand.
         host, port = check_and_maybe_split_server_name(well_known_result)
     else:
-        raise WellKnownParsingError(reason=f"{well_known_result}")
+        raise WellKnownParsingError(reason=f"{response}")
 
     return host, port
