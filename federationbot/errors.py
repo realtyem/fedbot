@@ -90,7 +90,7 @@ class WellKnownServerError(ServerDiscoveryError):
     """Connection error from Matrix server to client."""
 
 
-class WellKnownServerTimeout(ServerDiscoveryError):
+class WellKnownServerTimeout(WellKnownServerError):
     """Connection Timeout waiting for Matrix server response."""
 
 
@@ -108,6 +108,10 @@ class WellKnownSchemeError(WellKnownError):
 
 class WellKnownParsingError(WellKnownError):
     """Error occurred while parsing the well-known response."""
+
+
+class WellKnownClientTimeout(WellKnownClientError):
+    """Connection Timeout submitting Matrix server request."""
 
 
 # Internal Fedbot exceptions
