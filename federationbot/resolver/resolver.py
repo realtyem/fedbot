@@ -13,6 +13,7 @@ from federationbot.cache import TTLCache
 from federationbot.errors import (
     WellKnownClientError,
     WellKnownError,
+    WellKnownParsingError,
     WellKnownSchemeError,
     WellKnownServerError,
     WellKnownServerTimeout,
@@ -240,6 +241,16 @@ class ServerDiscoveryResolver:
             host, port = parse_and_check_well_known_response(content)
         except WellKnownSchemeError as e:
             logger.error("Well known result had a scheme error: '%s'", (e.reason,), exc_info=True)
+            return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
+        except WellKnownParsingError as e:
+            logger.error(
+                "Parsing error on '%s': '%s'",
+                (
+                    server_name,
+                    e.reason,
+                ),
+                exc_info=True,
+            )
             return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
 
         if not host:

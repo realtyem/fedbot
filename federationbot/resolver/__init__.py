@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from aiohttp.client_reqrep import CIMultiDictProxy
 from aiohttp.tracing import Trace
 
-from federationbot.errors import WellKnownSchemeError
+from federationbot.errors import WellKnownParsingError, WellKnownSchemeError
 
 
 @dataclass(slots=True)
@@ -102,11 +102,13 @@ def parse_and_check_well_known_response(response: dict[str, Any]) -> tuple[str |
 
     # In theory, got a good response. Should be JSON of
     # {"m.server": "example.com:433"} if there was a port
-    well_known_result: str | None = response.get("m.server", None)
-    if well_known_result:
+    well_known_result = response.get("m.server", None)
+    if isinstance(well_known_result, str):
         # I tried to find a library or module that would comprehensively handle
         # parsing a URL without a scheme, yarl came close. I guess we'll just
         # have to cover the basics by hand.
         host, port = check_and_maybe_split_server_name(well_known_result)
+    else:
+        raise WellKnownParsingError(reason=f"{well_known_result}")
 
     return host, port
