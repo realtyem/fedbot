@@ -5,13 +5,14 @@ import json
 import logging
 import socket
 
-from aiohttp import ClientResponse, ClientSession, ClientTimeout, ContentTypeError, TCPConnector, client_exceptions
+from aiohttp import ClientResponse, ClientSession, ClientTimeout, SocketTimeoutError, TCPConnector, client_exceptions
 from aiohttp.abc import ResolveResult
 import aiodns
 
 from federationbot.cache import TTLCache
 from federationbot.errors import (
     WellKnownClientError,
+    WellKnownClientTimeout,
     WellKnownError,
     WellKnownParsingError,
     WellKnownSchemeError,
@@ -302,8 +303,6 @@ class ServerDiscoveryResolver:
             client_exceptions.ClientConnectorError,
             # e is an OSError, may have e.strerror
             client_exceptions.ClientOSError,
-            # Broader OS error
-            OSError,
         ) as e:
             if hasattr(e, "os_error"):
                 # This gets type ignored, as it is defined but for some reason mypy can't figure that out
@@ -321,6 +320,20 @@ class ServerDiscoveryResolver:
         ) as e:
             raise WellKnownError(reason=f"{e.__class__.__name__}, {str(e.message)}") from e
 
+        except client_exceptions.ConnectionTimeoutError as e:
+            # logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
+
+            raise WellKnownClientTimeout(
+                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_READ_TIMEOUT} seconds"
+            ) from e
+
+        except SocketTimeoutError as e:
+            logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
+
+            raise WellKnownServerTimeout(
+                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_READ_TIMEOUT} seconds"
+            ) from e
+
         except client_exceptions.ServerTimeoutError as e:
             # ServerTimeoutError is asyncio.TimeoutError under it's hood
             raise WellKnownServerTimeout(
@@ -330,6 +343,8 @@ class ServerDiscoveryResolver:
         except (
             socket.gaierror,
             ConnectionRefusedError,
+            # Broader OS error
+            OSError,
             client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
             client_exceptions.InvalidURL,  # e.url
             client_exceptions.ClientPayloadError,  # e
