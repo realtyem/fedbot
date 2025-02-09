@@ -234,7 +234,7 @@ class ServerDiscoveryResolver:
                     return WellKnownLookupFailure(status_code=status_code, reason="Not found")
 
         except Exception:
-            logger.warning("Had a problem with well known RESPONSE from '%s'", (server_name,))
+            logger.warning("Had a problem with well known RESPONSE from '%s': %r", server_name, e, exc_info=True)
             # Maybe raise here, not sure yet
             raise
 
@@ -285,7 +285,7 @@ class ServerDiscoveryResolver:
         except client_exceptions.ClientConnectorCertificateError as e:
             # This is one of the errors I found while probing for SNI TLS
             raise WellKnownServerError(  # pylint: disable=bad-exception-cause
-                reason="%s, %s" % (e.__class__.__name__, str(e.certificate_error)),
+                reason=f"{e.__class__.__name__}, {str(e.certificate_error)}",
             ) from e
 
         except (
@@ -293,7 +293,7 @@ class ServerDiscoveryResolver:
             client_exceptions.ClientSSLError,
         ) as e:
             # This is one of the errors I found while probing for SNI TLS
-            raise WellKnownServerError(reason="%s, %s" % (e.__class__.__name__, e.strerror)) from e
+            raise WellKnownServerError(reason=f"{e.__class__.__name__}, {e.strerror}") from e
 
         except (
             # e is an OSError, may have e.strerror, possibly e.os_error.strerror
@@ -307,9 +307,9 @@ class ServerDiscoveryResolver:
         ) as e:
             if hasattr(e, "os_error"):
                 # This gets type ignored, as it is defined but for some reason mypy can't figure that out
-                raise WellKnownClientError(reason="%s, %s" % (e.__class__.__name__, e.os_error.strerror)) from e  # type: ignore[attr-defined]
+                raise WellKnownClientError(reason=f"{e.__class__.__name__}, {e.os_error.strerror}") from e  # type: ignore[attr-defined]
 
-            raise WellKnownClientError(reason="%s, %s" % (e.__class__.__name__, e.strerror)) from e
+            raise WellKnownClientError(reason=f"{e.__class__.__name__}, {e.strerror}") from e
 
         except (
             # For exceptions during http proxy handling(non-200 responses)
@@ -319,7 +319,7 @@ class ServerDiscoveryResolver:
             # For exceptions where the server disconnected early
             client_exceptions.ServerDisconnectedError,  # e.message
         ) as e:
-            raise WellKnownError(reason="%s, %s" % (e.__class__.__name__, str(e.message))) from e
+            raise WellKnownError(reason=f"{e.__class__.__name__}, {str(e.message)}") from e
 
         except client_exceptions.ServerTimeoutError as e:
             # ServerTimeoutError is asyncio.TimeoutError under it's hood
@@ -338,7 +338,7 @@ class ServerDiscoveryResolver:
             client_exceptions.ClientError,  # e
             Exception,  # e
         ) as e:
-            logger.error("Had a problem while placing well known REQUEST to %s", (server_name,), exc_info=True)
-            raise WellKnownError(reason="%s, %s" % (e.__class__.__name__, str(e))) from e
+            logger.error("Had a problem while placing well known REQUEST to %s", server_name, exc_info=True)
+            raise WellKnownError(reason=f"{e.__class__.__name__}, {str(e)}") from e
 
         return response
