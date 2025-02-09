@@ -205,7 +205,7 @@ class DelegationHandler:
             and response.rcode() != dns.rcode.SERVFAIL
         ):
             server_discovery_logger.warning(
-                f"DNS query {query_type} for {server_name} got {response.rcode()}, {response.answer}"
+                "DNS query %s for %s got %r, %r", query_type, server_name, response.rcode(), response.answer
             )
 
         # NOTE: To disable DNSSEC validation and try again to see what it says. For now, don't use since seems to work
@@ -252,7 +252,7 @@ class DelegationHandler:
             # TODO: Not sure we hit this any more, needs stress testing
             except dns.resolver.NoNameservers:
                 diag_info.add("Hit a possible SERVFAIL condition, working around")
-                server_discovery_logger.warning(f"Do we still hit this? {host}")
+                server_discovery_logger.warning("Do we still hit this? %s", host)
 
             # This one is still used, I think. It hits the backoff system, so I think yes
             except dns.resolver.LifetimeTimeout:
@@ -266,7 +266,7 @@ class DelegationHandler:
 
             except Exception as e:
                 diag_info.error(f"Hit a DNS exception: {e}")
-                server_discovery_logger.error(f"Hit a DNS exception: {e}")
+                server_discovery_logger.error("Hit a DNS exception: %r", e)
 
             else:
                 for ip4 in ip4_list:
@@ -402,7 +402,7 @@ class DelegationHandler:
         # Still not convinced this is necessary anymore, watch for logging to say we are
         except dns.resolver.NoNameservers:
             diag_info.add("Hit a possible SERVFAIL condition, working around")
-            server_discovery_logger.warning(f"Are we still hitting this? SRV lookup {server_name}")
+            server_discovery_logger.warning("Are we still hitting this? SRV lookup %s", server_name)
             try:
                 return await self._check_dns_for_srv_records(server_name, diag_info)
             except Exception as e:
@@ -920,7 +920,10 @@ class DelegationHandler:
         if ip4_address_port_tuples or ip6_address_port_tuples:
             if len(ip4_address_port_tuples) > 1 or len(ip6_address_port_tuples) > 1:
                 server_discovery_logger.warning(
-                    f"STEP 5 ISSUE FOUND: {server_name} ip-port tuples potential issue: {ip4_address_port_tuples} {ip6_address_port_tuples}"
+                    "STEP 5 ISSUE FOUND: %s ip-port tuples potential issue: %r %r",
+                    server_name,
+                    ip4_address_port_tuples,
+                    ip6_address_port_tuples,
                 )
 
             return ServerResult(
@@ -992,6 +995,6 @@ class DelegationHandler:
         try:
             await asyncio.wait(test_task_list)
         except Exception as e:
-            server_discovery_logger.warning(f"discover_server: {server_name} had an exception: {e}")
+            server_discovery_logger.warning("discover_server: %s had an exception: %r", server_name, e)
 
         return result

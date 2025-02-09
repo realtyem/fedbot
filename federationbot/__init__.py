@@ -252,7 +252,7 @@ class FederationBot(RoomWalkCommand):
         """
         origin_server = self.federation_handler.hosting_server
         destination_server = target_server or room_id_or_alias.split(":", maxsplit=1)[1]
-        self.log.warning(f"alias: {destination_server}, alias: {room_id_or_alias}")
+        self.log.warning("alias: %s, alias: %s", destination_server, room_id_or_alias)
         if room_id_or_alias.startswith("!"):
             await command_event.reply("I need a room alias not a room id")
             return
@@ -453,7 +453,7 @@ class FederationBot(RoomWalkCommand):
             if server_check and server_check.unhealthy is None:
                 good_host_list.extend((host,))
             else:
-                self.log.warning(f"not using {host} for room_walk2")
+                self.log.warning("not using %s for room_walk2", host)
         # Can now use good_host_list as an ordered list of servers to check for Events
 
         # Initial messages and lines setup. Never end in newline, as the helper handles
@@ -556,7 +556,7 @@ class FederationBot(RoomWalkCommand):
                         if is_this_a_retry:
                             # This should only be hit after a backfill attempt, and
                             # means the second try succeeded.
-                            self.log.info(f"{worker_name}: Hit a Resolved Error on {next_event_id}")
+                            self.log.info("%s: Hit a Resolved Error on %s", worker_name, next_event_id)
                             event_id_resolved_error_list.add(next_event_id)
 
                         seen_depths_for_progress.add(pulled_event.depth)
@@ -593,7 +593,7 @@ class FederationBot(RoomWalkCommand):
                         # TODO: maybe add a backfill of two at this point, to skip over gaps?
                         if not prev_good_events:
                             self.log.warning(
-                                f"{worker_name}: Unexpectedly found an empty prev_good_events on {next_event_id}",
+                                "%s: Unexpectedly found an empty prev_good_events on %s", worker_name, next_event_id
                             )
                         next_list_to_get.update(prev_good_events)
                         next_list_to_get.update(auth_good_events)
@@ -604,7 +604,7 @@ class FederationBot(RoomWalkCommand):
                         # All other opportunities to hit this will have been handled in the
                         # above filter function.
                         # TODO: not any more they aren't
-                        self.log.warning(f"hit an EventError when shouldn't have: {next_event_id}")
+                        self.log.warning("hit an EventError when shouldn't have: %s", next_event_id)
 
                 _time_spent = time.time() - iter_start_time
                 total_time_spent += _time_spent
@@ -659,11 +659,11 @@ class FederationBot(RoomWalkCommand):
 
                 if next_event_id in event_id_ok_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found room walk fetch event in OK list {next_event_id}",
+                        "%s: Unexpectedly found room walk fetch event in OK list %s", worker_name, next_event_id
                     )
                 if next_event_id in event_id_resolved_error_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found room walk fetch event in RESOLVED list {next_event_id}",
+                        "%s: Unexpectedly found room walk fetch event in RESOLVED list %s", worker_name, next_event_id
                     )
 
                 # start_time = time.time()
@@ -723,9 +723,11 @@ class FederationBot(RoomWalkCommand):
                                 # (filling them in order)
                                 list_of_server_and_event_id_to_send.append((_event_base,))
                                 self.log.info(
-                                    f"{worker_name}: found {popped_event_id} on "
-                                    f"{server_name} after "
-                                    f"{count_of_how_many_servers_tried - 1} other servers",
+                                    "%s: found %s on " "%s after " "%s other servers",
+                                    worker_name,
+                                    popped_event_id,
+                                    server_name,
+                                    count_of_how_many_servers_tried - 1,
                                 )
                                 # But, do we need more
 
@@ -742,8 +744,10 @@ class FederationBot(RoomWalkCommand):
                                         # Already tried searching for this
                                         continue
                                     self.log.warning(
-                                        f"{worker_name}: for: "
-                                        f"{_event_base.event_id}, need prev_event: {_ancestor_event_id}",
+                                        "%s: for: " "%s, need prev_event: %s",
+                                        worker_name,
+                                        _event_base.event_id,
+                                        _ancestor_event_id,
                                     )
                                     already_searching_for_event_id.add(_ancestor_event_id)
 
@@ -754,8 +758,10 @@ class FederationBot(RoomWalkCommand):
                                         # Already tried searching for this
                                         continue
                                     self.log.warning(
-                                        f"{worker_name}: for: "
-                                        f"{_event_base.event_id}, need auth_event: {_ancestor_event_id}",
+                                        "%s: for: " "%s, need auth_event: %s",
+                                        worker_name,
+                                        _event_base.event_id,
+                                        _ancestor_event_id,
                                     )
                                     already_searching_for_event_id.add(_ancestor_event_id)
 
@@ -763,13 +769,13 @@ class FederationBot(RoomWalkCommand):
 
                                 if not prev_bad_events and not auth_bad_events:
                                     self.log.info(
-                                        f"{worker_name}: All events for {_event_base.event_id} were found locally",
+                                        "%s: All events for %s were found locally", worker_name, _event_base.event_id
                                     )
                                 # The event was found, we can skip the rest of the host list on this iteration
 
                             else:
                                 self.log.warning(
-                                    f"{worker_name}: Event did not pass signature check, {_event_base.event_id}",
+                                    "%s: Event did not pass signature check, %s", worker_name, _event_base.event_id
                                 )
                         # else:
                         #     self.log.warning(
@@ -787,7 +793,10 @@ class FederationBot(RoomWalkCommand):
                 # Need to do these in reverse, or the destination server will barf
                 list_of_server_and_event_id_to_send.reverse()
                 self.log.info(
-                    f"{worker_name}: Size of PDU list about to send: {len(list_of_server_and_event_id_to_send)} for {next_event_id}",
+                    "%s: Size of PDU list about to send: %d for %s",
+                    worker_name,
+                    len(list_of_server_and_event_id_to_send),
+                    next_event_id,
                 )
                 list_of_pdus_to_send = []
                 for (event_base,) in list_of_server_and_event_id_to_send:
@@ -797,7 +806,7 @@ class FederationBot(RoomWalkCommand):
                 while list_of_pdus_to_send:
                     limited_list_of_pdus = list_of_pdus_to_send[:50]
                     list_of_pdus_to_send = list_of_pdus_to_send[50:]
-                    self.log.info(f"Size of PDU list about to send: {len(limited_list_of_pdus)}")
+                    self.log.info("Size of PDU list about to send: %d", len(limited_list_of_pdus))
                     response = await self.federation_handler.send_events_to_server(
                         origin_server,
                         destination_server,
@@ -815,7 +824,10 @@ class FederationBot(RoomWalkCommand):
                     ) in response_break_down.items():
                         if pdu_received_result:
                             self.log.info(
-                                f"{worker_name}: Received error from {pdu_event_id} got response of {pdu_received_result}",
+                                "%s: Received error from %s got response of %s",
+                                worker_name,
+                                pdu_event_id,
+                                pdu_received_result,
                             )
 
                 # Update for the render
@@ -837,7 +849,7 @@ class FederationBot(RoomWalkCommand):
                     )
 
                 else:
-                    self.log.warning(f"{worker_name}: Nothing to do, as no events were sent out for {next_event_id}")
+                    self.log.warning("%s: Nothing to do, as no events were sent out for %s", worker_name, next_event_id)
 
                 bot_working[worker_name] = False
 
@@ -894,9 +906,12 @@ class FederationBot(RoomWalkCommand):
                     # found the event, send it back to the event fetch queue for retry
                     not_found = False
                     self.log.info(
-                        f"{worker_name}: Potentially found event on roomwalk(after "
-                        f"{retry_counter} attempts), sending {event_id_to_check} back "
+                        "%s: Potentially found event on roomwalk(after "
+                        "%d attempts), sending %s back "
                         "to event fetcher",
+                        worker_name,
+                        retry_counter,
+                        event_id_to_check,
                     )
                     # The back off mech shouldn't need to wait in this instance, as the
                     # event will already be in the cache. This is considered a 'retry'
@@ -905,7 +920,7 @@ class FederationBot(RoomWalkCommand):
 
             if not_found:
                 self.log.warning(
-                    f"{worker_name}: Not found after {retry_counter} tries, giving up on {event_id_to_check}",
+                    "%s: Not found after %d tries, giving up on %s", worker_name, retry_counter, event_id_to_check
                 )
             # Register the bot as not working, so the render loop knows it's not waiting
             # for anything.
@@ -976,7 +991,7 @@ class FederationBot(RoomWalkCommand):
             if roomwalk_fetch_queue.qsize() == 0 and roomwalk_error_queue.qsize() == 0:
                 if all({not x for x in bot_working.values()}):
                     retry_for_finish += 1
-                    self.log.warning(f"Unexpectedly found no work being processed. Retry count: {retry_for_finish}")
+                    self.log.warning("Unexpectedly found no work being processed. Retry count: %d", retry_for_finish)
                     if retry_for_finish > 5:
                         finish_on_this_round = True
                 else:
@@ -1008,7 +1023,7 @@ class FederationBot(RoomWalkCommand):
             # TODO: Fix this too
             # if new_items_to_render or finish_on_this_round:
 
-            self.log.info(f"mid-render, room_depth difference: {len(seen_depths_for_progress)} / {room_depth}")
+            self.log.info("mid-render, room_depth difference: %d / %d", len(seen_depths_for_progress), room_depth)
             progress_bar.update(seen_depths_for_progress)
             progress_line = progress_bar.render_bitmap_bar()
 
@@ -1225,13 +1240,15 @@ class FederationBot(RoomWalkCommand):
                             _inner_event_base_check = response_check_for_this_event.get(_prev_event_id)
                             if isinstance(_inner_event_base_check, EventError):
                                 # We hit an error, that's what we want to keep looking
-                                self.log.warning(f"event retrieved during inner check: {_inner_event_base_check.error}")
+                                self.log.warning(
+                                    "event retrieved during inner check: %s", _inner_event_base_check.error
+                                )
 
                                 event_ids_to_try_next.put_nowait(_prev_event_id)
-                                self.log.info(f"repair_event: adding event_id to next to try: {_prev_event_id}")
+                                self.log.info("repair_event: adding event_id to next to try: %s", _prev_event_id)
                             elif isinstance(_inner_event_base_check, Event):
                                 self.log.warning(
-                                    f"event retrieved during inner check: {_inner_event_base_check.raw_data}",
+                                    "event retrieved during inner check: %s", _inner_event_base_check.raw_data
                                 )
 
                         break
@@ -1261,14 +1278,14 @@ class FederationBot(RoomWalkCommand):
                     destination_server,
                     [event_base.raw_data],
                 )
-                self.log.info(f"SENT, got response of {response.json_response}")
+                self.log.info("SENT, got response of %s", response.json_response)
                 list_of_buffer_lines.extend(
                     [
                         f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}",
                     ]
                 )
             else:
-                self.log.info(f"Unexpectedly not sent {event_base}")
+                self.log.info("Unexpectedly not sent %s", event_base)
 
         # await command_event.respond(
         #     f"Retrieving Hosts for \n"
@@ -1678,7 +1695,7 @@ class FederationBot(RoomWalkCommand):
         if not room_id:
             # The user facing error message was already sent
             return
-        self.log.warning(f"list_of_servers: {list_of_room_alias_servers}")
+        self.log.warning("list_of_servers: %r", list_of_room_alias_servers)
         destination_server = origin_server
         if list_of_room_alias_servers:
             destination_server = list_of_room_alias_servers[0]
@@ -1700,7 +1717,7 @@ class FederationBot(RoomWalkCommand):
             return
 
         # room_version = head_response.room_version
-        self.log.info(f"head: {head_response.prev_events}")
+        self.log.info("head: %r", head_response.prev_events)
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
             origin_server,
             destination_server,
@@ -1789,7 +1806,7 @@ class FederationBot(RoomWalkCommand):
                     assert isinstance(_result_sort, MakeJoinResponse)
                     good_results_queue.put_nowait((_host_sort, _result_sort))
             except BaseException as e:
-                self.log.warning(f"Found an exception: {e}")
+                self.log.warning("Found an exception: %r", e)
 
         async def _head_parsing_worker(_queue: asyncio.Queue[tuple[str, MakeJoinResponse]]) -> None:
             _host, _result = _queue.get_nowait()
@@ -2018,7 +2035,7 @@ class FederationBot(RoomWalkCommand):
                         timeout=10.0,
                     )
                 except Exception as e:
-                    self.log.debug(f"delegation worker error: {e}")
+                    self.log.debug("delegation worker error: %r", e)
                 queue.task_done()
 
         delegation_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -2283,15 +2300,15 @@ class FederationBot(RoomWalkCommand):
             and "{" in test_json_to_inject_or_keys_to_pop
             and "}" in test_json_to_inject_or_keys_to_pop
         ):
-            self.log.info(f"test_json_to_inject_or_keys_to_pop: {test_json_to_inject_or_keys_to_pop}")
+            self.log.info("test_json_to_inject_or_keys_to_pop: %r", test_json_to_inject_or_keys_to_pop)
             right_most_bracket = test_json_to_inject_or_keys_to_pop.rindex("}")
             json_bit = test_json_to_inject_or_keys_to_pop[: right_most_bracket + 1]
-            self.log.info(f"incoming inject: {json_bit}")
+            self.log.info("incoming inject: %s", json_bit)
             test_json_dumped = json.loads(json_bit)
-            self.log.info(f"after json.loads: {test_json_dumped}")
+            self.log.info("after json.loads: %r", test_json_dumped)
 
             remove_bit = test_json_to_inject_or_keys_to_pop[right_most_bracket + 1 :]
-            self.log.info(f"remove_bit: {remove_bit}")
+            self.log.info("remove_bit: %r", remove_bit)
             # returned_event.raw_data.update(test_json_dumped)
             # self.log.info(f"dumped raw_data:\n{json.dumps(returned_event.raw_data, indent=4)}")
 
@@ -3787,7 +3804,7 @@ class FederationBot(RoomWalkCommand):
         else:
             event_id_from_room_right_now: str | None = ts_response.json_response.get("event_id", None)
             assert event_id_from_room_right_now is not None
-            self.log.debug(f"Timestamp to event responded with event_id: {event_id_from_room_right_now}")
+            self.log.debug("Timestamp to event responded with event_id: %r", event_id_from_room_right_now)
             # Get all the hosts in the supplied room
             host_list = await self.federation_handler.get_hosts_in_room_ordered(
                 origin_server,
@@ -3971,7 +3988,7 @@ class FederationBot(RoomWalkCommand):
             )
             if public_room_result.http_code != 200:
                 self.log.warning(
-                    f"Hit an error on public rooms: {public_room_result.http_code} {public_room_result.reason}",
+                    "Hit an error on public rooms: %d %s", public_room_result.http_code, public_room_result.reason
                 )
                 if retry_count > 3:
                     await command_event.respond(
@@ -3983,7 +4000,7 @@ class FederationBot(RoomWalkCommand):
                 continue
 
             since = public_room_result.json_response.get("next_batch", None)
-            self.log.info(f"Next batch: {since}")
+            self.log.info("Next batch: %r", since)
             if not since:
                 done = True
 
@@ -4138,7 +4155,7 @@ class FederationBot(RoomWalkCommand):
                         worker_server_name,
                     )
                 except Exception as e:
-                    self.log.warning(f"delegation worker error: {e}", exc_info=True)
+                    self.log.warning("delegation worker error: %r", e, exc_info=True)
                     raise
                 queue.task_done()
 

@@ -289,7 +289,7 @@ class FederationHandler:
                 queue.task_done()
 
         fed_handler_logger.debug(
-            f"get_events_from_server: requesting {len(events_list)} events from {destination_server}"
+            "get_events_from_server: requesting %d events from %s", len(events_list), destination_server
         )
         event_queue: asyncio.Queue[str] = asyncio.Queue()
         for event_id in events_list:
