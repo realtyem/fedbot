@@ -204,31 +204,33 @@ class ServerDiscoveryResolver:
     async def make_well_known_request(self, server_name: str) -> WellKnownLookupResult:
         try:
             response = await self._fetch_well_known(server_name)
-        except WellKnownError as e:
+        except WellKnownClientError as e:
+            return WellKnownLookupFailure(status_code=None, reason=e.reason)
+        except WellKnownServerError as e:
             return WellKnownLookupFailure(status_code=None, reason=e.reason)
         try:
             async with response:
                 status_code = response.status
                 headers = response.headers
                 # Default to this, but if there is another it will be overwritten below
-                content_type = "application/json"
+                content_type = headers.get("content-type", "application/json")
                 context_tracing = response._traces[0]  # noqa: W0212  # pylint:disable=protected-access
 
-                if status_code != 200:
-                    return WellKnownLookupFailure(status_code=status_code, reason="Not found")
-                try:
-                    content = await response.json(encoding="utf-8", loads=self.json_decoder.decode)
-                except ContentTypeError:
-                    # TODO: do we need to tell someone? Also check that 'text/html' is usable
-                    for other_content_type in ["application/octet-stream", "text/plain"]:
-                        content = await response.json(
-                            encoding="utf-8", loads=self.json_decoder.decode, content_type=other_content_type
+                # There can be a range of status codes, but only 404 specifically is called out
+                if 200 <= status_code < 600 and not status_code == 404:
+                    try:
+                        content = self.json_decoder.decode(await response.text())
+                    except json.decoder.JSONDecodeError:
+                        return WellKnownLookupFailure(
+                            status_code=status_code, reason="JSONDecodeError: No usable data in response"
                         )
-                        if content:
-                            content_type = other_content_type
-                            break
+                    except TimeoutError as e:
+                        return WellKnownLookupFailure(
+                            status_code=status_code, reason=f"{e.__class__.__name__}: Timed out while reading response"
+                        )
+                else:
+                    return WellKnownLookupFailure(status_code=status_code, reason="Not found")
 
-                logger.debug("content was %r", (content,))
         except Exception:
             logger.warning("Had a problem with well known RESPONSE from '%s'", (server_name,))
             # Maybe raise here, not sure yet
