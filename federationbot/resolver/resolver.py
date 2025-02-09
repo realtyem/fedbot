@@ -274,7 +274,7 @@ class ServerDiscoveryResolver:
         )
 
         try:
-            return await self.http_client.get(url, timeout=client_timeouts)
+            response = await self.http_client.get(url, timeout=client_timeouts)
 
         # Split the different exceptions up based on where the information is extracted from
         except client_exceptions.ClientConnectorCertificateError as e:
@@ -297,6 +297,8 @@ class ServerDiscoveryResolver:
             client_exceptions.ClientConnectorError,
             # e is an OSError, may have e.strerror
             client_exceptions.ClientOSError,
+            # Broader OS error
+            OSError,
         ) as e:
             if hasattr(e, "os_error"):
                 # This gets type ignored, as it is defined but for some reason mypy can't figure that out
@@ -321,6 +323,7 @@ class ServerDiscoveryResolver:
             ) from e
 
         except (
+            socket.gaierror,
             ConnectionRefusedError,
             client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
             client_exceptions.InvalidURL,  # e.url
@@ -332,3 +335,5 @@ class ServerDiscoveryResolver:
         ) as e:
             logger.error("Had a problem while placing well known REQUEST to %s", (server_name,), exc_info=True)
             raise WellKnownError(reason="%s, %s" % (e.__class__.__name__, str(e))) from e
+
+        return response
