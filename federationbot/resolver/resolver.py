@@ -7,6 +7,7 @@ import socket
 from aiohttp import ClientResponse, ClientSession, ClientTimeout, SocketTimeoutError, TCPConnector, client_exceptions
 from aiohttp.abc import ResolveResult
 
+from federationbot.api import USER_AGENT_STRING
 from federationbot.cache import TTLCache
 from federationbot.errors import (
     WellKnownClientError,
@@ -175,7 +176,15 @@ class ServerDiscoveryResolver:
     json_decoder: JSONDecoder
 
     def __init__(self) -> None:
-        connector = TCPConnector(ttl_dns_cache=60 * 60 * 5, limit=10000, limit_per_host=1, force_close=True)
+        connector = TCPConnector(
+            ttl_dns_cache=10,
+            family=socket.AddressFamily.AF_INET,
+            limit=10000,
+            limit_per_host=3,
+            # happy_eyeballs_delay=None,
+            # interleave=3,
+            force_close=True,
+        )
         self.http_client = ClientSession(
             connector=connector,
             trace_configs=[make_fresh_trace_config()],
@@ -277,8 +286,9 @@ class ServerDiscoveryResolver:
             # ceil_threshold=5.0,
         )
 
+        request_headers = {"User-Agent": USER_AGENT_STRING}
         try:
-            response = await self.http_client.get(url, timeout=client_timeouts)
+            response = await self.http_client.request("GET", url, headers=request_headers, timeout=client_timeouts)
 
         # Split the different exceptions up based on where the information is extracted from
         except client_exceptions.ClientConnectorCertificateError as e:
