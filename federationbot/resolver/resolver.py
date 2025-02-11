@@ -213,37 +213,30 @@ class ServerDiscoveryResolver:
     async def make_well_known_request(self, server_name: str) -> WellKnownLookupResult:
         try:
             response = await self._fetch_well_known(server_name)
-        except WellKnownClientError as e:
-            return WellKnownLookupFailure(status_code=None, reason=e.reason)
-        except WellKnownServerError as e:
-            return WellKnownLookupFailure(status_code=None, reason=e.reason)
-        try:
-            async with response:
-                status_code = response.status
-                headers = response.headers
-                # Default to this, but if there is another it will be overwritten below
-                content_type = headers.get("content-type", "application/json")
-                context_tracing = response._traces[0]  # noqa: W0212  # pylint:disable=protected-access
+        except WellKnownError as e:
+            error_return = WellKnownLookupFailure(status_code=None, reason=e.reason)
+            return error_return
 
-                # There can be a range of status codes, but only 404 specifically is called out
-                if 200 <= status_code < 600 and not status_code == 404:
-                    try:
-                        content = self.json_decoder.decode(await response.text())
-                    except json.decoder.JSONDecodeError:
-                        return WellKnownLookupFailure(
-                            status_code=status_code, reason="JSONDecodeError: No usable data in response"
-                        )
-                    except TimeoutError as e:
-                        return WellKnownLookupFailure(
-                            status_code=status_code, reason=f"{e.__class__.__name__}: Timed out while reading response"
-                        )
-                else:
-                    return WellKnownLookupFailure(status_code=status_code, reason="Not found")
+        async with response:
+            status_code = response.status
+            headers = response.headers
+            context_tracing = response._traces[0]  # noqa: W0212  # pylint:disable=protected-access
 
-        except Exception:
-            logger.warning("Had a problem with well known RESPONSE from '%s': %r", server_name, e, exc_info=True)
-            # Maybe raise here, not sure yet
-            raise
+            # There can be a range of status codes, but only 404 specifically is called out
+            if 200 <= status_code < 600 and not status_code == 404:
+                try:
+                    text_content = await response.text()
+                    content = self.json_decoder.decode(text_content)
+                except json.decoder.JSONDecodeError:
+                    return WellKnownLookupFailure(
+                        status_code=status_code, reason="JSONDecodeError: No usable data in response"
+                    )
+                except client_exceptions.ServerTimeoutError as e:
+                    return WellKnownLookupFailure(
+                        status_code=status_code, reason=f"{e.__class__.__name__}: Timed out while reading response"
+                    )
+            else:
+                return WellKnownLookupFailure(status_code=status_code, reason="Not found")
 
         try:
             host, port = parse_and_check_well_known_response(content)
@@ -263,7 +256,7 @@ class ServerDiscoveryResolver:
             host=host,
             port=port,
             status_code=status_code,
-            content_type=content_type,
+            content_type=headers.get("content-type", "No value found"),
             context_trace=context_tracing,
             headers=headers,
         )
