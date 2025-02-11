@@ -200,14 +200,14 @@ class ServerDiscoveryResolver:
         """
         # had_valid_well_known = self._had_well_known_cache.get(server_name)
         if cached_result := self._well_known_cache.get(server_name):
-            logger.debug("Found cached result for '%s': %r", server_name, cached_result)
             return cached_result
+
         result = await self.make_well_known_request(server_name)
         if isinstance(result, WellKnownDiagnosticResult):
             self._well_known_cache.set(server_name, result)
         elif isinstance(result, WellKnownLookupFailure):
             self._well_known_cache.set(server_name, result, ttl_displacer_ms=30 * 1000)
-        logger.debug("Got result from '%s': %r", server_name, result)
+
         return result
 
     async def make_well_known_request(self, server_name: str) -> WellKnownLookupResult:
