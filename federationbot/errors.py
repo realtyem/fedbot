@@ -86,7 +86,11 @@ class ServerDiscoveryDNSError(ServerDiscoveryError):
     """Error during DNS query"""
 
 
-class WellKnownServerError(ServerDiscoveryError):
+class WellKnownError(ServerDiscoveryError):
+    """Unknown error during .well-known federation discovery."""
+
+
+class WellKnownServerError(WellKnownError):
     """Connection error from Matrix server to client."""
 
 
@@ -94,12 +98,8 @@ class WellKnownServerTimeout(WellKnownServerError):
     """Connection Timeout waiting for Matrix server response."""
 
 
-class WellKnownClientError(ServerDiscoveryError):
+class WellKnownClientError(WellKnownError):
     """Connection error from client to Matrix server."""
-
-
-class WellKnownError(ServerDiscoveryError):
-    """Unknown error during .well-known federation discovery."""
 
 
 class WellKnownSchemeError(WellKnownError):
