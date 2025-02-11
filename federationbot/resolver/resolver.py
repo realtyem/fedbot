@@ -241,10 +241,8 @@ class ServerDiscoveryResolver:
         try:
             host, port = parse_and_check_well_known_response(content)
         except WellKnownSchemeError as e:
-            logger.error("Well known result had a scheme error: '%s'", (e.reason,), exc_info=True)
             return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
         except WellKnownParsingError as e:
-            # logger.warning("Parsing error on '%s': '%s'", server_name, e.reason, exc_info=True)
             return WellKnownParseFailure(status_code=status_code, reason=e.reason)
 
         if not host:
@@ -261,7 +259,6 @@ class ServerDiscoveryResolver:
             headers=headers,
         )
 
-    # TODO: maybe apply backoff here for retries, WellKnownServerTimeout is what to watch for
     async def _fetch_well_known(self, server_name: str) -> ClientResponse:
         url = f"https://{server_name}/.well-known/matrix/server"
         client_timeouts = ClientTimeout(
@@ -325,13 +322,8 @@ class ServerDiscoveryResolver:
             SocketTimeoutError,
             client_exceptions.ServerTimeoutError,
         ) as e:
-            # logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
             # SocketTimeoutError is hit when aiohttp cancels a request that takes to long
-            # logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
-
             # ServerTimeoutError is asyncio.TimeoutError under it's hood
-            # logger.warning("%s:  %s", e.__class__.__name__, server_name)
-
             raise WellKnownServerTimeout(
                 reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_CONNECT_TIMEOUT} seconds"
             ) from e
@@ -340,7 +332,7 @@ class ServerDiscoveryResolver:
             #     socket.gaierror,
             #     ConnectionRefusedError,
             #     # Broader OS error
-            #     # OSError,
+            #     OSError,
             #     client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
             #     client_exceptions.InvalidURL,  # e.url
             client_exceptions.ClientPayloadError,  # e
