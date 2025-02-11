@@ -1,4 +1,3 @@
-from typing import Any, Dict, List, Tuple, Union
 from abc import ABC, abstractmethod
 from json import JSONDecoder
 import json
@@ -37,7 +36,7 @@ class AbstractResolver(ABC):
     @abstractmethod
     async def resolve(
         self, host: str, port: int = 0, family: socket.AddressFamily = socket.AF_INET
-    ) -> List[ResolveResult]:
+    ) -> list[ResolveResult]:
         """Return IP address for given hostname"""
 
     @abstractmethod
