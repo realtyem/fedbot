@@ -11,7 +11,6 @@ from federationbot.api import USER_AGENT_STRING
 from federationbot.cache import TTLCache
 from federationbot.errors import (
     WellKnownClientError,
-    WellKnownClientTimeout,
     WellKnownError,
     WellKnownParsingError,
     WellKnownSchemeError,
@@ -328,37 +327,33 @@ class ServerDiscoveryResolver:
         ) as e:
             raise WellKnownError(reason=f"{e.__class__.__name__}, {str(e.message)}") from e
 
-        except client_exceptions.ConnectionTimeoutError as e:
+        except (
+            client_exceptions.ConnectionTimeoutError,
+            SocketTimeoutError,
+            client_exceptions.ServerTimeoutError,
+        ) as e:
+            # logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
+            # SocketTimeoutError is hit when aiohttp cancels a request that takes to long
             # logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
 
-            raise WellKnownClientTimeout(
-                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_READ_TIMEOUT} seconds"
-            ) from e
-
-        except SocketTimeoutError as e:
-            logger.error("%s:  %s", e.__class__.__name__, server_name, exc_info=True)
-
-            raise WellKnownServerTimeout(
-                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_READ_TIMEOUT} seconds"
-            ) from e
-
-        except client_exceptions.ServerTimeoutError as e:
             # ServerTimeoutError is asyncio.TimeoutError under it's hood
+            # logger.warning("%s:  %s", e.__class__.__name__, server_name)
+
             raise WellKnownServerTimeout(
-                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_READ_TIMEOUT} seconds"
+                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_CONNECT_TIMEOUT} seconds"
             ) from e
 
         except (
-            socket.gaierror,
-            ConnectionRefusedError,
-            # Broader OS error
-            OSError,
-            client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
-            client_exceptions.InvalidURL,  # e.url
+            #     socket.gaierror,
+            #     ConnectionRefusedError,
+            #     # Broader OS error
+            #     # OSError,
+            #     client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
+            #     client_exceptions.InvalidURL,  # e.url
             client_exceptions.ClientPayloadError,  # e
-            client_exceptions.ServerConnectionError,  # e
-            client_exceptions.ClientConnectionError,  # e
-            client_exceptions.ClientError,  # e
+            #     client_exceptions.ServerConnectionError,  # e
+            #     client_exceptions.ClientConnectionError,  # e
+            #     client_exceptions.ClientError,  # e
             Exception,  # e
         ) as e:
             logger.error("Had a problem while placing well known REQUEST to %s", server_name, exc_info=True)
