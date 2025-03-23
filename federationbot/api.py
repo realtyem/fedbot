@@ -525,13 +525,11 @@ class FederationApi:
         fetch_server_name: str,
         from_server_name: str,
         minimum_valid_until_ts: int,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             from_server_name,
             f"/_matrix/key/v2/query/{fetch_server_name}",
             query_args=[("minimum_valid_until_ts", minimum_valid_until_ts)],
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -550,13 +548,11 @@ class FederationApi:
         destination_server: str,
         origin_server: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/event/{event_id}",
             origin_server=origin_server,
-            **kwargs,
         )
 
         return response
@@ -567,14 +563,12 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/state_ids/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -594,14 +588,12 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/state/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -621,13 +613,11 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -647,19 +637,17 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         utc_time_at_ms: int,
-        **kwargs,
     ) -> MatrixResponse:
         # With no errors, will produce a json like:
         # {
         #    "event_id": "$somehash",
         #    "origin_server_ts": 123455676543whatever_int
         # }
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
             query_args=[("dir", "b"), ("ts", utc_time_at_ms)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -680,15 +668,13 @@ class FederationApi:
         room_id: str,
         event_id: str,
         limit: str = "10",
-        **kwargs,
     ) -> MatrixResponse:
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/backfill/{room_id}",
             query_args=[("v", event_id), ("limit", limit)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -707,17 +693,15 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         user_mxid: str,
-        **kwargs,
     ) -> MatrixResponse:
         # url = URL(
         #     f"https://{destination_server}/_matrix/federation/v1/user/devices/{mxid}"
         # )
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/user/devices/{user_mxid}",
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -736,14 +720,12 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         room_alias: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             "/_matrix/federation/v1/query/directory",
             query_args=[("room_alias", room_alias)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -800,7 +782,6 @@ class FederationApi:
         limit: int = 10,
         since: Optional[str] = None,
         third_party_instance_id: Optional[str] = None,
-        **kwargs,
     ) -> MatrixResponse:
         query_args = [
             ("include_all_networks", str(include_all_networks).lower()),
@@ -812,12 +793,11 @@ class FederationApi:
         if third_party_instance_id:
             query_args.append(("third_party_instance_id", third_party_instance_id))
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             "/_matrix/federation/v1/publicRooms",
             query_args=query_args,
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -837,7 +817,6 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         user_id: str,
-        **kwargs,
     ) -> MatrixResponse:
         # In an ideal world, this would expand correctly in aiohttp. In reality, it does not.
         # query_list={
@@ -848,11 +827,10 @@ class FederationApi:
         for i in range(0, 11):
             query_list.extend([("ver", f"{i + 1}")])
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
             query_args=query_list,
-            **kwargs,
             origin_server=origin_server,
         )
 

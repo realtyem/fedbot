@@ -447,7 +447,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             event_id,
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         good_host_list: list[str] = []
@@ -1176,7 +1175,6 @@ class FederationBot(RoomWalkCommand):
             list_of_room_alias_servers[0] if list_of_room_alias_servers else destination_server,
             room_id,
             str(self.client.mxid),
-            timeout=self.command_conn_timeouts["head"] or 10,
         )
         # 2. Get the hosts in the room, test which ones are live and filter out the dead
         await command_event.respond("Retrieving list of hosts in room")
@@ -1185,7 +1183,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             head_data.prev_events[0],
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         good_host_list: list[str] = []
@@ -1391,7 +1388,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             event_id,
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         # Time to start rendering. Build the header lines first
@@ -1713,7 +1709,6 @@ class FederationBot(RoomWalkCommand):
                 destination_server,
                 room_id,
                 str(self.client.mxid),
-                timeout=self.command_conn_timeouts["head"] or 10,
             )
         except MatrixError as e:
             message_id = cast(
@@ -1730,7 +1725,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             head_response.prev_events[0],
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
         list_of_message_ids: list[EventID] = []
 
@@ -1768,7 +1762,6 @@ class FederationBot(RoomWalkCommand):
                     _host,
                     room_id,
                     str(self.client.mxid),
-                    timeout=self.command_conn_timeouts["head"] or 10,
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
@@ -2039,7 +2032,6 @@ class FederationBot(RoomWalkCommand):
                         worker_server_name,
                         force_rediscover=True,
                         diagnostics=True,
-                        timeout=10.0,
                     )
                 except Exception as e:
                     self.log.debug("delegation worker error: %r", e)
@@ -2482,7 +2474,6 @@ class FederationBot(RoomWalkCommand):
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id,
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         prerender_message_2 = await command_event.respond(
@@ -3625,7 +3616,6 @@ class FederationBot(RoomWalkCommand):
                 destination_server,
                 room_id,
                 event_id,
-                timeout=self.command_conn_timeouts["state"] or 10,
             )
         except MatrixError as e:
             await command_event.respond(f"Some kind of error\n{e.http_code}:{e.reason}")
@@ -3819,7 +3809,6 @@ class FederationBot(RoomWalkCommand):
                 origin_server,
                 room_id,
                 event_id_from_room_right_now,
-                timeout=self.command_conn_timeouts["state"] or 10,
             )
 
         use_ordered_list = True
