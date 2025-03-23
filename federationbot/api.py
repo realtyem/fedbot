@@ -21,6 +21,7 @@ from federationbot.errors import (
     ServerSSLException,
     ServerUnreachable,
 )
+from federationbot.requests import FederationRequests
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 from federationbot.tracing import make_fresh_trace_config
@@ -29,7 +30,7 @@ backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
 
 SOCKET_TIMEOUT_SECONDS = 5.0
-USER_AGENT_STRING = "PeekingAtYourServerBits 0.0.9"
+USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
 # the /_matrix urlspace. 'bot' and 'Python' trigger it, so use a different name
 # "Maubot/Fedbot 0.0.7"
@@ -84,9 +85,12 @@ class FederationApi:
             trace_configs=[make_fresh_trace_config()],
         )
         self.delegation_handler = DelegationHandler(self._federation_request)
+        self.federation_transport = FederationRequests(self.server_signing_keys)
+        # self.server_discovery_resolver = ServerDiscoveryResolver(self.http_client)
 
     async def shutdown(self) -> None:
         await self.http_client.close()
+        await self.federation_transport.http_client.close()
         await self.server_discovery_cache.stop()
 
     @backoff.on_predicate(
@@ -450,6 +454,9 @@ class FederationApi:
         diagnostics: bool = False,
         **kwargs,
     ) -> MatrixResponse:
+        # response = await self.federation_transport.request(
+        #     server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
+        # )
         response = await self.federation_request(
             server_name,
             "/_matrix/federation/v1/version",
@@ -467,21 +474,49 @@ class FederationApi:
 
         return response
 
-    async def get_server_keys(self, server_name: str, **kwargs) -> MatrixResponse:
-        response = await self.federation_request(
-            server_name,
-            "/_matrix/key/v2/server",
-            **kwargs,
+    async def get_server_version_new(
+        self,
+        server_name: str,
+        force_rediscover: bool = False,
+        diagnostics: bool = False,
+        **kwargs,
+    ) -> MatrixResponse:
+        response = await self.federation_transport.request(
+            server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
         )
+        # response = await self.federation_request(
+        #     server_name,
+        #     "/_matrix/federation/v1/version",
+        #     force_rediscover=force_rediscover,
+        #     diagnostics=diagnostics,
+        #     **kwargs,
+        # )
 
-        if response.http_code != 200:
-            fedapi_logger.debug(
-                "get_server_keys: %s: got %d: %s %s",
-                server_name,
-                response.http_code,
-                response.errcode,
-                response.error or response.reason,
-            )
+        if diagnostics and response.diag_info is not None:
+            # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
+            if response.http_code != 200:
+                response.diag_info.connection_test_status = ResponseStatusType.ERROR
+            else:
+                response.diag_info.connection_test_status = ResponseStatusType.OK
+
+        return response
+
+    async def get_server_keys(self, server_name: str, **kwargs) -> MatrixResponse:
+        # response = await self.federation_request(
+        #     server_name,
+        #     "/_matrix/key/v2/server",
+        #     **kwargs,
+        # )
+        fedapi_logger.debug("Making server keys request to %s", server_name)
+        response = await self.federation_transport.request(server_name, "/_matrix/key/v2/server")
+        # if response.http_code != 200:
+        fedapi_logger.debug(
+            "get_server_keys: %s: got %d: %s %s",
+            server_name,
+            response.http_code,
+            response.errcode,
+            response.error or response.reason,
+        )
 
         return response
 

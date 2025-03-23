@@ -9,6 +9,7 @@ shared functionality for command handling.
 from __future__ import annotations
 
 from time import time
+import asyncio
 
 from maubot.plugin_base import Plugin
 from mautrix.types import EventType
@@ -18,7 +19,6 @@ from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.federation import FederationHandler
-from federationbot.resolver.resolver import ServerDiscoveryResolver
 from federationbot.types import MessageEvent
 
 
@@ -44,7 +44,7 @@ class FederationBotCommandBase(Plugin):
     server_signing_keys: dict[str, str]
     federation_handler: FederationHandler
     command_conn_timeouts: dict[str, int]
-    experimental_resolver: ServerDiscoveryResolver
+    # experimental_resolver: ServerDiscoveryResolver
 
     @classmethod
     def get_config_class(cls) -> type[BaseProxyConfig] | None:
@@ -64,6 +64,8 @@ class FederationBotCommandBase(Plugin):
         max_workers: int = 10
         self.command_conn_timeouts = {}
 
+        loop = asyncio.get_running_loop()
+        loop.set_debug(True)
         if self.config:
             self.config.load_and_update()
             max_workers = self.config["thread_pool_max_workers"]
@@ -82,7 +84,7 @@ class FederationBotCommandBase(Plugin):
             task_controller=self.reaction_task_controller,
         )
 
-        self.experimental_resolver = ServerDiscoveryResolver()
+        # self.experimental_resolver = ServerDiscoveryResolver()
 
     async def pre_stop(self) -> None:
         """Stop the plugin and clean up resources."""
@@ -90,6 +92,10 @@ class FederationBotCommandBase(Plugin):
         await self.reaction_task_controller.shutdown()
         # To stop any caching cleanup tasks
         await self.federation_handler.stop()
+        # await self.experimental_resolver.http_client.close()
+
+        loop = asyncio.get_running_loop()
+        loop.set_debug(False)
 
     async def get_room_depth(
         self,

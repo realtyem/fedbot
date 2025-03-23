@@ -1,6 +1,6 @@
 maubot: 0.1.0
 id: net.littlevortex.federationbot
-version: 0.0.9
+version: 0.1.0
 modules:
   - federationbot
 main_class: FederationBot

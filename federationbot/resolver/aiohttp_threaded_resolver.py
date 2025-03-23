@@ -1,6 +1,7 @@
-import asyncio
-import socket
 from abc import ABC, abstractmethod
+import asyncio
+import logging
+import socket
 
 from aiohttp.abc import ResolveResult
 
@@ -11,6 +12,9 @@ try:
 except ImportError:
     aiodns = None  # type: ignore[assignment]
     aiodns_default = False
+
+
+logger = logging.getLogger(__name__)
 
 
 class AbstractResolver(ABC):
@@ -151,6 +155,7 @@ class ThreadedResolver(AbstractResolver):
     async def resolve(
         self, host: str, port: int = 0, family: socket.AddressFamily = socket.AF_INET
     ) -> list[ResolveResult]:
+        logger.info("Resolving: host: %s, port: %d, family: %r", host, port, family)
         infos = await self._loop.getaddrinfo(
             host,
             port,
@@ -160,7 +165,7 @@ class ThreadedResolver(AbstractResolver):
         )
 
         hosts: list[ResolveResult] = []
-        for family, _, proto, _, address in infos:
+        for family, socket_kind, proto, cname, address in infos:
             if family == socket.AF_INET6:
                 if len(address) < 3:
                     # IPv6 is not supported by Python build,
@@ -186,6 +191,17 @@ class ThreadedResolver(AbstractResolver):
                     proto=proto,
                     flags=_NUMERIC_SOCKET_FLAGS,
                 )
+            )
+            logger.info(
+                "Result: hostname: %s, resolved_host: %s, port: %d, family: %r, proto: %d, flags: %r, socket_kind: %r, cname: %s",
+                host,
+                resolved_host,
+                port,
+                family,
+                proto,
+                _NUMERIC_SOCKET_FLAGS,
+                socket_kind,
+                cname,
             )
 
         return hosts

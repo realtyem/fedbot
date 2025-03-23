@@ -10,9 +10,11 @@ from aiohttp import ClientResponse, client_exceptions
 from backoff._typing import Details
 from dns.asyncresolver import Resolver
 from dns.message import Message
+from dns.nameserver import Do53Nameserver
 import backoff
 import dns.resolver
 
+from federationbot.cache import TTLCache
 from federationbot.errors import FedBotException, WellKnownSchemeError
 from federationbot.server_result import DiagnosticInfo, ServerResult
 
@@ -166,6 +168,10 @@ def _parse_and_check_well_known_response(
     return host, port
 
 
+DNS_SRV_GOOD_RESULT_CACHE_TTL_MS = 1000 * 60 * 60
+DNS_SRV_BAD_RESULT_CACHE_TTL_MS = 1000 * 60
+
+
 class DelegationHandler:
     def __init__(
         self,
@@ -174,11 +180,18 @@ class DelegationHandler:
             Coroutine[Any, Any, ClientResponse],
         ],
     ) -> None:
+        nameserver = Do53Nameserver("192.168.2.1")
         self.dns_resolver = Resolver()
+        self.dns_resolver.nameservers = [nameserver]
+        self.dns_resolver.cache = dns.resolver.LRUCache()
+        # Mapping of (server_name, query_type) -> DNS Query message
+        self.dns_query_cache: TTLCache[tuple[str, str], Message] = TTLCache()
+
+        # self.dns_resolver = Resolver()
         # DNS timeout for a request default is 2 seconds
         # DNS lifetime of requests default is 5 seconds
         # The lifetime we can touch, make it longer to give some more time for slow DNS servers
-        self.dns_resolver.lifetime = 10.0
+        # self.dns_resolver.lifetime = 10.0
         self.json_decoder = json.JSONDecoder()
         self.fed_request_callback = fed_request_callback
 
@@ -188,15 +201,18 @@ class DelegationHandler:
         query_type: str,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ):
-        query = dns.message.make_query(server_name, query_type)
-        nameserver = self.dns_resolver.nameservers[0]
+        response = self.dns_query_cache.get((server_name, query_type))
+        if not response:
+            query = dns.message.make_query(server_name, query_type)
 
-        # This returns a tuple(Message, used_tcp_bool), just get the first part
-        response = dns.query.udp_with_fallback(query, str(nameserver))[0]
-
+            # This returns a tuple(Message, used_tcp_bool), just get the first part
+            response = dns.query.udp_with_fallback(query, "192.168.2.1")[0]
+        bad = False
         if response.rcode() == dns.rcode.SERVFAIL:
+            bad = True
             diag_info.error(f"No '{query_type}' record for '{server_name}'(SERVFAIL) potential DNSSEC validation fail")
         elif response.rcode() == dns.rcode.NXDOMAIN:
+            bad = True
             diag_info.error(f"No '{query_type}' record for '{server_name}'(NXDOMAIN)")
 
         if (
@@ -204,6 +220,7 @@ class DelegationHandler:
             and response.rcode() != dns.rcode.NXDOMAIN
             and response.rcode() != dns.rcode.SERVFAIL
         ):
+            bad = True
             server_discovery_logger.warning(
                 "DNS query %s for %s got %r, %r", query_type, server_name, response.rcode(), response.answer
             )
@@ -215,6 +232,11 @@ class DelegationHandler:
         # server_discovery_logger.info(f"DNSSEC fallback response: {response.answer}")
         #
         # a_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "A")
+        self.dns_query_cache.set(
+            (server_name, query_type),
+            response,
+            DNS_SRV_BAD_RESULT_CACHE_TTL_MS if bad else DNS_SRV_GOOD_RESULT_CACHE_TTL_MS,
+        )
         return response
 
     def check_dns_from_list_for_reg_records(
@@ -685,7 +707,7 @@ class DelegationHandler:
                 port=_resolved_port,
                 host=original_host,
                 well_known_host=well_known_host,
-                host_header=f"{well_known_host}:{_resolved_port}",
+                host_header=f"{well_known_host}{':' + well_known_port if well_known_port else ''}",
                 sni_server_name=well_known_host,
                 diag_info=diag_info,
             )
@@ -783,7 +805,6 @@ class DelegationHandler:
 
         Args:
             server_name: The name as supplied from the back of a mxid
-            fed_req_callback: Pass through the callable to retrieve well-known data
             diag_info: Diagnostic collection object
 
         Returns: A ServerResult(or ServerResultError) object with all the information

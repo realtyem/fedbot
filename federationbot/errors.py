@@ -72,6 +72,36 @@ class ServerUnreachable(FedBotException):
     """Server was offline last time we checked, and temporarily blocked from retries."""
 
 
+# Errors while making requests
+class RequestError(Exception):
+    """
+    General Error during a request
+    """
+
+    reason: str
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+
+class RequestServerError(RequestError):
+    """
+    The server receiving the request had an error
+    """
+
+
+class RequestClientError(RequestError):
+    """
+    The client placing the request had an error
+    """
+
+
+class RequestTimeout(RequestError):
+    """
+    The request timed out
+    """
+
+
 # Errors during the discovery process
 class ServerDiscoveryError(Exception):
     """Error during Matrix server discovery process."""
