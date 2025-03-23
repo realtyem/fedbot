@@ -38,6 +38,7 @@ from federationbot.resolver import (
 from federationbot.resolver.dns import CachingDNSResolver
 
 logger = logging.getLogger(__name__)
+logger.setLevel("INFO")
 
 
 USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
@@ -124,7 +125,6 @@ class ServerDiscoveryResolver:
 
         # Step One
         output("Step 1: Checking if server name is a literal IP address")
-        logger.debug("_discover_server: %s: Step 1: Checking if server name is a literal IP address")
         if is_this_an_ip_address(host):
             output(f"  {host} is a literal IP address")
             if port == 0:
@@ -145,9 +145,9 @@ class ServerDiscoveryResolver:
 
         # Step Two
         output("Step 2: Checking if hostname is resolvable and has a port")
-        logger.debug("_discover_server: %s: Step 2: Checking if hostname is resolvable and has a port")
         # If this makes it to step 6, reuse these
         initial_dns_responses = await self.exp_dns_resolver.resolve_reg_records(host, diagnostics=diagnostics)
+        logger.debug("dns results from step 2: %s:\n%r", server_name, initial_dns_responses.get_hosts())
         if not initial_dns_responses.get_hosts():
             return ServerDiscoveryErrorResult(error=initial_dns_responses.get_errors()[0], diagnostics=diagnostics)
 
@@ -169,7 +169,6 @@ class ServerDiscoveryResolver:
         # Step Three - Well known
         # well_known_resolved_results: list[ResolveResult] = []
         output("Step 3: Checking for well known delegation")
-        logger.debug("_discover_server: %s: Step 3: Checking for well known delegation")
 
         # Should be able to use the initial dns response to look this up. However, clever people sometimes do silly
         # things. As an example: beeper.com resolves to two different IPv4 addresses for it's well known endpoint.
@@ -332,6 +331,7 @@ class ServerDiscoveryResolver:
                 if isinstance(cached_result, WellKnownDiagnosticResult):
                     diagnostics.output_list.append(f"    host and port: {cached_result.host}:{cached_result.port}")
                 elif isinstance(cached_result, WellKnownLookupFailure):
+                    logger.warning("get_well_known: %s found cached error:\n%r", server_name, cached_result)
                     diagnostics.output_list.append(
                         f"    code: {cached_result.status_code}, reason: {cached_result.reason}"
                     )
@@ -347,6 +347,7 @@ class ServerDiscoveryResolver:
         if isinstance(result, WellKnownDiagnosticResult):
             self._well_known_cache.set(server_name, result)
         elif isinstance(result, WellKnownLookupFailure):
+            logger.warning("get_well_known: %s received failure:\n%r", server_name, result)
             self._well_known_cache.set(server_name, result, 30 * 1000)
 
         return result
@@ -449,8 +450,6 @@ class ServerDiscoveryResolver:
         )
 
     async def _fetch_well_known(self, server_name: str, ip_address: str | None = None) -> ClientResponse:
-        # url = f"https://{ip_address if ip_address else server_name}/.well-known/matrix/server"
-        logger.info("_fetch_well_known: %s: %r", server_name, ip_address)
         url_object = URL.build(
             scheme="https",
             host=ip_address,
@@ -458,7 +457,7 @@ class ServerDiscoveryResolver:
             path="/.well-known/matrix/server",
             encoded=False,
         )
-        logger.info("_fetch_well_known: %s: %r", server_name, url_object)
+
         client_timeouts = ClientTimeout(
             # Don't limit the total connection time, as incremental reads are handled distinctly by sock_read
             total=None,
