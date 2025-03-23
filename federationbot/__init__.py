@@ -2831,10 +2831,9 @@ class FederationBot(RoomWalkCommand):
             if server_data:
                 # Federation request may have had an error, handle those errors here
                 if server_data.http_code != 200:
-                    # Pad the software column with spaces, so the error and the code end up in the version column
-                    # Additionally, since this is the error clause, don't include the vertical line to separate
-                    # the column, giving a more distinctive visual indicator.
-                    buffered_message += f"{server_software_col.pad('')}   "
+                    # Don't include the vertical line to separate the column, giving a more distinctive visual
+                    # indicator.
+                    buffered_message += "❌ "
 
                     buffered_message += f"{str(server_data.http_code) + ': ' if server_data.http_code > 0 else ''}{server_data.reason}\n"
 
