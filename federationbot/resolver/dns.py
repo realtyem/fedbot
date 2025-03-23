@@ -6,7 +6,7 @@ from dns.name import from_text
 from dns.nameserver import Do53Nameserver
 from dns.rdataclass import IN
 from dns.rdatatype import AAAA, CNAME, SRV, A, RdataType
-from dns.resolver import LRUCache
+from dns.resolver import NXDOMAIN, LRUCache, NoAnswer
 import dns
 
 from federationbot.cache import TTLCache
@@ -53,7 +53,7 @@ class CachingDNSResolver:
         error_message = None
         try:
             # We don't raise on NoAnswer, this creates an empty Answer that won't break iteration
-            answer = await self.dns_resolver.resolve(server_name, rdtype, raise_on_no_answer=False)
+            answer = await self.dns_resolver.resolve(server_name, rdtype, raise_on_no_answer=True)
 
             last_host_found = str(server_name)
             compiled_list_from_cname = []
@@ -95,8 +95,20 @@ class CachingDNSResolver:
             # logger.debug("DNS %s Answer.expiration: %r", rdtype, response.expiration)
             # logger.debug("DNS %s Answer.canonical_name: %r", rdtype, responses.canonical_name)
 
+        except NoAnswer as e:
+            error_message = "NoAnswer"
+            if diagnostics:
+                diagnostics.status.dns = StatusEnum.ERROR
+                diagnostics.output_list.append(f"  {error_message}: {e}")
+
+        except NXDOMAIN as e:
+            error_message = "NXDOMAIN"
+            if diagnostics:
+                diagnostics.status.dns = StatusEnum.ERROR
+                diagnostics.output_list.append(f"  {error_message}: {e}")
+
         except Exception as e:
-            # logger.error("%s: %r", server_name, e, exc_info=True)
+            logger.error("%s: %r", server_name, e, exc_info=True)
             error_message = str(e)
             if diagnostics:
                 diagnostics.status.dns = StatusEnum.ERROR
