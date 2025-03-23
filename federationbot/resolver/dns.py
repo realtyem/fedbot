@@ -70,49 +70,41 @@ class CachingDNSResolver:
                         found_cname_target = str(rdata.target)
 
                         if diagnostics:
-                            compiled_list_from_cname.append(
-                                f"    Found CNAME record: {last_name_searched} -> {found_cname_target}"
-                            )
+                            diagnostics.log(f"    Found CNAME record: {last_name_searched} -> {found_cname_target}")
 
                         last_host_found = found_cname_target
             # Use create=True here to simulate an empty list, so iteration doesn't break
             responses = answer.response.find_rrset(ANSWER, from_text(last_host_found), IN, rdtype, create=True)
 
-            if diagnostics:
-                diagnostics.output_list.extend(compiled_list_from_cname)
-                # compiled_list_from_cname = []
+            # if diagnostics:
+            #     diagnostics.log(compiled_list_from_cname)
+            # compiled_list_from_cname = []
 
             for rdata in responses:
                 results.append(str(rdata.address))
                 if diagnostics:
                     # TODO: this is stupid and we need a better way
                     diagnostics.status.dns = StatusEnum.OK
-                    diagnostics.output_list.append(f"    Found Resolved IP address: {str(rdata.address)}")
-
-            # logger.debug("DNS %s responses: %r", rdtype, response.response.answer)
-            # logger.debug("DNS %s Answer.qname: %r", rdtype, responses.qname)
-            # logger.debug("DNS %s Answer.rrset: %r", rdtype, responses.rrset)
-            # logger.debug("DNS %s Answer.expiration: %r", rdtype, response.expiration)
-            # logger.debug("DNS %s Answer.canonical_name: %r", rdtype, responses.canonical_name)
+                    diagnostics.log(f"    Found Resolved IP address: {str(rdata.address)}")
 
         except NoAnswer as e:
             error_message = "NoAnswer"
             if diagnostics:
                 diagnostics.status.dns = StatusEnum.ERROR
-                diagnostics.output_list.append(f"  {error_message}: {e}")
+                diagnostics.log(f"  {error_message}: {e}")
 
         except NXDOMAIN as e:
             error_message = "NXDOMAIN"
             if diagnostics:
                 diagnostics.status.dns = StatusEnum.ERROR
-                diagnostics.output_list.append(f"  {error_message}: {e}")
+                diagnostics.log(f"  {error_message}: {e}")
 
         except Exception as e:
             logger.error("%s: %r", server_name, e, exc_info=True)
             error_message = str(e)
             if diagnostics:
                 diagnostics.status.dns = StatusEnum.ERROR
-                diagnostics.output_list.append(f"  {error_message}")
+                diagnostics.log(f"  {error_message}")
 
         return DnsResult(hosts=results, error=error_message)
 
@@ -124,7 +116,7 @@ class CachingDNSResolver:
     ) -> ServerDiscoveryDnsResult:
         logger.debug("resolve_reg_records: %s", server_name)
         if diagnostics:
-            diagnostics.output_list.append(f"  Starting DNS query for: {server_name}")
+            diagnostics.log(f"  Starting DNS query for: {server_name}")
 
         a_results = await self.query(server_name, A, check_cname=check_cname, diagnostics=diagnostics)
         logger.debug("resolve_reg_records: %s, a_results:\n%r", server_name, a_results)
@@ -146,7 +138,7 @@ class CachingDNSResolver:
 
         srv_answers = self.dns_srv_query_cache.get(server_name)
         if diagnostics and srv_answers is not None:
-            diagnostics.output_list.append("    Found cached SRV result")
+            diagnostics.log("    Found cached SRV result")
 
         if srv_answers is None:
             query = dns.message.make_query(srv_name, SRV)
@@ -162,7 +154,7 @@ class CachingDNSResolver:
         ):
             if diagnostics:
                 diagnostics.status.srv = StatusEnum.ERROR
-                diagnostics.output_list.append(f"    Received {srv_answers.rcode()} response")
+                diagnostics.log(f"    Received {srv_answers.rcode()} response")
             logger.warning(
                 "DNS query %s for %s got %r, %r", "SRV", server_name, srv_answers.rcode(), srv_answers.answer
             )
@@ -178,7 +170,7 @@ class CachingDNSResolver:
             port = int(rdata.port)
             if diagnostics:
                 diagnostics.status.srv = StatusEnum.OK
-                diagnostics.output_list.append(f"    Received SRV target and port: {host}:{port}")
+                diagnostics.log(f"    Received SRV target and port: {host}:{port}")
             host_port_tuples.append((host, port))
 
         ip_port_tuples = []
@@ -213,14 +205,14 @@ class CachingDNSResolver:
         """
         # logger.debug("Preparing to request SRV records for %s", server_name)
         if diagnostics:
-            diagnostics.output_list.append(f"  Starting SRV query for: _matrix-fed._tcp.{server_name}")
+            diagnostics.log(f"  Starting SRV query for: _matrix-fed._tcp.{server_name}")
 
         matrix_fed_answers = await self._resolve_srv_records(f"_matrix-fed._tcp.{server_name}", diagnostics=diagnostics)
         if matrix_fed_answers:
             return matrix_fed_answers
 
         if diagnostics:
-            diagnostics.output_list.append(f"  Starting SRV query for: _matrix._tcp.{server_name}")
+            diagnostics.log(f"  Starting SRV query for: _matrix._tcp.{server_name}")
         deprecated_matrix_answers = await self._resolve_srv_records(
             f"_matrix._tcp.{server_name}", diagnostics=diagnostics
         )

@@ -182,8 +182,13 @@ class Diagnostics:
     diagnostic messages for debugging federation issues.
     """
 
+    enable_diagnostics: bool = field(default=False)
     output_list: list[str] = field(default_factory=list)
     status: ServerDiscoveryStatus = field(default_factory=ServerDiscoveryStatus)
+
+    def log(self, line: str) -> None:
+        if self.enable_diagnostics:
+            self.output_list.append(line)
 
 
 @dataclass(slots=True)

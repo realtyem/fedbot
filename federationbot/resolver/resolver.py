@@ -111,27 +111,21 @@ class ServerDiscoveryResolver:
         return server_result
 
     async def _discover_server(self, server_name: str, run_diagnostics: bool = False) -> ServerDiscoveryBaseResult:
-        diagnostics = None
-        if run_diagnostics:
-            # There is a status object as part of Diagnostics, we flag things as we go
-            diagnostics = Diagnostics()
-
-        def output(content: str) -> None:
-            if diagnostics:
-                diagnostics.output_list.append(content)
+        # The Diagnostics object will not actually log anything if run_diagnostics is False
+        diag = Diagnostics(enable_diagnostics=run_diagnostics)
 
         time_start = time.time()
         host, port = check_and_maybe_split_server_name(server_name)
 
         # Step One
-        output("Step 1: Checking if server name is a literal IP address")
+        diag.log("Step 1: Checking if server name is a literal IP address")
         if is_this_an_ip_address(host):
-            output(f"  {host} is a literal IP address")
+            diag.log(f"  {host} is a literal IP address")
             if port == 0:
-                output("No port provided, using 8448")
+                diag.log("No port provided, using 8448")
                 port = 8448
             else:
-                output(f"Port provided: {port}")
+                diag.log(f"Port provided: {port}")
 
             ip_port_object = IpAddressAndPort(ip_address=host, port=port)
             return ServerDiscoveryResult(
@@ -140,20 +134,20 @@ class ServerDiscoveryResolver:
                 host_header=f"{host}{':' + str(port) if port else ''}",
                 sni=host,
                 time_for_complete_delegation=time.time() - time_start,
-                diagnostics=diagnostics,
+                diagnostics=diag,
             )
 
         # Step Two
-        output("Step 2: Checking if hostname is resolvable and has a port")
+        diag.log("Step 2: Checking if hostname is resolvable and has a port")
         # If this makes it to step 6, reuse these
-        initial_dns_responses = await self.exp_dns_resolver.resolve_reg_records(host, diagnostics=diagnostics)
+        initial_dns_responses = await self.exp_dns_resolver.resolve_reg_records(host, diagnostics=diag)
         logger.debug("dns results from step 2: %s:\n%r", server_name, initial_dns_responses.get_hosts())
         if not initial_dns_responses.get_hosts():
-            return ServerDiscoveryErrorResult(error=initial_dns_responses.get_errors()[0], diagnostics=diagnostics)
+            return ServerDiscoveryErrorResult(error=initial_dns_responses.get_errors()[0], diagnostics=diag)
 
         if port != 0:
             list_of_ip_objects = []
-            output(f"  {port} was included")
+            diag.log(f"  {port} was included")
             for dns_resolved_ip in initial_dns_responses.get_hosts():
                 list_of_ip_objects.append(IpAddressAndPort(ip_address=dns_resolved_ip, port=port))
 
@@ -163,32 +157,31 @@ class ServerDiscoveryResolver:
                 host_header=f"{host}:{port}",
                 sni=host,
                 time_for_complete_delegation=time.time() - time_start,
-                diagnostics=diagnostics,
+                diagnostics=diag,
             )
 
         # Step Three - Well known
         # well_known_resolved_results: list[ResolveResult] = []
-        output("Step 3: Checking for well known delegation")
+        diag.log("Step 3: Checking for well known delegation")
 
         # Should be able to use the initial dns response to look this up. However, clever people sometimes do silly
         # things. As an example: beeper.com resolves to two different IPv4 addresses for it's well known endpoint.
         # So, if there was only a single initial dns response, use it directly. Otherwise, let aiohttp's happy eyeballs
         # algorithm deal with it, and whoever answers first, wins.
-        well_known_result = await self.get_well_known(
-            server_name, initial_dns_responses.get_hosts(), diagnostics=diagnostics
-        )
+        well_known_result = await self.get_well_known(server_name, initial_dns_responses.get_hosts(), diagnostics=diag)
 
         if isinstance(well_known_result, WellKnownDiagnosticResult):
             # Step 3.1, does the well known have a literal IP?
             if is_this_an_ip_address(well_known_result.host):
-                output(f"Step 3.1: Well known points to literal IP address: {well_known_result.host}")
+                diag.log(f"Step 3.1: Well known points to literal IP address: {well_known_result.host}")
                 port = well_known_result.port
                 # Literal IP's can not have SRV records
                 if port in [0, None]:
-                    output("No port provided, using 8448")
+                    diag.log("No port provided, using 8448")
+                    # TODO: fix whatever is happening with port here, it's not used
                     port = 8448
                 else:
-                    output(f"Port provided: {port}")
+                    diag.log(f"Port provided: {port}")
 
                 ip_port_object = IpAddressAndPort(ip_address=well_known_result.host, port=well_known_result.port)
 
@@ -198,19 +191,19 @@ class ServerDiscoveryResolver:
                     host_header=f"{well_known_result.host}{':' + str(well_known_result.port) if well_known_result.port else ''}",
                     sni=well_known_result.host,
                     time_for_complete_delegation=time.time() - time_start,
-                    diagnostics=diagnostics,
+                    diagnostics=diag,
                 )
 
             # Step 3.2, resolve the hostname IF there was a port
             if well_known_result.port:
-                output(f"Step 3.2: Well known had attached port: {port}")
+                diag.log(f"Step 3.2: Well known had attached port: {port}")
 
                 well_known_dns_query_results = await self.exp_dns_resolver.resolve_reg_records(
-                    well_known_result.host, diagnostics=diagnostics
+                    well_known_result.host, diagnostics=diag
                 )
                 if not well_known_dns_query_results.get_hosts():
                     return ServerDiscoveryErrorResult(
-                        error=well_known_dns_query_results.get_errors()[0], diagnostics=diagnostics
+                        error=well_known_dns_query_results.get_errors()[0], diagnostics=diag
                     )
 
                 list_of_ip_objects = []
@@ -224,16 +217,16 @@ class ServerDiscoveryResolver:
                     host_header=f"{well_known_result.host}:{well_known_result.port}",
                     sni=well_known_result.host,
                     time_for_complete_delegation=time.time() - time_start,
-                    diagnostics=diagnostics,
+                    diagnostics=diag,
                 )
 
             # Step 3.3 and 3.4, there was no port, resolve SRV records
             else:
                 # SRV because no port
-                output("Step 3.3(and 3.4) SRV query based on well known response")
+                diag.log("Step 3.3(and 3.4) SRV query based on well known response")
                 try:
                     well_known_srv_results = await self.exp_dns_resolver.resolve_srv_records(
-                        well_known_result.host, diagnostics=diagnostics
+                        well_known_result.host, diagnostics=diag
                     )
                 except Exception:
                     well_known_srv_results = []
@@ -251,17 +244,17 @@ class ServerDiscoveryResolver:
                         host_header=f"{well_known_result.host}",
                         sni=well_known_result.host,
                         time_for_complete_delegation=time.time() - time_start,
-                        diagnostics=diagnostics,
+                        diagnostics=diag,
                     )
 
                 # There was a host, but not a port in the well known, default to 8448
-                output("Step 3.5 Resolve DNS for host from well known and use port 8448")
+                diag.log("Step 3.5 Resolve DNS for host from well known and use port 8448")
                 well_known_dns_query_results = await self.exp_dns_resolver.resolve_reg_records(
-                    well_known_result.host, diagnostics=diagnostics
+                    well_known_result.host, diagnostics=diag
                 )
                 if not well_known_dns_query_results.get_hosts():
                     return ServerDiscoveryErrorResult(
-                        error=well_known_dns_query_results.get_errors()[0], diagnostics=diagnostics
+                        error=well_known_dns_query_results.get_errors()[0], diagnostics=diag
                     )
 
                 list_of_ip_objects = []
@@ -274,13 +267,13 @@ class ServerDiscoveryResolver:
                     host_header=well_known_result.host,
                     sni=well_known_result.host,
                     time_for_complete_delegation=time.time() - time_start,
-                    diagnostics=diagnostics,
+                    diagnostics=diag,
                 )
 
         # Step 4 and 5, we have a hostname but no port, resolve SRV records
-        output("Step 4(and 5) Check for SRV records")
+        diag.log("Step 4(and 5) Check for SRV records")
         try:
-            srv_results = await self.exp_dns_resolver.resolve_srv_records(host, diagnostics=diagnostics)
+            srv_results = await self.exp_dns_resolver.resolve_srv_records(host, diagnostics=diag)
         except Exception:
             srv_results = []
 
@@ -297,11 +290,11 @@ class ServerDiscoveryResolver:
                 host_header=f"{host}",
                 sni=host,
                 time_for_complete_delegation=time.time() - time_start,
-                diagnostics=diagnostics,
+                diagnostics=diag,
             )
 
         # Step 6, default port to 8448
-        output("Step 6 No other port found, default to 8448")
+        diag.log("Step 6 No other port found, default to 8448")
 
         list_of_ip_objects = []
         for dns_result in initial_dns_responses.get_hosts():
@@ -313,7 +306,7 @@ class ServerDiscoveryResolver:
             host_header=host,
             sni=host,
             time_for_complete_delegation=time.time() - time_start,
-            diagnostics=diagnostics,
+            diagnostics=diag,
         )
 
     async def get_well_known(
@@ -327,23 +320,20 @@ class ServerDiscoveryResolver:
         if cached_result := self._well_known_cache.get(server_name):
             logger.debug("get_well_known: %s found cached request", server_name)
             if diagnostics:
-                diagnostics.output_list.append(f"  Found cached well known result for: {server_name}")
+                diagnostics.log(f"  Found cached well known result for: {server_name}")
                 if isinstance(cached_result, WellKnownDiagnosticResult):
-                    diagnostics.output_list.append(f"    host and port: {cached_result.host}:{cached_result.port}")
+                    diagnostics.log(f"    host and port: {cached_result.host}:{cached_result.port}")
                 elif isinstance(cached_result, WellKnownLookupFailure):
                     logger.warning("get_well_known: %s found cached error:\n%r", server_name, cached_result)
-                    diagnostics.output_list.append(
-                        f"    code: {cached_result.status_code}, reason: {cached_result.reason}"
-                    )
+                    diagnostics.log(f"    code: {cached_result.status_code}, reason: {cached_result.reason}")
                 else:
                     assert isinstance(cached_result, NoWellKnown)
-                    diagnostics.output_list.append(f"    code: {cached_result.status_code}")
+                    diagnostics.log(f"    code: {cached_result.status_code}")
             return cached_result
 
         result = await self.make_well_known_request(server_name, list_of_ip_addresses, diagnostics=diagnostics)
         logger.debug("get_well_known: %s finished request\n%r", server_name, result)
 
-        # logger.debug("Well known response was: %r", result)
         if isinstance(result, WellKnownDiagnosticResult):
             self._well_known_cache.set(server_name, result)
         elif isinstance(result, WellKnownLookupFailure):
@@ -379,7 +369,7 @@ class ServerDiscoveryResolver:
         except WellKnownError as e:
             if diagnostics:
                 diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.output_list.append(f"    Error: {e.reason}")
+                diagnostics.log(f"    Error: {e.reason}")
             error_return = WellKnownLookupFailure(status_code=None, reason=e.reason)
             return error_return
 
@@ -396,20 +386,20 @@ class ServerDiscoveryResolver:
                 except json.decoder.JSONDecodeError as e:
                     if diagnostics:
                         diagnostics.status.well_known = StatusEnum.ERROR
-                        diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.msg}")
+                        diagnostics.log(f"    Code: {status_code}, Error: {e.msg}")
                     return WellKnownLookupFailure(
                         status_code=status_code, reason="JSONDecodeError: No usable data in response"
                     )
                 except client_exceptions.ServerTimeoutError as e:
                     if diagnostics:
                         diagnostics.status.well_known = StatusEnum.ERROR
-                        diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.strerror}")
+                        diagnostics.log(f"    Code: {status_code}, Error: {e.strerror}")
                     return WellKnownLookupFailure(
                         status_code=status_code, reason=f"{e.__class__.__name__}: Timed out while reading response"
                     )
             else:
                 if diagnostics:
-                    diagnostics.output_list.append(f"    Code: {status_code}")
+                    diagnostics.log(f"    Code: {status_code}")
 
                 return NoWellKnown(status_code=status_code)
 
@@ -418,27 +408,27 @@ class ServerDiscoveryResolver:
         except WellKnownSchemeError as e:
             if diagnostics:
                 diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.reason}")
+                diagnostics.log(f"    Code: {status_code}, Error: {e.reason}")
 
             return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
         except WellKnownParsingError as e:
             if diagnostics:
                 diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.reason}")
+                diagnostics.log(f"    Code: {status_code}, Error: {e.reason}")
 
             return WellKnownParseFailure(status_code=status_code, reason=e.reason)
 
         if not host:
             if diagnostics:
                 diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.output_list.append(f"    Code: {status_code}, Error: No host found")
+                diagnostics.log(f"    Code: {status_code}, Error: No host found")
 
             return WellKnownLookupFailure(status_code=status_code, reason="No host found")
         # TODO: Remember to set the SNI header
         # TODO: parse the headers for the cache control stuff, sort out ttl options
         if diagnostics:
             diagnostics.status.well_known = StatusEnum.OK
-            diagnostics.output_list.append(f"    host and port: {host}:{port}")
+            diagnostics.log(f"    host and port: {host}:{port}")
 
         return WellKnownDiagnosticResult(
             host=host,
