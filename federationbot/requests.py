@@ -25,6 +25,7 @@ from federationbot.responses import MatrixError, MatrixFederationResponse, Matri
 from federationbot.tracing import make_fresh_trace_config
 
 logger = logging.getLogger(__name__)
+logger.setLevel("INFO")
 
 
 USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
