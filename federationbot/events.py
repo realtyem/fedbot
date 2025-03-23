@@ -1254,10 +1254,10 @@ class RoomMemberStateEvent(GenericStateEvent):
         return summary
 
     def to_extras_summary(self) -> str:
-        return f"membership: {self.membership} "
+        return f"membership: {self.membership} target: {self.state_key} "
 
     def to_short_type_summary(self) -> str:
-        return f"{self.event_type} {self.sender} {self.membership}"
+        return f"{self.event_type} {self.sender} {self.state_key} {self.membership}"
 
     def to_pretty_summary(
         self,

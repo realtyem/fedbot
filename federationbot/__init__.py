@@ -3533,7 +3533,7 @@ class FederationBot(RoomWalkCommand):
             line_summary = event_base.to_template_line_summary(template_list)
             line_summary += " "
             line_summary += event_base.to_extras_summary()
-            line_summary += f"{line_summary}\n"
+            line_summary += "\n"
 
             list_of_buffer_lines.extend([line_summary])
 
