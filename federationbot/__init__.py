@@ -2883,13 +2883,16 @@ class FederationBot(RoomWalkCommand):
         async def _version_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
+                try:
+                    result = await self.federation_handler.api.get_server_version_new(
+                        worker_server_name,
+                        diagnostics=True,
+                    )
 
-                result = await self.federation_handler.api.get_server_version(
-                    worker_server_name,
-                    diagnostics=True,
-                )
-
-                server_to_version_data[worker_server_name] = result
+                    server_to_version_data[worker_server_name] = result
+                except Exception as e:
+                    self.log.warning("_version_worker: %s: %r", worker_server_name, e)
+                    pass
                 queue.task_done()
 
         version_queue: asyncio.Queue[str] = asyncio.Queue()
