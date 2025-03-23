@@ -1,5 +1,4 @@
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
-from dataclasses import asdict
 import asyncio
 import json
 import logging
@@ -579,13 +578,12 @@ class FederationHandler:
             destination_server=destination_server,
             room_id=room_id,
             user_id=user_id,
-            **kwargs,
         )
         if response.http_code != 200:
             assert isinstance(response, MatrixError)
             raise response
 
-        return MakeJoinResponse(**asdict(response))
+        return MakeJoinResponse(**response.__dict__)
 
     async def get_events_from_backfill(
         self,
