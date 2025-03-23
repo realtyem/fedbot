@@ -2684,8 +2684,8 @@ class FederationBot(RoomWalkCommand):
                 buffered_message += f"{add_color(bold(ok_or_fail_col.pad('PASS')), foreground=Colors.GREEN)}"
                 buffered_message += f"{ok_or_fail_col.horizontal_separator}"
                 calculated_time = -1.0
-                if server_data.diag_info:
-                    context = server_data.diag_info.trace_ctx
+                if server_data.tracing_context:
+                    context = server_data.tracing_context
                     if context:
                         end_time = context.request_end
                         # if context.request_chunk_sent:
