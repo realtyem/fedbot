@@ -174,16 +174,15 @@ class ServerDiscoveryResolver:
             # Step 3.1, does the well known have a literal IP?
             if is_this_an_ip_address(well_known_result.host):
                 diag.log(f"Step 3.1: Well known points to literal IP address: {well_known_result.host}")
-                port = well_known_result.port
-                # Literal IP's can not have SRV records
-                if port in [0, None]:
-                    diag.log("No port provided, using 8448")
-                    # TODO: fix whatever is happening with port here, it's not used
-                    port = 8448
-                else:
-                    diag.log(f"Port provided: {port}")
 
-                ip_port_object = IpAddressAndPort(ip_address=well_known_result.host, port=well_known_result.port)
+                # Literal IP's can not have SRV records
+                if well_known_result.port in [0, None]:
+                    diag.log("  No port provided, using 8448")
+                    # TODO: fix whatever is happening with port here, it's not used
+                    ip_port_object = IpAddressAndPort(ip_address=well_known_result.host, port=8448)
+                else:
+                    diag.log(f"  Port provided: {port}")
+                    ip_port_object = IpAddressAndPort(ip_address=well_known_result.host, port=well_known_result.port)
 
                 return ServerDiscoveryResult(
                     hostname=host,
@@ -196,7 +195,7 @@ class ServerDiscoveryResolver:
 
             # Step 3.2, resolve the hostname IF there was a port
             if well_known_result.port:
-                diag.log(f"Step 3.2: Well known had attached port: {port}")
+                diag.log(f"Step 3.2: Well known had attached port: {well_known_result.port}")
 
                 well_known_dns_query_results = await self.exp_dns_resolver.resolve_reg_records(
                     well_known_result.host, diagnostics=diag
@@ -221,54 +220,50 @@ class ServerDiscoveryResolver:
                 )
 
             # Step 3.3 and 3.4, there was no port, resolve SRV records
-            else:
-                # SRV because no port
-                diag.log("Step 3.3(and 3.4) SRV query based on well known response")
-                try:
-                    well_known_srv_results = await self.exp_dns_resolver.resolve_srv_records(
-                        well_known_result.host, diagnostics=diag
-                    )
-                except Exception:
-                    well_known_srv_results = []
-
-                if well_known_srv_results:
-                    list_of_ip_objects = []
-                    for srv_result in well_known_srv_results:
-                        resolved_ip = srv_result[0]
-                        resolved_port = srv_result[1]
-                        list_of_ip_objects.append(IpAddressAndPort(ip_address=resolved_ip, port=resolved_port))
-
-                    return ServerDiscoveryResult(
-                        hostname=host,
-                        list_of_resolved_addresses=list_of_ip_objects,
-                        host_header=f"{well_known_result.host}",
-                        sni=well_known_result.host,
-                        time_for_complete_delegation=time.time() - time_start,
-                        diagnostics=diag,
-                    )
-
-                # There was a host, but not a port in the well known, default to 8448
-                diag.log("Step 3.5 Resolve DNS for host from well known and use port 8448")
-                well_known_dns_query_results = await self.exp_dns_resolver.resolve_reg_records(
+            diag.log("Step 3.3(and 3.4) SRV query based on well known response")
+            try:
+                well_known_srv_results = await self.exp_dns_resolver.resolve_srv_records(
                     well_known_result.host, diagnostics=diag
                 )
-                if not well_known_dns_query_results.get_hosts():
-                    return ServerDiscoveryErrorResult(
-                        error=well_known_dns_query_results.get_errors()[0], diagnostics=diag
-                    )
+            except Exception:
+                well_known_srv_results = []
 
+            if well_known_srv_results:
                 list_of_ip_objects = []
-                for dns_resolved_ip in well_known_dns_query_results.get_hosts():
-                    list_of_ip_objects.append(IpAddressAndPort(ip_address=dns_resolved_ip, port=8448))
+                for srv_result in well_known_srv_results:
+                    resolved_ip = srv_result[0]
+                    resolved_port = srv_result[1]
+                    list_of_ip_objects.append(IpAddressAndPort(ip_address=resolved_ip, port=resolved_port))
 
                 return ServerDiscoveryResult(
                     hostname=host,
                     list_of_resolved_addresses=list_of_ip_objects,
-                    host_header=well_known_result.host,
+                    host_header=f"{well_known_result.host}",
                     sni=well_known_result.host,
                     time_for_complete_delegation=time.time() - time_start,
                     diagnostics=diag,
                 )
+
+            # There was a host, but not a port in the well known, default to 8448
+            diag.log("Step 3.5 Resolve DNS for host from well known and use port 8448")
+            well_known_dns_query_results = await self.exp_dns_resolver.resolve_reg_records(
+                well_known_result.host, diagnostics=diag
+            )
+            if not well_known_dns_query_results.get_hosts():
+                return ServerDiscoveryErrorResult(error=well_known_dns_query_results.get_errors()[0], diagnostics=diag)
+
+            list_of_ip_objects = []
+            for dns_resolved_ip in well_known_dns_query_results.get_hosts():
+                list_of_ip_objects.append(IpAddressAndPort(ip_address=dns_resolved_ip, port=8448))
+
+            return ServerDiscoveryResult(
+                hostname=host,
+                list_of_resolved_addresses=list_of_ip_objects,
+                host_header=well_known_result.host,
+                sni=well_known_result.host,
+                time_for_complete_delegation=time.time() - time_start,
+                diagnostics=diag,
+            )
 
         # Step 4 and 5, we have a hostname but no port, resolve SRV records
         diag.log("Step 4(and 5) Check for SRV records")
@@ -331,6 +326,8 @@ class ServerDiscoveryResolver:
                     diagnostics.log(f"    code: {cached_result.status_code}")
             return cached_result
 
+        if diagnostics:
+            diagnostics.log("  Making request to well-known")
         result = await self.make_well_known_request(server_name, list_of_ip_addresses, diagnostics=diagnostics)
         logger.debug("get_well_known: %s finished request\n%r", server_name, result)
 
@@ -442,7 +439,7 @@ class ServerDiscoveryResolver:
             headers=headers,
         )
 
-    async def _fetch_well_known(self, server_name: str, ip_address: str | None = None) -> ClientResponse:
+    async def _fetch_well_known(self, server_name: str, ip_address: str) -> ClientResponse:
         url_object = URL.build(
             scheme="https",
             host=ip_address,
