@@ -56,7 +56,6 @@ class CachingDNSResolver:
             answer = await self.dns_resolver.resolve(server_name, rdtype, raise_on_no_answer=True)
 
             last_host_found = str(server_name)
-            compiled_list_from_cname = []
             if check_cname:
                 while True:
                     name = from_text(last_host_found)
@@ -75,10 +74,6 @@ class CachingDNSResolver:
                         last_host_found = found_cname_target
             # Use create=True here to simulate an empty list, so iteration doesn't break
             responses = answer.response.find_rrset(ANSWER, from_text(last_host_found), IN, rdtype, create=True)
-
-            # if diagnostics:
-            #     diagnostics.log(compiled_list_from_cname)
-            # compiled_list_from_cname = []
 
             for rdata in responses:
                 results.append(str(rdata.address))
