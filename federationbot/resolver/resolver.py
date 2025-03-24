@@ -364,7 +364,7 @@ class ServerDiscoveryResolver:
 
             for task in pending:
                 task.cancel()
-            response = done.pop().result()
+            response: ClientResponse = done.pop().result()
 
         except WellKnownError as e:
             if diagnostics:
@@ -376,7 +376,7 @@ class ServerDiscoveryResolver:
         async with response:
             status_code = response.status
             headers = response.headers
-            context_tracing = response._traces[0]  # noqa: W0212  # pylint:disable=protected-access
+            context_tracing = response._traces[0]._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
 
             # There can be a range of status codes, but only 404 specifically is called out
             if 200 <= status_code < 600 and not status_code == 404:
@@ -429,6 +429,9 @@ class ServerDiscoveryResolver:
         if diagnostics:
             diagnostics.status.well_known = StatusEnum.OK
             diagnostics.log(f"    host and port: {host}:{port}")
+            end = context_tracing.request_end
+            start = context_tracing.request_start
+            diagnostics.log(f"    request response time: {1000 * (end - start):.3f} milliseconds")
 
         return WellKnownDiagnosticResult(
             host=host,

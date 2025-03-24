@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 from dataclasses import dataclass, field
 from enum import StrEnum
+from types import SimpleNamespace
 import ipaddress
 import itertools
 import socket
 
 from aiohttp.client_reqrep import CIMultiDictProxy
-from aiohttp.tracing import Trace
 
 from federationbot.errors import WellKnownParsingError, WellKnownSchemeError
 
@@ -37,7 +37,7 @@ class WellKnownDiagnosticResult(WellKnownLookupResult):
     port: int
     status_code: int
     content_type: str
-    context_trace: Trace
+    context_trace: SimpleNamespace
     headers: CIMultiDictProxy
 
 
