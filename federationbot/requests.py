@@ -25,10 +25,9 @@ from federationbot.responses import MatrixError, MatrixFederationResponse, Matri
 from federationbot.tracing import make_fresh_trace_config
 
 logger = logging.getLogger(__name__)
-logger.setLevel("DEBUG")
 
 
-USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
+USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.1"
 
 # Both are in seconds(float)
 SOCKET_CONNECT_TIMEOUT = 10

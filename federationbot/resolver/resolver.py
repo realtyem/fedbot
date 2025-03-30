@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
 
 
-USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
+USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.1"
 
 # Both are in seconds(float)
 WELL_KNOWN_SOCKET_CONNECT_TIMEOUT = 3

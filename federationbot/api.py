@@ -30,10 +30,10 @@ backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
 
 SOCKET_TIMEOUT_SECONDS = 5.0
-USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
+USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.1"
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
 # the /_matrix urlspace. 'bot' and 'Python' trigger it, so use a different name
-# "Maubot/Fedbot 0.0.7"
+# "Maubot/Fedbot 0.1.1"
 
 
 def backoff_logging_backoff_handler(details: Details) -> None:
