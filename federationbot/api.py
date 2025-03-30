@@ -501,14 +501,14 @@ class FederationApi:
         # )
         fedapi_logger.debug("Making server keys request to %s", server_name)
         response = await self.federation_transport.request(server_name, "/_matrix/key/v2/server")
-        # if response.http_code != 200:
-        fedapi_logger.debug(
-            "get_server_keys: %s: got %d: %s %s",
-            server_name,
-            response.http_code,
-            response.errcode,
-            response.error or response.reason,
-        )
+        if response.http_code != 200:
+            fedapi_logger.debug(
+                "get_server_keys: %s: got %d: %s %s",
+                server_name,
+                response.http_code,
+                response.errcode,
+                response.error or response.reason or response.json_response,
+            )
 
         return response
 
@@ -530,7 +530,7 @@ class FederationApi:
                 from_server_name,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -569,7 +569,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -594,7 +594,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -618,7 +618,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -648,7 +648,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -675,7 +675,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -702,7 +702,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -726,7 +726,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -759,7 +759,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -796,7 +796,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -830,7 +830,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
