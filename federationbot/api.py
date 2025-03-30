@@ -479,7 +479,6 @@ class FederationApi:
         server_name: str,
         force_rediscover: bool = False,
         diagnostics: bool = False,
-        **kwargs,
     ) -> MatrixResponse:
         response = await self.federation_transport.request(
             server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
@@ -744,7 +743,6 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         pdus_to_send: Sequence[Dict[str, Any]],
-        **kwargs,
     ) -> MatrixResponse:
         formatted_data: Dict[str, Any] = {}
         now = int(time.time() * 1000)
@@ -760,7 +758,6 @@ class FederationApi:
             method="PUT",
             content=formatted_data,
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
