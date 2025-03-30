@@ -181,7 +181,7 @@ class FederationRequests:
             if 200 <= status_code < 600 and not status_code == 404:
                 try:
                     text_content = await response.text()
-                    content = self.json_decoder.decode(text_content)
+                    response_content = self.json_decoder.decode(text_content)
                     stop_time = time.time()
 
                 except json.decoder.JSONDecodeError as e:
@@ -223,7 +223,7 @@ class FederationRequests:
 
         return MatrixFederationResponse(
             http_code=status_code,
-            json_response=content or {},
+            json_response=response_content or {},
             tracing_context=context_tracing,
             headers=headers,
             diagnostics=diagnostics,
