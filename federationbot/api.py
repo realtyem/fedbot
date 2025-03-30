@@ -483,13 +483,6 @@ class FederationApi:
         response = await self.federation_transport.request(
             server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
         )
-        # response = await self.federation_request(
-        #     server_name,
-        #     "/_matrix/federation/v1/version",
-        #     force_rediscover=force_rediscover,
-        #     diagnostics=diagnostics,
-        #     **kwargs,
-        # )
 
         if diagnostics and response.diag_info is not None:
             # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
