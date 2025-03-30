@@ -561,8 +561,7 @@ class FederationHandler:
             room_id=room_id,
             user_id=user_id,
         )
-        if response.http_code != 200:
-            assert isinstance(response, MatrixError)
+        if isinstance(response, MatrixError):
             raise response
 
         return MakeJoinResponse(**response.__dict__)
