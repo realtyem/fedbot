@@ -193,14 +193,11 @@ class TTLCache(Generic[KT, VT]):
 
     """
 
-    _cache: dict[KT, TTLCacheEntry[VT]]
-    _ttl_default_ms: int
-    _time_cb: Callable[..., float]
-
-    def __init__(self, ttl_default_ms: int = 1 * 60 * 60 * 1000):
-        self._time_cb = time.time
-        self._cache = {}
-        self._ttl_default_ms = ttl_default_ms
+    def __init__(self, ttl_default_ms: int = 1 * 60 * 60 * 1000) -> None:
+        self._lock = Lock()
+        self._time_cb: Callable[..., float] = time.time
+        self._cache: dict[KT, TTLCacheEntry[VT]] = {}
+        self._ttl_default_ms: int = ttl_default_ms
         self.get = self.__getitem__
         self.set = self.__setitem__
 
@@ -210,7 +207,8 @@ class TTLCache(Generic[KT, VT]):
             ttl = ttl + ttl_displacer_ms
         else:
             ttl = ttl + self._ttl_default_ms
-        self._cache[key] = TTLCacheEntry(cache_value=value, ttl=ttl)
+        with self._lock:
+            self._cache[key] = TTLCacheEntry(cache_value=value, ttl=ttl)
 
     @overload
     def __getitem__(self, key: KT, _return_raw: Literal[False] = False) -> VT | None: ...  # noqa: E704
@@ -219,13 +217,14 @@ class TTLCache(Generic[KT, VT]):
     def __getitem__(self, key: KT, _return_raw: Literal[True] = True) -> TTLCacheEntry[VT] | None: ...  # noqa: E704
 
     def __getitem__(self, key: KT, _return_raw: bool = False) -> TTLCacheEntry[VT] | VT | None:
-        if cache_entry := self._cache.get(key, None):
-            if cache_entry.ttl < self._time_cb():
-                self._cache.pop(key)
-            if _return_raw:
-                return cache_entry
-            return cache_entry.cache_value
-        return None
+        with self._lock:
+            if cache_entry := self._cache.get(key, None):
+                if cache_entry.ttl < self._time_cb():
+                    self._cache.pop(key)
+                if _return_raw:
+                    return cache_entry
+                return cache_entry.cache_value
+            return None
 
     def __len__(self) -> int:
         return len(self._cache)
