@@ -12,7 +12,7 @@ from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
 from yarl import URL
 
-from federationbot.errors import RequestClientError, RequestError, RequestServerError, RequestTimeout
+from federationbot.errors import RedirectRetry, RequestClientError, RequestError, RequestServerError, RequestTimeout
 from federationbot.resolver import (
     Diagnostics,
     IpAddressAndPort,
@@ -25,7 +25,7 @@ from federationbot.responses import MatrixError, MatrixFederationResponse, Matri
 from federationbot.tracing import make_fresh_trace_config
 
 logger = logging.getLogger(__name__)
-logger.setLevel("INFO")
+logger.setLevel("DEBUG")
 
 
 USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.0"
@@ -47,6 +47,11 @@ CLIENT_TIMEOUT = ClientTimeout(
     # defaults to 5, for roundups on timeouts
     # ceil_threshold=5.0,
 )
+
+
+async def raise_for_status_on_redirect(response: ClientResponse) -> None:
+    if response.status in {301}:
+        raise RedirectRetry(response.headers.get("Location"))
 
 
 class FederationRequests:
@@ -74,9 +79,10 @@ class FederationRequests:
         self.http_client = ClientSession(
             connector=connector,
             trace_configs=[make_fresh_trace_config()],
+            raise_for_status=raise_for_status_on_redirect,
         )
         self.json_decoder = json.JSONDecoder()
-        self.server_discovery = ServerDiscoveryResolver(self.http_client)
+        self.server_discovery = ServerDiscoveryResolver(self._request)
 
     async def request(
         self,
@@ -271,9 +277,22 @@ class FederationRequests:
             )
 
         try:
+            logger.debug("Trying request: %s%s", host_name, path)
+
+            # Because we have allow_redirects=False and with the ClientSession watching all responses for the
+            # 301, this may raise a RedirectRetry exception. We trap that on the outside of this method, so it
+            # can requery dns and log to diagnostics
             response = await self.http_client.request(
-                method, url_object, headers=request_headers, server_hostname=sni_host_name, timeout=CLIENT_TIMEOUT
+                method,
+                url_object,
+                headers=request_headers,
+                server_hostname=sni_host_name,
+                timeout=CLIENT_TIMEOUT,
+                allow_redirects=False,
             )
+
+        except RedirectRetry as e:
+            raise e
 
         # Split the different exceptions up based on where the information is extracted from
         except client_exceptions.ClientConnectorCertificateError as e:
@@ -335,7 +354,7 @@ class FederationRequests:
             client_exceptions.ClientPayloadError,  # e
             Exception,  # e
         ) as e:
-            logger.error("Had a problem while placing REQUEST to %s", host_name, exc_info=True)
+            logger.error("Had a problem while placing REQUEST to %s%s", host_name, path, exc_info=True)
             raise RequestError(reason=f"{e.__class__.__name__}, {str(e)}") from e
 
         return response

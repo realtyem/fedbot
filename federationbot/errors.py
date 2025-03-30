@@ -73,6 +73,17 @@ class ServerUnreachable(FedBotException):
 
 
 # Errors while making requests
+class RedirectRetry(Exception):
+    """
+    Not really an error, but used to raise a signal to try the redirect again
+    """
+
+    location: str
+
+    def __init__(self, location) -> None:
+        self.location = location
+
+
 class RequestError(Exception):
     """
     General Error during a request

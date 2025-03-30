@@ -1,3 +1,5 @@
+from typing import Any
+from collections.abc import Callable, Coroutine
 from ipaddress import IPv4Address
 from json import JSONDecoder
 import asyncio
@@ -6,18 +8,11 @@ import json
 import logging
 import time
 
-from aiohttp import ClientResponse, ClientSession, ClientTimeout, SocketTimeoutError, client_exceptions
+from aiohttp import ClientResponse, client_exceptions
 from yarl import URL
 
 from federationbot.cache import TTLCache
-from federationbot.errors import (
-    WellKnownClientError,
-    WellKnownError,
-    WellKnownParsingError,
-    WellKnownSchemeError,
-    WellKnownServerError,
-    WellKnownServerTimeout,
-)
+from federationbot.errors import RedirectRetry, RequestError, WellKnownParsingError, WellKnownSchemeError
 from federationbot.resolver import (
     Diagnostics,
     IpAddressAndPort,
@@ -52,6 +47,18 @@ WELL_KNOWN_LOOKUP_GOOD_TTL_MS = 1000 * 60 * 60 * 1
 WELL_KNOWN_LOOKUP_BAD_TTL_MS = 1000 * 60 * 5
 
 
+def filter_to_only_ipv4_addresses(list_of_ip_addresses: list[str]) -> list[IpAddressAndPort]:
+    list_of_only_ipv4_addresses = []
+    for ip_address in list_of_ip_addresses:
+        try:
+            _ip_address = ipaddress.ip_address(ip_address)
+            if isinstance(_ip_address, IPv4Address):
+                list_of_only_ipv4_addresses.append(IpAddressAndPort(ip_address, 443))
+        except ValueError:
+            pass
+    return list_of_only_ipv4_addresses
+
+
 class ServerDiscoveryResolver:
     """
     Combine server discovery techniques of both Well Known and SRV resolution
@@ -60,11 +67,10 @@ class ServerDiscoveryResolver:
     _had_well_known_cache: TTLCache[str, str]
     _well_known_cache: TTLCache[str, WellKnownLookupResult]
     server_discovery_cache: TTLCache[str, ServerDiscoveryResult]
-    http_client: ClientSession
     json_decoder: JSONDecoder
     exp_dns_resolver: CachingDNSResolver
 
-    def __init__(self, client_session: ClientSession) -> None:
+    def __init__(self, request_cb: Callable[..., Coroutine[Any, Any, ClientResponse]]) -> None:
         # resolver = ThreadedResolver()
         # resolver = CachingDNSResolver()
         # nameserver = Do53Nameserver("192.168.2.1")
@@ -82,7 +88,7 @@ class ServerDiscoveryResolver:
         #     # interleave=3,
         #     force_close=True,
         # )
-        self.http_client = client_session
+        self._request = request_cb
         # self.http_client = ClientSession(
         #     connector=connector,
         #     trace_configs=[make_fresh_trace_config()],
@@ -343,27 +349,60 @@ class ServerDiscoveryResolver:
         self, server_name: str, list_of_ip_addresses: list[str], diagnostics: Diagnostics | None = None
     ) -> WellKnownLookupResult:
         # Until IPv6 works on my server, curate the list of ip addresses to only have IPv4
-        list_of_only_ipv4_addresses = []
-        for ip_address in list_of_ip_addresses:
-            try:
-                _ip_address = ipaddress.ip_address(ip_address)
-                if isinstance(_ip_address, IPv4Address):
-                    list_of_only_ipv4_addresses.append(ip_address)
-            except ValueError:
-                pass
+        list_of_only_ipv4_addresses = filter_to_only_ipv4_addresses(list_of_ip_addresses)
+
         try:
-            list_of_coros: list[asyncio.Task] = []
-            for ip_address in list_of_only_ipv4_addresses:
-                coro = self._fetch_well_known(server_name, ip_address)
-                list_of_coros.append(asyncio.create_task(coro))
+            last_server_name_tried = server_name
+            last_host_header = server_name
+            last_sni_host_name = server_name
+            while True:
+                try:
+                    list_of_coros: list[asyncio.Task] = []
+                    for ip_address in list_of_only_ipv4_addresses:
 
-            done, pending = await asyncio.wait(list_of_coros, return_when=asyncio.FIRST_COMPLETED)
+                        coro = self._request(
+                            ip_address,
+                            last_server_name_tried,
+                            "/.well-known/matrix/server",
+                            host_header=last_host_header,
+                            sni_host_name=last_sni_host_name,
+                        )
+                        list_of_coros.append(asyncio.create_task(coro))
 
-            for task in pending:
-                task.cancel()
-            response: ClientResponse = done.pop().result()
+                    done, pending = await asyncio.wait(list_of_coros, return_when=asyncio.FIRST_COMPLETED)
 
-        except WellKnownError as e:
+                    for task in pending:
+                        task.cancel()
+                    response: ClientResponse = done.pop().result()
+
+                except RedirectRetry as e:
+                    # The request returned a 301 status code, we are allowed to follow those. Parse out the new server
+                    # name and request it's DNS then request again
+                    logger.info("Redirect detected for %s: pointing to %s", server_name, e.location)
+                    new_location_url = URL(e.location)
+                    new_host = new_location_url.host
+                    # The possibility exists that the host could be None here, but it's highly unlikely(unless the other
+                    # side messed up their reverse proxy that gave the 301). Mypy doesn't know it's unlikely, so explain
+                    assert new_host is not None
+                    diagnostics.log(f"  {last_server_name_tried} wants to redirect to {new_host}")
+                    last_sni_host_name = new_host
+                    last_host_header = new_host
+                    last_server_name_tried = new_host
+
+                    new_dns_responses = await self.exp_dns_resolver.resolve_reg_records(
+                        new_host, diagnostics=diagnostics
+                    )
+
+                    if not new_dns_responses.get_hosts():
+                        return WellKnownLookupFailure(status_code=None, reason=new_dns_responses.get_errors()[0])
+
+                    list_of_only_ipv4_addresses = filter_to_only_ipv4_addresses(new_dns_responses.get_hosts())
+
+                else:
+                    logger.debug("request to %s%s completed", server_name, "/.well-known/matrix/server")
+                    break
+
+        except RequestError as e:
             if diagnostics:
                 diagnostics.status.well_known = StatusEnum.ERROR
                 diagnostics.log(f"    Error: {e.reason}")
@@ -438,99 +477,3 @@ class ServerDiscoveryResolver:
             context_trace=context_tracing,
             headers=headers,
         )
-
-    async def _fetch_well_known(self, server_name: str, ip_address: str) -> ClientResponse:
-        url_object = URL.build(
-            scheme="https",
-            host=ip_address,
-            port=443,
-            path="/.well-known/matrix/server",
-            encoded=False,
-        )
-
-        client_timeouts = ClientTimeout(
-            # Don't limit the total connection time, as incremental reads are handled distinctly by sock_read
-            total=None,
-            # connect should be None, as sock_connect is behavior intended. This is for waiting for a connection from
-            # the pool as well as establishing the connection itself.
-            connect=None,
-            # This is the most useful for detecting bad servers
-            sock_connect=WELL_KNOWN_SOCKET_CONNECT_TIMEOUT,
-            # This is the one that may have the longest time, as we wait for a server to send a response
-            sock_read=WELL_KNOWN_SOCKET_READ_TIMEOUT,
-            # defaults to 5, for roundups on timeouts
-            # ceil_threshold=5.0,
-        )
-
-        request_headers = {"User-Agent": USER_AGENT_STRING, "Host": server_name}
-        try:
-            response = await self.http_client.request(
-                "GET", url_object, headers=request_headers, server_hostname=server_name, timeout=client_timeouts
-            )
-
-        # Split the different exceptions up based on where the information is extracted from
-        except client_exceptions.ClientConnectorCertificateError as e:
-            # This is one of the errors I found while probing for SNI TLS
-            raise WellKnownServerError(  # pylint: disable=bad-exception-cause
-                reason=f"{e.__class__.__name__}, {str(e.certificate_error)}",
-            ) from e
-
-        except (
-            client_exceptions.ClientConnectorSSLError,
-            client_exceptions.ClientSSLError,
-        ) as e:
-            # This is one of the errors I found while probing for SNI TLS
-            raise WellKnownServerError(reason=f"{e.__class__.__name__}, {e.strerror}") from e
-
-        except (
-            # e is an OSError, may have e.strerror, possibly e.os_error.strerror
-            client_exceptions.ClientProxyConnectionError,
-            # e is an OSError, may have e.strerror, possibly e.os_error.strerror
-            client_exceptions.ClientConnectorError,
-            # e is an OSError, may have e.strerror
-            client_exceptions.ClientOSError,
-        ) as e:
-            if hasattr(e, "os_error"):
-                # This gets type ignored, as it is defined but for some reason mypy can't figure that out
-                raise WellKnownClientError(reason=f"{e.__class__.__name__}, {e.os_error.strerror}") from e  # type: ignore[attr-defined]
-
-            raise WellKnownClientError(reason=f"{e.__class__.__name__}, {e.strerror}") from e
-
-        except (
-            # For exceptions during http proxy handling(non-200 responses)
-            client_exceptions.ClientHttpProxyError,  # e.message
-            # For exceptions after getting a response, maybe unexpected termination?
-            client_exceptions.ClientResponseError,  # e.message, base class, possibly e.status too
-            # For exceptions where the server disconnected early
-            client_exceptions.ServerDisconnectedError,  # e.message
-        ) as e:
-            raise WellKnownError(reason=f"{e.__class__.__name__}, {str(e.message)}") from e
-
-        except (
-            client_exceptions.ConnectionTimeoutError,
-            SocketTimeoutError,
-            client_exceptions.ServerTimeoutError,
-        ) as e:
-            # SocketTimeoutError is hit when aiohttp cancels a request that takes to long
-            # ServerTimeoutError is asyncio.TimeoutError under it's hood
-            raise WellKnownServerTimeout(
-                reason=f"{e.__class__.__name__} after {WELL_KNOWN_SOCKET_CONNECT_TIMEOUT} seconds"
-            ) from e
-
-        except (
-            #     socket.gaierror,
-            #     ConnectionRefusedError,
-            #     # Broader OS error
-            #     OSError,
-            #     client_exceptions.ServerFingerprintMismatch,  # e.expected, e.got
-            #     client_exceptions.InvalidURL,  # e.url
-            client_exceptions.ClientPayloadError,  # e
-            #     client_exceptions.ServerConnectionError,  # e
-            #     client_exceptions.ClientConnectionError,  # e
-            #     client_exceptions.ClientError,  # e
-            Exception,  # e
-        ) as e:
-            logger.error("Had a problem while placing well known REQUEST to %s", server_name, exc_info=True)
-            raise WellKnownError(reason=f"{e.__class__.__name__}, {str(e)}") from e
-
-        return response
