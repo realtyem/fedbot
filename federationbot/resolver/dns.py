@@ -3,7 +3,7 @@ import logging
 from dns.asyncresolver import Resolver
 from dns.message import ANSWER, Message
 from dns.name import from_text
-from dns.nameserver import Do53Nameserver
+from dns.nameserver import Do53Nameserver, Nameserver
 from dns.rdataclass import IN
 from dns.rdatatype import AAAA, CNAME, SRV, A, RdataType
 from dns.resolver import NXDOMAIN, LRUCache, NoAnswer
@@ -138,7 +138,8 @@ class CachingDNSResolver:
         if srv_answers is None:
             query = dns.message.make_query(srv_name, SRV)
             nameserver = self.dns_resolver.nameservers[0]
-
+            # Mypy thinks this could be a string, make sure it know otherwise
+            assert isinstance(nameserver, Nameserver)
             # This returns a tuple(Message, used_tcp_bool), just get the first part
             srv_answers = dns.query.udp_with_fallback(query, nameserver.answer_nameserver())[0]
 
