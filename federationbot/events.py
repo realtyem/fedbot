@@ -1150,12 +1150,14 @@ class JoinRulesStateEvent(GenericStateEvent):
     def __init__(self, event_id: EventID, raw_data: Dict[str, Any]) -> None:
         super().__init__(event_id, raw_data)
         self.join_rule = self.content.pop("join_rule", "Not Found")
-        # Allow should only be populated if join_rule is restricted. And it's a list
-        allow_list = self.content.pop("allow", [])
         self.allow = AllowConditions()
+        # Allow should only be populated if join_rule is restricted. And it's a list
+        if self.join_rule not in ("restricted", "knock_restricted"):
+            return
+        allow_list = self.content.pop("allow", [])
         for allow_entry in allow_list:
-            room_id = allow_entry.pop("room_id", None)
-            condition_type = allow_entry.pop("type", None)
+            room_id = allow_entry.pop("room_id")
+            condition_type = allow_entry.pop("type")
             allow = AllowCondition(room_id=room_id, condition_type=condition_type)
             self.allow.list_of_conditions.append(allow)
 
@@ -1171,7 +1173,7 @@ class JoinRulesStateEvent(GenericStateEvent):
         return summary
 
     def to_extras_summary(self) -> str:
-        return f"join_rule: {self.join_rule} "
+        return f"join_rule: {self.raw_data.get("content")} "
 
     def to_pretty_summary(
         self,
