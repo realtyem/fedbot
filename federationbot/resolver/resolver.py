@@ -311,7 +311,7 @@ class ServerDiscoveryResolver:
         )
 
     async def get_well_known(
-        self, server_name: str, list_of_ip_addresses: list[str], diagnostics: Diagnostics | None = None
+        self, server_name: str, list_of_ip_addresses: list[str], diagnostics: Diagnostics
     ) -> WellKnownLookupResult:
         """
         Retrieve a cached entry if it was found, or begin the actual lookup
@@ -334,7 +334,7 @@ class ServerDiscoveryResolver:
 
         if diagnostics:
             diagnostics.log("  Making request to well-known")
-        result = await self.make_well_known_request(server_name, list_of_ip_addresses, diagnostics=diagnostics)
+        result = await self.make_well_known_request(server_name, list_of_ip_addresses, diagnostics)
         logger.debug("get_well_known: %s finished request\n%r", server_name, result)
 
         if isinstance(result, WellKnownDiagnosticResult):
@@ -346,7 +346,7 @@ class ServerDiscoveryResolver:
         return result
 
     async def make_well_known_request(
-        self, server_name: str, list_of_ip_addresses: list[str], diagnostics: Diagnostics | None = None
+        self, server_name: str, list_of_ip_addresses: list[str], diagnostics: Diagnostics
     ) -> WellKnownLookupResult:
         # Until IPv6 works on my server, curate the list of ip addresses to only have IPv4
         list_of_only_ipv4_addresses = filter_to_only_ipv4_addresses(list_of_ip_addresses)

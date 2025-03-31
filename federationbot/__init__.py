@@ -4153,7 +4153,7 @@ class FederationBot(RoomWalkCommand):
                 try:
                     server_to_server_data[worker_server_name] = (
                         await self.federation_handler.api.federation_transport.server_discovery.get_well_known(
-                            worker_server_name, []
+                            worker_server_name, [], Diagnostics()
                         )
                     )
                     set_of_server_names.discard(worker_server_name)
