@@ -26,6 +26,39 @@ from federationbot.tracing import make_fresh_trace_config
 
 logger = logging.getLogger(__name__)
 
+# Save this backoff stuff just in case
+# backoff_logger = logging.getLogger("request_backoff")
+#
+#
+# def backoff_logging_backoff_handler(details: Details) -> None:
+#     wait = details.get("wait", 0.0)
+#     tries = details.get("tries", 0)
+#     host = details.get("args", (None, "arg not found"))[1]
+#     backoff_logger.debug(
+#         "Backing off %.2f seconds after %d tries on host %s",
+#         wait,
+#         tries,
+#         host,
+#     )
+#
+#
+# def backoff_logging_giveup_handler(details: Details) -> None:
+#     elapsed = details.get("elapsed", 0.0)
+#     tries = details.get("tries", 0)
+#     host = details.get("args", (None, "arg not found"))[1]
+#     backoff_logger.debug(
+#         "Giving up after %d tries and %.2f seconds on host %s",
+#         tries,
+#         elapsed,
+#         host,
+#     )
+#
+#
+# def backoff_update_retries_handler(details: Details) -> None:
+#     server_result: Optional[ServerResult] = details.get("kwargs", {}).get("server_result", None)
+#     if server_result and server_result.diag_info:
+#         server_result.diag_info.retries += 1
+
 
 USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.1"
 
@@ -241,6 +274,16 @@ class FederationRequests:
             time_taken=stop_time - start_time,
         )
 
+    # @backoff.on_exception(
+    #     backoff.expo,
+    #     RequestTimeout,
+    #     max_tries=3,
+    #     logger=None,
+    #     on_backoff=[backoff_logging_backoff_handler],
+    #     on_giveup=[backoff_logging_giveup_handler],
+    #     max_value=4.0,
+    #     base=1.5,
+    # )
     async def _request(
         self,
         ip_address_and_port: IpAddressAndPort,

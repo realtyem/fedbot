@@ -14,6 +14,59 @@ from federationbot.resolver import Diagnostics, DnsResult, ServerDiscoveryDnsRes
 
 logger = logging.getLogger("dns")
 logger.setLevel("INFO")
+# backoff_logger = logging.getLogger("dns_backoff")
+
+
+# def backoff_srv_backoff_logging_handler(details: Details) -> None:
+#     wait = details.get("wait", 0.0)
+#     tries = details.get("tries", 0)
+#     # args is a tuple(self, server_name, diag_info), we want the second slot
+#     host = details.get("args", (None, "arg not found"))[1]
+#     backoff_logger.debug(
+#         "DNS SRV query backing off %.2f seconds after %d tries on host %s",
+#         wait,
+#         tries,
+#         host,
+#     )
+
+
+# def backoff_srv_giveup_logging_handler(details: Details) -> None:
+#     elapsed = details.get("elapsed", 0.0)
+#     tries = details.get("tries", 0)
+#     # args is a tuple(self, server_name, diag_info), we want the second slot
+#     host = details.get("args", (None, "arg not found"))[1]
+#     backoff_logger.info(
+#         "DNS SRV query giving up after %d tries and %.2f seconds on host %s",
+#         tries,
+#         elapsed,
+#         host,
+#     )
+
+
+# def backoff_dns_backoff_logging_handler(details: Details) -> None:
+#     wait = details.get("wait", 0.0)
+#     tries = details.get("tries", 0)
+#     # args is a tuple(self, server_name, diag_info), we want the second slot
+#     host = details.get("args", (None, "arg not found"))[1]
+#     backoff_logger.debug(
+#         "DNS query backing off %.2f seconds after %d tries on host %s",
+#         wait,
+#         tries,
+#         host,
+#     )
+
+
+# def backoff_dns_giveup_logging_handler(details: Details) -> None:
+#     elapsed = details.get("elapsed", 0.0)
+#     tries = details.get("tries", 0)
+#     # args is a tuple(self, server_name, diag_info), we want the second slot
+#     host = details.get("args", (None, "arg not found"))[1]
+#     backoff_logger.info(
+#         "DNS query giving up after %d tries and %.2f seconds on host %s",
+#         tries,
+#         elapsed,
+#         host,
+#     )
 
 
 DNS_SRV_GOOD_RESULT_CACHE_TTL_MS = 1000 * 60 * 60
@@ -33,6 +86,16 @@ class CachingDNSResolver:
         # The lifetime we can touch, make it longer to give some more time for slow DNS servers
         self.dns_resolver.lifetime = 10.0
 
+    # @backoff.on_exception(
+    #     backoff.expo,
+    #     (dns.exception.Timeout, dns.resolver.NoNameservers),
+    #     max_tries=1,
+    #     logger=None,
+    #     on_backoff=[backoff_dns_backoff_logging_handler],
+    #     on_giveup=[backoff_dns_giveup_logging_handler],
+    #     max_value=2.0,
+    #     base=1.0,
+    # )
     async def query(
         self, server_name: str, rdtype: RdataType = A, check_cname: bool = True, diagnostics: Diagnostics | None = None
     ) -> DnsResult:
@@ -120,6 +183,16 @@ class CachingDNSResolver:
 
         return server_discovery_dns_result
 
+    # @backoff.on_exception(
+    #     backoff.expo,
+    #     (dns.exception.Timeout, dns.resolver.NoNameservers),
+    #     max_tries=1,
+    #     logger=None,
+    #     on_backoff=[backoff_srv_backoff_logging_handler],
+    #     on_giveup=[backoff_srv_giveup_logging_handler],
+    #     max_value=2.0,
+    #     base=1.0,
+    # )
     async def _resolve_srv_records(
         self, server_name: str, diagnostics: Diagnostics | None = None
     ) -> list[tuple[str, int]]:
