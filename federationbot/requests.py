@@ -158,7 +158,12 @@ class FederationRequests:
                 )
                 list_of_coros.append(asyncio.create_task(coro))
 
-            done, pending = await asyncio.wait(list_of_coros, return_when=asyncio.FIRST_COMPLETED)
+            try:
+                done, pending = await asyncio.wait(list_of_coros, return_when=asyncio.FIRST_COMPLETED)
+            except ValueError as e:
+                # TODO: can remove this after IPv6 is enabled on my server
+                logger.exception("%s: %r", server_name, e)
+                raise RequestError("This server can not make requests to IPv6") from e
 
             for task in pending:
                 task.cancel()

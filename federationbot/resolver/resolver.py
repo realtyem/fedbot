@@ -369,7 +369,11 @@ class ServerDiscoveryResolver:
                         )
                         list_of_coros.append(asyncio.create_task(coro))
 
-                    done, pending = await asyncio.wait(list_of_coros, return_when=asyncio.FIRST_COMPLETED)
+                    try:
+                        done, pending = await asyncio.wait(list_of_coros, return_when=asyncio.FIRST_COMPLETED)
+                    except ValueError as e:
+                        logger.exception("%s, %s: %r", server_name, last_server_name_tried, e)
+                        raise RequestError("No addresses found?") from e
 
                     for task in pending:
                         task.cancel()
