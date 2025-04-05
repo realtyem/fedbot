@@ -172,10 +172,21 @@ class CachingDNSResolver:
         if diagnostics:
             diagnostics.log(f"  Starting DNS query for: {server_name}")
 
-        a_results = await self.query(server_name, A, check_cname=check_cname, diagnostics=diagnostics)
-        logger.debug("resolve_reg_records: %s, a_results:\n%r", server_name, a_results)
-        a4_results = await self.query(server_name, AAAA, check_cname=check_cname, diagnostics=diagnostics)
-        logger.debug("resolve_reg_records: %s, a4_results:\n%r", server_name, a4_results)
+        a_results = None
+        a4_results = None
+        try:
+            a_results = await self.query(server_name, A, check_cname=check_cname, diagnostics=diagnostics)
+        except Exception as e:
+            logger.debug("resolve_reg_records: %s, A FAILED: %r", server_name, e)
+        else:
+            logger.debug("resolve_reg_records: %s, a_results:\n%r", server_name, a_results)
+
+        try:
+            a4_results = await self.query(server_name, AAAA, check_cname=check_cname, diagnostics=diagnostics)
+        except Exception as e:
+            logger.debug("resolve_reg_records: %s, AAAA FAILED: %r", server_name, e)
+        else:
+            logger.debug("resolve_reg_records: %s, a4_results:\n%r", server_name, a4_results)
 
         server_discovery_dns_result = ServerDiscoveryDnsResult(a_result=a_results, a4_result=a4_results)
         logger.debug(
