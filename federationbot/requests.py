@@ -82,7 +82,7 @@ CLIENT_TIMEOUT = ClientTimeout(
 
 
 async def raise_for_status_on_redirect(response: ClientResponse) -> None:
-    if response.status in {301}:
+    if response.status in (301,):
         raise RedirectRetry(response.headers.get("Location"))
 
 
