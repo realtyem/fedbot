@@ -418,20 +418,24 @@ class ServerDiscoveryResolver:
             return error_return
 
         async with response:
+            content: dict[str, Any] = {}
             status_code = response.status
             headers = response.headers
             diagnostics.log(f"  Response status: {status_code}, {response.reason}")
             context_tracing = response._traces[0]._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
 
-            # There can be a range of status codes, but only 404 specifically is called out
-            if 200 <= status_code < 600 and not status_code == 404:
+            # There can be a range of status codes, but only try and decode 200
+            if status_code == 200:
                 try:
-                    text_content = await response.text()
-                    content = self.json_decoder.decode(text_content)
-                except json.decoder.JSONDecodeError as e:
-                    if diagnostics:
-                        diagnostics.status.well_known = StatusEnum.ERROR
-                        diagnostics.log(f"    Code: {status_code}, Error: {e.msg}")
+                    content = await response.json()
+                except client_exceptions.ContentTypeError:
+                    diagnostics.log("    Response had Content-Type: " f"{headers.get('Content-Type', 'None Found')}")
+                    diagnostics.log("    Expected Content-Type of 'application/json', will try work-around")
+
+                except json.decoder.JSONDecodeError:
+                    logger.warning("JSONDecodeError from request on %s to /.well-known/matrix/server", server_name)
+                    diagnostics.log("    JSONDecodeError: Content-Type was correct, but contained unusable data")
+                    diagnostics.status.well_known = StatusEnum.ERROR
                     return WellKnownLookupFailure(
                         status_code=status_code, reason="JSONDecodeError: No usable data in response"
                     )
@@ -441,10 +445,19 @@ class ServerDiscoveryResolver:
                     return WellKnownLookupFailure(
                         status_code=status_code, reason=f"{e.__class__.__name__}: Timed out while reading response"
                     )
-            else:
-                if diagnostics:
-                    diagnostics.log(f"    Code: {status_code}")
 
+                if not content:
+                    try:
+                        text_result = await response.text()
+                        content = self.json_decoder.decode(text_result)
+                    except json.decoder.JSONDecodeError as e:
+                        logger.info(f"text_result: {len(text_result)} bytes")
+                        diagnostics.log(
+                            f"    JSONDecodeError, work-around failed. Content length was: {len(text_result) if text_result else 0}"
+                        )
+                        return WellKnownSchemeFailure(status_code=status_code, reason=e.msg)
+
+            else:
                 return NoWellKnown(status_code=status_code)
 
         try:
