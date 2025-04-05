@@ -2659,7 +2659,7 @@ class FederationBot(RoomWalkCommand):
         header_messages.extend([f"{pad('', header_message_line_size, pad_with='-')}"])
 
         # Alphabetical looks nicer
-        sorted_list_of_servers = sorted(list_of_servers_to_check)
+        sorted_list_of_servers = sorted(server_to_version_data.keys())
 
         # Collect all the output lines for chunking afterward
         list_of_result_data = []
