@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from types import SimpleNamespace
 import ipaddress
-import itertools
 import socket
 
 from aiohttp.client_reqrep import CIMultiDictProxy
@@ -253,30 +252,36 @@ class ServerDiscoveryDnsBaseResult:
     """
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class ServerDiscoveryDnsResult(ServerDiscoveryDnsBaseResult):
     """
     Successful
     """
 
-    a_result: DnsResult
-    a4_result: DnsResult
+    a_result: DnsResult | None
+    a4_result: DnsResult | None
 
     def __bool__(self) -> bool:
-        if self.a_result.error or self.a4_result.error:
+        if (self.a_result and self.a_result.error) or (self.a4_result and self.a4_result.error):
             return False
         return True
 
     def get_errors(self) -> list[str]:
         errors = []
-        if self.a_result.error:
+        if self.a_result and self.a_result.error:
             errors.append(self.a_result.error)
-        if self.a4_result.error:
+        if self.a4_result and self.a4_result.error:
             errors.append(self.a4_result.error)
         return errors
 
     def get_hosts(self) -> list[str]:
-        return list(itertools.chain(self.a_result.hosts, self.a4_result.hosts))
+        return_list = []
+        if self.a_result:
+            return_list.extend(self.a_result.hosts)
+        if self.a4_result:
+            return_list.extend(self.a4_result.hosts)
+
+        return return_list
 
 
 @dataclass(slots=True)
