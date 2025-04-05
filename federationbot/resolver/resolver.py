@@ -355,6 +355,7 @@ class ServerDiscoveryResolver:
             last_server_name_tried = server_name
             last_host_header = server_name
             last_sni_host_name = server_name
+            already_tried_redirects = set()
             while True:
                 try:
                     list_of_coros: list[asyncio.Task] = []
@@ -384,7 +385,10 @@ class ServerDiscoveryResolver:
                     # name and request it's DNS then request again
                     logger.info("Redirect detected for %s: pointing to %s", server_name, e.location)
                     new_location_url = URL(e.location)
-                    new_host = new_location_url.host
+                    # Found someone who somehow is redirecting to themselves. No idea how or why, but that's a Not Found
+                    new_host = new_location_url.host if new_location_url.host is not None else last_server_name_tried
+                    if new_host in already_tried_redirects:
+                        raise RequestError("Potential redirect loop, breaking")
                     # The possibility exists that the host could be None here, but it's highly unlikely(unless the other
                     # side messed up their reverse proxy that gave the 301). Mypy doesn't know it's unlikely, so explain
                     assert new_host is not None
@@ -396,6 +400,7 @@ class ServerDiscoveryResolver:
                     new_dns_responses = await self.exp_dns_resolver.resolve_reg_records(
                         new_host, diagnostics=diagnostics
                     )
+                    already_tried_redirects.add(new_host)
 
                     if not new_dns_responses.get_hosts():
                         return WellKnownLookupFailure(status_code=None, reason=new_dns_responses.get_errors()[0])
