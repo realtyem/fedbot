@@ -379,14 +379,16 @@ class FederationRequests:
         ) as e:
             raise RequestError(reason=f"{e.__class__.__name__}, {str(e.message)}") from e
 
+        except (client_exceptions.ConnectionTimeoutError,) as e:
+            raise RequestTimeout(reason=f"{e.__class__.__name__} after {SOCKET_CONNECT_TIMEOUT} seconds") from e
+
         except (
-            client_exceptions.ConnectionTimeoutError,
             SocketTimeoutError,
             client_exceptions.ServerTimeoutError,
         ) as e:
             # SocketTimeoutError is hit when aiohttp cancels a request that takes to long
             # ServerTimeoutError is asyncio.TimeoutError under it's hood
-            raise RequestTimeout(reason=f"{e.__class__.__name__} after {SOCKET_CONNECT_TIMEOUT} seconds") from e
+            raise RequestTimeout(reason=f"{e} after {SOCKET_READ_TIMEOUT} seconds") from e
 
         #     socket.gaierror,
         #     ConnectionRefusedError,
