@@ -146,11 +146,12 @@ class CachingDNSResolver:
                     diagnostics.log(f"    Found Resolved IP address: {str(rdata.address)}")
 
         except (NoAnswer, NXDOMAIN) as e:
+            error_message = str(e)
             if diagnostics:
                 # If one of the two queries done was OK, just use that. Stupid ipv6
                 if diagnostics.status.dns != StatusEnum.OK:
                     diagnostics.status.dns = StatusEnum.ERROR
-                    diagnostics.log(f"  {e.__name__}: {e}")
+                    diagnostics.log(f"  {e}")
 
         except Exception as e:
             logger.error("%s: %r", server_name, e, exc_info=True)
