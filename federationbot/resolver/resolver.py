@@ -412,15 +412,15 @@ class ServerDiscoveryResolver:
                     break
 
         except RequestError as e:
-            if diagnostics:
-                diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.log(f"    Error: {e.reason}")
+            diagnostics.status.well_known = StatusEnum.ERROR
+            diagnostics.log(f"    Error: {e.reason}")
             error_return = WellKnownLookupFailure(status_code=None, reason=e.reason)
             return error_return
 
         async with response:
             status_code = response.status
             headers = response.headers
+            diagnostics.log(f"  Response status: {status_code}, {response.reason}")
             context_tracing = response._traces[0]._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
 
             # There can be a range of status codes, but only 404 specifically is called out
@@ -436,9 +436,8 @@ class ServerDiscoveryResolver:
                         status_code=status_code, reason="JSONDecodeError: No usable data in response"
                     )
                 except client_exceptions.ServerTimeoutError as e:
-                    if diagnostics:
-                        diagnostics.status.well_known = StatusEnum.ERROR
-                        diagnostics.log(f"    Code: {status_code}, Error: {e.strerror}")
+                    diagnostics.status.well_known = StatusEnum.ERROR
+                    diagnostics.log(f"    Error: {e.strerror} while reading response")
                     return WellKnownLookupFailure(
                         status_code=status_code, reason=f"{e.__class__.__name__}: Timed out while reading response"
                     )
@@ -451,32 +450,28 @@ class ServerDiscoveryResolver:
         try:
             host, port = parse_and_check_well_known_response(content)
         except WellKnownSchemeError as e:
-            if diagnostics:
-                diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.log(f"    Code: {status_code}, Error: {e.reason}")
+            diagnostics.status.well_known = StatusEnum.ERROR
+            diagnostics.log(f"    Code: {status_code}, Error: {e.reason}")
 
             return WellKnownSchemeFailure(status_code=status_code, reason=e.reason)
         except WellKnownParsingError as e:
-            if diagnostics:
-                diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.log(f"    Code: {status_code}, Error: {e.reason}")
+            diagnostics.status.well_known = StatusEnum.ERROR
+            diagnostics.log(f"    Code: {status_code}, Error: {e.reason}")
 
             return WellKnownParseFailure(status_code=status_code, reason=e.reason)
 
         if not host:
-            if diagnostics:
-                diagnostics.status.well_known = StatusEnum.ERROR
-                diagnostics.log(f"    Code: {status_code}, Error: No host found")
+            diagnostics.status.well_known = StatusEnum.ERROR
+            diagnostics.log(f"    Code: {status_code}, Error: No host found")
 
             return WellKnownLookupFailure(status_code=status_code, reason="No host found")
         # TODO: Remember to set the SNI header
         # TODO: parse the headers for the cache control stuff, sort out ttl options
-        if diagnostics:
-            diagnostics.status.well_known = StatusEnum.OK
-            diagnostics.log(f"    host and port: {host}:{port}")
-            end = context_tracing.request_end
-            start = context_tracing.request_start
-            diagnostics.log(f"    request response time: {1000 * (end - start):.3f} milliseconds")
+        diagnostics.status.well_known = StatusEnum.OK
+        diagnostics.log(f"    host and port: {host}:{port}")
+        end = context_tracing.request_end
+        start = context_tracing.request_start
+        diagnostics.log(f"    request response time: {1000 * (end - start):.3f} milliseconds")
 
         return WellKnownDiagnosticResult(
             host=host,
