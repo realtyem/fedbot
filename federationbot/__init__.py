@@ -303,15 +303,8 @@ class FederationBot(RoomWalkCommand):
             )
             return
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_fix or get_domain_from_id(command_event.sender)
@@ -1120,15 +1113,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_fix or origin_server
@@ -1335,15 +1321,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -1532,15 +1511,8 @@ class FederationBot(RoomWalkCommand):
         """
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
@@ -1589,15 +1561,8 @@ class FederationBot(RoomWalkCommand):
         """
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         if not event_id:
@@ -2189,15 +2154,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -2256,15 +2214,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         if server_to_request_from:
@@ -2420,15 +2371,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -3438,15 +3382,8 @@ class FederationBot(RoomWalkCommand):
             await command_event.reply(f"I got a limit number that could not be converted into an integer: {limit}")
             return
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -3566,15 +3503,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -3700,15 +3630,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         _, destination_server = user_mxid.split(":", maxsplit=1)
@@ -3761,15 +3684,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)

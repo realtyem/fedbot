@@ -15,6 +15,7 @@ from maubot.plugin_base import Plugin
 from mautrix.types import EventType
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
+from federationbot import get_domain_from_id
 from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
@@ -208,3 +209,33 @@ class FederationBotCommandBase(Plugin):
             room_id = str(command_event.room_id)
 
         return room_id, list_of_servers
+
+    async def get_origin_server_and_assert_key_exists(
+        self, command_event: MessageEvent, origin_server: str | None = None
+    ) -> str | None:
+        """
+        Define and check that the origin server to sign any requests is one that we have keys for. When not found,
+        send a message into the relevant room that originated the command. We can not force an exit from here, so
+        make sure to guard for this being None from the calling function/command.
+
+        Args:
+            command_event: The original event that triggered the bot. Used to send the error message into the room
+            origin_server: Optionally an origin server to use. If None, then use the bot's own server
+
+        Returns: None if there is no key to use for signing requests, otherwise the server name that a key exists for
+
+        """
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        if not origin_server:
+            _origin_server = get_domain_from_id(self.client.mxid)
+        else:
+            _origin_server = origin_server
+        if _origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first.",
+            )
+            return None
+        return _origin_server
