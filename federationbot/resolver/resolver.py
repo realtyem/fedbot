@@ -104,6 +104,7 @@ class ServerDiscoveryResolver:
     async def discover_server(self, server_name: str, run_diagnostics: bool = False) -> ServerDiscoveryBaseResult:
         logger.debug("Discovering server: %s", server_name)
         cached_server_result = self.server_discovery_cache.get(server_name)
+        # We borrow from the intention that if run_diagnostics is True then force rediscovery
         if cached_server_result and not run_diagnostics:
             logger.debug("Using cached response for: %s\n%r", server_name, cached_server_result)
             return cached_server_result
@@ -318,9 +319,10 @@ class ServerDiscoveryResolver:
         """
         # had_valid_well_known = self._had_well_known_cache.get(server_name)
         logger.debug("get_well_known: %s placing request", server_name)
-        if cached_result := self._well_known_cache.get(server_name):
-            logger.debug("get_well_known: %s found cached request", server_name)
-            if diagnostics:
+        if not diagnostics.enable_diagnostics:
+            if cached_result := self._well_known_cache.get(server_name):
+                logger.debug("get_well_known: %s found cached request", server_name)
+
                 diagnostics.log(f"  Found cached well known result for: {server_name}")
                 if isinstance(cached_result, WellKnownDiagnosticResult):
                     diagnostics.log(f"    host and port: {cached_result.host}:{cached_result.port}")
@@ -330,10 +332,9 @@ class ServerDiscoveryResolver:
                 else:
                     assert isinstance(cached_result, NoWellKnown)
                     diagnostics.log(f"    code: {cached_result.status_code}")
-            return cached_result
+                return cached_result
 
-        if diagnostics:
-            diagnostics.log("  Making request to well-known")
+        diagnostics.log("  Making request to well-known")
         result = await self.make_well_known_request(server_name, list_of_ip_addresses, diagnostics)
         logger.debug("get_well_known: %s finished request\n%r", server_name, result)
 

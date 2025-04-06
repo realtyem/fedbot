@@ -250,8 +250,7 @@ class FederationRequests:
                 )
 
         # TODO: parse the headers for the cache control stuff, sort out ttl options
-        if run_diagnostics and diagnostics:
-            diagnostics.status.connection = StatusEnum.OK
+        diagnostics.status.connection = StatusEnum.OK
 
         return MatrixFederationResponse(
             http_code=status_code,
