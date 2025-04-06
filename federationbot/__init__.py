@@ -4621,8 +4621,8 @@ class FederationBot(RoomWalkCommand):
         dns_status_col = DisplayLineColumnConfig("DNS", initial_size=5)
         connective_test_status_col = DisplayLineColumnConfig("Test", initial_size=5)
         sni_col = DisplayLineColumnConfig("SNI")
-        srt_col = DisplayLineColumnConfig("SRT")
-        crt_col = DisplayLineColumnConfig("CRT")
+        srt_col = DisplayLineColumnConfig("SRT", 5, justify=Justify.RIGHT)
+        crt_col = DisplayLineColumnConfig("CRT", 5, justify=Justify.RIGHT)
         tls_served_by_col = DisplayLineColumnConfig("TLS served by")
 
         # Iterate through the server names to widen the column, if necessary.
@@ -4631,6 +4631,11 @@ class FederationBot(RoomWalkCommand):
             if not len(server_name) > 30:
                 server_name_col.maybe_update_column_width(len(server_name))
             if isinstance(response, MatrixFederationResponse):
+                well_known_status_col.maybe_update_column_width(response.diagnostics.status.well_known)
+                srv_status_col.maybe_update_column_width(response.diagnostics.status.srv)
+                dns_status_col.maybe_update_column_width(response.diagnostics.status.dns)
+                connective_test_status_col.maybe_update_column_width(response.diagnostics.status.connection)
+
                 # If this header is not present, just using "" means it will register as a zero length string
                 tls_served_by = response.headers.get("server", "")
                 tls_served_by_col.maybe_update_column_width(len(tls_served_by))
