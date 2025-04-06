@@ -1,7 +1,6 @@
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 from itertools import chain
 import asyncio
-import ipaddress
 import json
 import logging
 import time
@@ -16,7 +15,7 @@ import dns.resolver
 
 from federationbot.cache import TTLCache
 from federationbot.errors import FedBotException, WellKnownSchemeError
-from federationbot.resolver import check_and_maybe_split_server_name
+from federationbot.resolver import check_and_maybe_split_server_name, is_this_an_ip_address
 from federationbot.server_result import DiagnosticInfo, ServerResult
 
 server_discovery_logger = logging.getLogger("server_discovery")
@@ -73,23 +72,6 @@ def backoff_dns_giveup_logging_handler(details: Details) -> None:
         elapsed,
         host,
     )
-
-
-def is_this_an_ip_address(host: str) -> bool:
-    """
-    Check with the ipaddress library if this is a Literal IP(works for both ipv4 and
-        ipv6)
-
-    Returns: bool
-    """
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        # This isn't a real ipv4 or ipv6 address
-        # This is probably the common path
-        return False
-
-    return True
 
 
 def _parse_and_check_well_known_response(
