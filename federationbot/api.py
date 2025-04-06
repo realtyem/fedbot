@@ -22,6 +22,7 @@ from federationbot.errors import (
     ServerUnreachable,
 )
 from federationbot.requests import FederationRequests
+from federationbot.resolver import StatusEnum
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 from federationbot.tracing import make_fresh_trace_config
@@ -485,12 +486,12 @@ class FederationApi:
             server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
         )
 
-        if diagnostics and response.diag_info is not None:
+        if diagnostics:
             # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
             if response.http_code != 200:
-                response.diag_info.connection_test_status = ResponseStatusType.ERROR
+                response.diagnostics.status.connection = StatusEnum.ERROR
             else:
-                response.diag_info.connection_test_status = ResponseStatusType.OK
+                response.diagnostics.status.connection = StatusEnum.OK
 
         return response
 
