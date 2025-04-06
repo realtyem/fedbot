@@ -200,8 +200,8 @@ class ServerDiscoveryResolver:
                 )
 
             # Step 3.2, resolve the hostname IF there was a port
+            diag.log("Step 3.2: Checking if well known had attached port")
             if well_known_result.port:
-                diag.log(f"Step 3.2: Well known had attached port: {well_known_result.port}")
 
                 well_known_dns_query_results = await self.exp_dns_resolver.resolve_reg_records(
                     well_known_result.host, diagnostics=diag
