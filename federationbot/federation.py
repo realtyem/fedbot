@@ -11,7 +11,7 @@ from signedjson.sign import SignatureVerifyException, verify_signed_json
 from federationbot.api import FederationApi
 from federationbot.cache import LRUCache
 from federationbot.controllers import ReactionTaskController
-from federationbot.errors import FedBotException, MalformedRoomAliasError
+from federationbot.errors import FedBotException
 from federationbot.events import (
     Event,
     EventBase,
@@ -21,7 +21,7 @@ from federationbot.events import (
     redact_event,
 )
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
-from federationbot.types import KeyContainer, KeyID, ServerVerifyKeys, SignatureVerifyResult
+from federationbot.types import KeyContainer, KeyID, RoomAlias, ServerVerifyKeys, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
 fed_handler_logger = logging.getLogger("federation_handler")
@@ -387,7 +387,7 @@ class FederationHandler:
 
     async def resolve_room_alias(
         self,
-        room_alias: str,
+        room_alias: RoomAlias,
         origin_server: str,
     ) -> Tuple[str, List[str]]:
         """
@@ -399,20 +399,10 @@ class FederationHandler:
         Returns:
         Raises: ValueError if room_alias does not start with '#' or contain a ':'
         """
-        # Sort out if the room id or alias passed in is valid and resolve the alias
-        # to the room id if it is.
-        try:
-            assert room_alias.startswith("#")
-            _, destination_server = room_alias.split(":", maxsplit=1)
-        except ValueError as e:
-            raise MalformedRoomAliasError(summary_exception="Room Alias did not have ':'") from e
-        except AssertionError as e:
-            raise MalformedRoomAliasError(summary_exception="Room Alias did not start with '#'") from e
-
         # look up the room alias. The server is extracted from the alias itself.
         alias_result = await self.api.get_room_alias_from_directory(
             origin_server,
-            destination_server,
+            room_alias.origin_server,
             room_alias,
         )
 

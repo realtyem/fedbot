@@ -259,7 +259,7 @@ class FederationBot(RoomWalkCommand):
         """
         origin_server = self.federation_handler.hosting_server
         destination_server = target_server or room_id_or_alias.split(":", maxsplit=1)[1]
-        self.log.warning("alias: %s, alias: %s", destination_server, room_id_or_alias)
+        self.log.warning("alias server: %s, alias: %s", destination_server, room_id_or_alias)
         if room_id_or_alias.startswith("!"):
             await command_event.reply("I need a room alias not a room id")
             return

@@ -155,8 +155,8 @@ class FederationBotCommandBase(Plugin):
         self,
         room_id_or_alias: str | None,
         command_event: MessageEvent,
-        origin_server: str,
-    ) -> tuple[str | None, list[str] | None]:
+        origin_server: str | None = None,
+    ) -> tuple[str | None, list[str]]:
         """
         Resolve a room ID or alias to a room ID and list of servers.
 
@@ -172,41 +172,47 @@ class FederationBotCommandBase(Plugin):
         Returns:
             A tuple containing the room ID and a list of servers to join through
         """
-        list_of_servers = None
-        if room_id_or_alias:
-            # Sort out if the room id or alias passed in is valid and resolve the alias
-            # to the room id if it is.
-            if room_id_or_alias.startswith("#"):
-                # look up the room alias. The server is extracted from the alias itself.
-                try:
-                    (
-                        room_id,
-                        list_of_servers,
-                    ) = await self.federation_handler.resolve_room_alias(
-                        origin_server=origin_server,
-                        room_alias=room_id_or_alias,
-                    )
-                except MalformedRoomAliasError as e:
-                    message_id = await command_event.reply(f"{e.summary_exception}: '{room_id_or_alias}'")
-
-                    await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-                    return None, None
-                except FedBotException as e:
-                    message_id = await command_event.reply(
-                        "Received an error while querying for room alias:\n\n"
-                        f"{e.summary_exception}: '{room_id_or_alias}'",
-                    )
-
-                    await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-                    return None, None
-
-            else:
-                room_id = room_id_or_alias
-
-        else:
+        list_of_servers: list[str] = []
+        # TODO: sort out if this is used/needed
+        if not room_id_or_alias:
             # When not supplied a room id, we assume they want the room the command was
             # issued from.
-            room_id = str(command_event.room_id)
+            return str(command_event.room_id), list_of_servers
+
+        # Sort out if the room id or alias passed in is valid and resolve the alias
+        # to the room id if it is.
+        _room_id = is_room_id(room_id_or_alias)
+        if _room_id:
+            return _room_id, list_of_servers
+
+        _room_alias = is_room_alias(room_id_or_alias)
+        if not _room_alias:
+            message_id = await command_event.reply(
+                f"{room_id_or_alias} does not seem to be a room alias or room id",
+            )
+
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+
+            return None, list_of_servers
+        room_alias = RoomAlias(_room_alias)
+
+        # look up the room alias. The server is extracted from the alias itself.
+        try:
+            (
+                room_id,
+                list_of_servers,
+            ) = await self.federation_handler.resolve_room_alias(
+                room_alias,
+                origin_server or room_alias.origin_server,
+            )
+
+        except FedBotException as e:
+            message_id = await command_event.reply(
+                "Received an error while querying for room alias:\n\n" f"{e.summary_exception}: '{_room_alias}'",
+            )
+
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+            return None, []
 
         return room_id, list_of_servers
 

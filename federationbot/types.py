@@ -23,6 +23,27 @@ ServerName = NewType("ServerName", str)  # Type for Matrix server names
 KeyID = NewType("KeyID", str)  # Type for Matrix key identifiers
 
 
+@dataclass(slots=True, init=False, repr=False)
+class RoomAlias:
+    """House and split the RoomAlias into it's components"""
+
+    alias: str
+    origin_server: str
+    list_of_servers_can_join_via: list[str]
+
+    def __init__(self, room_alias: str) -> None:
+        _split_alias = room_alias.split(":", maxsplit=1)
+        self.alias = _split_alias[0]
+        self.origin_server = _split_alias[1]
+        self.list_of_servers_can_join_via = []
+
+    # def __str__(self) -> str:
+    #     return f"{self.alias}:{self.origin_server}"
+
+    def __repr__(self) -> str:
+        return f"{self.alias}:{self.origin_server}"
+
+
 @dataclass(frozen=True, slots=True)
 class Signature:
     """Container for a Matrix digital signature."""

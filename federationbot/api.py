@@ -30,6 +30,7 @@ from federationbot.resolver import StatusEnum
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 from federationbot.tracing import make_fresh_trace_config
+from federationbot.types import RoomAlias
 
 fedapi_logger = logging.getLogger("federation_api")
 
@@ -686,12 +687,12 @@ class FederationApi:
         self,
         origin_server: str,
         destination_server: str,
-        room_alias: str,
+        room_alias: str | RoomAlias,
     ) -> MatrixResponse:
         response = await self.federation_transport.request(
             destination_server,
             "/_matrix/federation/v1/query/directory",
-            query_args=[("room_alias", room_alias)],
+            query_args=[("room_alias", f"{room_alias}")],
             origin_server=origin_server,
         )
 
