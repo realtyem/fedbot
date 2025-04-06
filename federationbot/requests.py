@@ -12,12 +12,7 @@ from signedjson.sign import sign_json
 from yarl import URL
 
 from federationbot.errors import RedirectRetry, RequestClientError, RequestError, RequestServerError, RequestTimeout
-from federationbot.resolver import (
-    IpAddressAndPort,
-    ServerDiscoveryErrorResult,
-    ServerDiscoveryResult,
-    StatusEnum,
-)
+from federationbot.resolver import IpAddressAndPort, ServerDiscoveryErrorResult, ServerDiscoveryResult, StatusEnum
 from federationbot.resolver.resolver import ServerDiscoveryResolver
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.tracing import make_fresh_trace_config
