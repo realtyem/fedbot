@@ -178,9 +178,9 @@ class ServerDiscoveryResolver:
 
         if isinstance(well_known_result, WellKnownDiagnosticResult):
             # Step 3.1, does the well known have a literal IP?
-            if is_this_an_ip_address(well_known_result.host):
-                diag.log(f"Step 3.1: Well known points to literal IP address: {well_known_result.host}")
+            diag.log("Step 3.1: Checking if well known points to literal IP address")
 
+            if is_this_an_ip_address(well_known_result.host):
                 # Literal IP's can not have SRV records
                 if well_known_result.port in [0, None]:
                     diag.log("  No port provided, using 8448")
