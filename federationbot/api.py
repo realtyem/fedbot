@@ -5,7 +5,6 @@ import logging
 import time
 
 from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, client_exceptions
-from backoff._typing import Details
 from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
 from yarl import URL
@@ -22,12 +21,16 @@ from federationbot.errors import (
     ServerUnreachable,
 )
 from federationbot.requests import FederationRequests
+from federationbot.requests.backoff import (
+    backoff_logging_backoff_handler,
+    backoff_logging_giveup_handler,
+    backoff_update_retries_handler,
+)
 from federationbot.resolver import StatusEnum
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
 from federationbot.tracing import make_fresh_trace_config
 
-backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
 
 SOCKET_TIMEOUT_SECONDS = 5.0
@@ -35,36 +38,6 @@ USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.1"
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
 # the /_matrix urlspace. 'bot' and 'Python' trigger it, so use a different name
 # "Maubot/Fedbot 0.1.1"
-
-
-def backoff_logging_backoff_handler(details: Details) -> None:
-    wait = details.get("wait", 0.0)
-    tries = details.get("tries", 0)
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "Backing off %.2f seconds after %d tries on host %s",
-        wait,
-        tries,
-        host,
-    )
-
-
-def backoff_logging_giveup_handler(details: Details) -> None:
-    elapsed = details.get("elapsed", 0.0)
-    tries = details.get("tries", 0)
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "Giving up after %d tries and %.2f seconds on host %s",
-        tries,
-        elapsed,
-        host,
-    )
-
-
-def backoff_update_retries_handler(details: Details) -> None:
-    server_result: Optional[ServerResult] = details.get("kwargs", {}).get("server_result", None)
-    if server_result and server_result.diag_info:
-        server_result.diag_info.retries += 1
 
 
 class FederationApi:
