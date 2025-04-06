@@ -6,7 +6,6 @@ import logging
 import time
 
 from aiohttp import ClientResponse, client_exceptions
-from backoff._typing import Details
 from dns.asyncresolver import Resolver
 from dns.message import Message
 from dns.nameserver import Do53Nameserver
@@ -15,63 +14,16 @@ import dns.resolver
 
 from federationbot.cache import TTLCache
 from federationbot.errors import FedBotException, WellKnownSchemeError
+from federationbot.requests.backoff import (
+    backoff_dns_backoff_logging_handler,
+    backoff_dns_giveup_logging_handler,
+    backoff_srv_backoff_logging_handler,
+    backoff_srv_giveup_logging_handler,
+)
 from federationbot.resolver import check_and_maybe_split_server_name, is_this_an_ip_address
 from federationbot.server_result import DiagnosticInfo, ServerResult
 
 server_discovery_logger = logging.getLogger("server_discovery")
-backoff_logger = logging.getLogger("dns_backoff")
-
-
-def backoff_srv_backoff_logging_handler(details: Details) -> None:
-    wait = details.get("wait", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "DNS SRV query backing off %.2f seconds after %d tries on host %s",
-        wait,
-        tries,
-        host,
-    )
-
-
-def backoff_srv_giveup_logging_handler(details: Details) -> None:
-    elapsed = details.get("elapsed", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.info(
-        "DNS SRV query giving up after %d tries and %.2f seconds on host %s",
-        tries,
-        elapsed,
-        host,
-    )
-
-
-def backoff_dns_backoff_logging_handler(details: Details) -> None:
-    wait = details.get("wait", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "DNS query backing off %.2f seconds after %d tries on host %s",
-        wait,
-        tries,
-        host,
-    )
-
-
-def backoff_dns_giveup_logging_handler(details: Details) -> None:
-    elapsed = details.get("elapsed", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.info(
-        "DNS query giving up after %d tries and %.2f seconds on host %s",
-        tries,
-        elapsed,
-        host,
-    )
 
 
 def _parse_and_check_well_known_response(
