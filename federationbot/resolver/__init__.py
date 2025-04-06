@@ -190,13 +190,13 @@ class Diagnostics:
             self.output_list.append(line)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class ServerDiscoveryBaseResult:
     """
     The base class for what happened during the discovery process
     """
 
-    diagnostics: Diagnostics | None
+    diagnostics: Diagnostics = field(default_factory=Diagnostics)
 
 
 @dataclass(slots=True)

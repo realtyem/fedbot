@@ -52,7 +52,7 @@ class MatrixResponse:
     json_response: dict[str, Any] = field(default_factory=dict)
     diag_info: DiagnosticInfo | None = field(default=None)
     server_result: ServerDiscoveryBaseResult | None = field(default=None)
-    diagnostics: Diagnostics | None = field(default=None)
+    diagnostics: Diagnostics = field(default_factory=Diagnostics)
     time_taken: float = field(default=0.0)
     errcode: str | None = field(default=None)
     error: str | None = field(default=None)

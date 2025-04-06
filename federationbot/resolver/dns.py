@@ -97,7 +97,11 @@ class CachingDNSResolver:
     #     base=1.0,
     # )
     async def query(
-        self, server_name: str, rdtype: RdataType = A, check_cname: bool = True, diagnostics: Diagnostics | None = None
+        self,
+        server_name: str,
+        diagnostics: Diagnostics,
+        rdtype: RdataType = A,
+        check_cname: bool = True,
     ) -> DnsResult:
         """
         Place the dns resolution request. Catch the errors, so we control how it is returned
@@ -105,9 +109,9 @@ class CachingDNSResolver:
         Args:
             server_name: A list of tuples, matching [host:string, port:string]. Port isn't used, but is
                 passed through to the returned result.
+            diagnostics: verbose output storage
             rdtype: The specific type of record to resolve
             check_cname:
-            diagnostics: verbose output storage
 
         Returns: a tuple containing two lists of strings. The first is the IP addresses found, and the second is
             pretty formatted texted displaying the CNAME server targets
@@ -131,8 +135,7 @@ class CachingDNSResolver:
                     for rdata in cname_rrset:
                         found_cname_target = str(rdata.target)
 
-                        if diagnostics:
-                            diagnostics.log(f"    Found CNAME record: {last_name_searched} -> {found_cname_target}")
+                        diagnostics.log(f"    Found CNAME record: {last_name_searched} -> {found_cname_target}")
 
                         last_host_found = found_cname_target
             # Use create=True here to simulate an empty list, so iteration doesn't break
@@ -140,49 +143,45 @@ class CachingDNSResolver:
 
             for rdata in responses:
                 results.append(str(rdata.address))
-                if diagnostics:
-                    # TODO: this is stupid and we need a better way
-                    diagnostics.status.dns = StatusEnum.OK
-                    diagnostics.log(f"    Found Resolved IP address: {str(rdata.address)}")
+                # TODO: this is stupid and we need a better way
+                diagnostics.status.dns = StatusEnum.OK
+                diagnostics.log(f"    Found Resolved IP address: {str(rdata.address)}")
 
         except (NoAnswer, NXDOMAIN) as e:
             error_message = str(e)
-            if diagnostics:
-                # If one of the two queries done was OK, just use that. Stupid ipv6
-                if diagnostics.status.dns != StatusEnum.OK:
-                    diagnostics.status.dns = StatusEnum.ERROR
-                    diagnostics.log(f"  {e}")
+            # If one of the two queries done was OK, just use that. Stupid ipv6
+            if diagnostics.status.dns != StatusEnum.OK:
+                diagnostics.status.dns = StatusEnum.ERROR
+                diagnostics.log(f"  {e}")
 
         except Exception as e:
             logger.error("%s: %r", server_name, e, exc_info=True)
             error_message = str(e)
-            if diagnostics:
-                diagnostics.status.dns = StatusEnum.ERROR
-                diagnostics.log(f"  {error_message}")
+            diagnostics.status.dns = StatusEnum.ERROR
+            diagnostics.log(f"  {error_message}")
 
         return DnsResult(hosts=results, error=error_message)
 
     async def resolve_reg_records(
         self,
         server_name: str,
+        diagnostics: Diagnostics,
         check_cname: bool = True,
-        diagnostics: Diagnostics | None = None,
     ) -> ServerDiscoveryDnsResult:
         logger.debug("resolve_reg_records: %s", server_name)
-        if diagnostics:
-            diagnostics.log(f"  Starting DNS query for: {server_name}")
+        diagnostics.log(f"  Starting DNS query for: {server_name}")
 
         a_results = None
         a4_results = None
         try:
-            a_results = await self.query(server_name, A, check_cname=check_cname, diagnostics=diagnostics)
+            a_results = await self.query(server_name, diagnostics, A, check_cname=check_cname)
         except Exception as e:
             logger.debug("resolve_reg_records: %s, A FAILED: %r", server_name, e)
         else:
             logger.debug("resolve_reg_records: %s, a_results:\n%r", server_name, a_results)
 
         try:
-            a4_results = await self.query(server_name, AAAA, check_cname=check_cname, diagnostics=diagnostics)
+            a4_results = await self.query(server_name, diagnostics, AAAA, check_cname=check_cname)
         except Exception as e:
             logger.debug("resolve_reg_records: %s, AAAA FAILED: %r", server_name, e)
         else:
@@ -205,17 +204,15 @@ class CachingDNSResolver:
     #     max_value=2.0,
     #     base=1.0,
     # )
-    async def _resolve_srv_records(
-        self, server_name: str, diagnostics: Diagnostics | None = None
-    ) -> list[tuple[str, int]]:
+    async def _resolve_srv_records(self, server_name: str, diagnostics: Diagnostics) -> list[tuple[str, int]]:
         host_port_tuples: list[tuple[str, int]] = []
         srv_name = from_text(server_name)
 
         srv_answers = self.dns_srv_query_cache.get(server_name)
-        if diagnostics and srv_answers is not None:
+        if srv_answers is not None:
             diagnostics.log("    Found cached SRV result")
 
-        if srv_answers is None:
+        else:
             query = dns.message.make_query(srv_name, SRV)
             nameserver = self.dns_resolver.nameservers[0]
             # Mypy thinks this could be a string, make sure it know otherwise
@@ -228,9 +225,8 @@ class CachingDNSResolver:
             and srv_answers.rcode() != dns.rcode.NXDOMAIN
             and srv_answers.rcode() != dns.rcode.SERVFAIL
         ):
-            if diagnostics:
-                diagnostics.status.srv = StatusEnum.ERROR
-                diagnostics.log(f"    Received {srv_answers.rcode()} response")
+            diagnostics.status.srv = StatusEnum.ERROR
+            diagnostics.log(f"    Received {srv_answers.rcode()} response")
             logger.warning(
                 "DNS query %s for %s got %r, %r", "SRV", server_name, srv_answers.rcode(), srv_answers.answer
             )
@@ -244,9 +240,8 @@ class CachingDNSResolver:
             # logger.info("SRV: RDATA %r", rdata)
             host = str(rdata.target).rstrip(".")
             port = int(rdata.port)
-            if diagnostics:
-                diagnostics.status.srv = StatusEnum.OK
-                diagnostics.log(f"    Received SRV target and port: {host}:{port}")
+            diagnostics.status.srv = StatusEnum.OK
+            diagnostics.log(f"    Received SRV target and port: {host}:{port}")
             host_port_tuples.append((host, port))
 
         ip_port_tuples = []
@@ -254,7 +249,7 @@ class CachingDNSResolver:
             # Need to resolve each one, and keep the port with it
             for _host, _port in host_port_tuples:
                 # The spec says not to resolve any CNAME records found from this host
-                dns_records = await self.resolve_reg_records(_host, check_cname=False, diagnostics=diagnostics)
+                dns_records = await self.resolve_reg_records(_host, diagnostics, check_cname=False)
                 for _found_ip in dns_records.get_hosts():
                     ip_port_tuples.append((_found_ip, _port))
 
@@ -265,9 +260,7 @@ class CachingDNSResolver:
 
         return ip_port_tuples
 
-    async def resolve_srv_records(
-        self, server_name: str, diagnostics: Diagnostics | None = None
-    ) -> list[tuple[str, int]]:
+    async def resolve_srv_records(self, server_name: str, diagnostics: Diagnostics) -> list[tuple[str, int]]:
         """
         Check for SRV records. Wrap the inner version of the function to allow for clean cache wrapping.
         First check for the newer '_matrix-fed._tcp.' SRV record, and if that is not found, use the
@@ -280,17 +273,13 @@ class CachingDNSResolver:
         Returns: List containing Tuples of hostnames that need to be resolved and the port that was found
         """
         # logger.debug("Preparing to request SRV records for %s", server_name)
-        if diagnostics:
-            diagnostics.log(f"  Starting SRV query for: _matrix-fed._tcp.{server_name}")
+        diagnostics.log(f"  Starting SRV query for: _matrix-fed._tcp.{server_name}")
 
-        matrix_fed_answers = await self._resolve_srv_records(f"_matrix-fed._tcp.{server_name}", diagnostics=diagnostics)
+        matrix_fed_answers = await self._resolve_srv_records(f"_matrix-fed._tcp.{server_name}", diagnostics)
         if matrix_fed_answers:
             return matrix_fed_answers
 
-        if diagnostics:
-            diagnostics.log(f"  Starting SRV query for: _matrix._tcp.{server_name}")
-        deprecated_matrix_answers = await self._resolve_srv_records(
-            f"_matrix._tcp.{server_name}", diagnostics=diagnostics
-        )
+        diagnostics.log(f"  Starting SRV query for: _matrix._tcp.{server_name}")
+        deprecated_matrix_answers = await self._resolve_srv_records(f"_matrix._tcp.{server_name}", diagnostics)
 
         return deprecated_matrix_answers

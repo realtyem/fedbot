@@ -1,6 +1,5 @@
 from typing import Any, Sequence, Union
 import asyncio
-import copy
 import ipaddress
 import json
 import logging
@@ -14,7 +13,6 @@ from yarl import URL
 
 from federationbot.errors import RedirectRetry, RequestClientError, RequestError, RequestServerError, RequestTimeout
 from federationbot.resolver import (
-    Diagnostics,
     IpAddressAndPort,
     ServerDiscoveryErrorResult,
     ServerDiscoveryResult,
@@ -153,12 +151,8 @@ class FederationRequests:
             )
 
         assert isinstance(server_result, ServerDiscoveryResult)
-        diagnostics = None
-        if run_diagnostics:
-            diagnostics = Diagnostics()
-            if server_result.diagnostics is not None:
-                diagnostics.output_list = server_result.diagnostics.output_list.copy()
-                diagnostics.status = copy.copy(server_result.diagnostics.status)
+        diagnostics = server_result.diagnostics
+
         if ip_address_and_port_tuple_override:
             list_of_ip_addresses_and_ports = ip_address_and_port_tuple_override
         else:

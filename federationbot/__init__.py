@@ -4360,12 +4360,10 @@ class FederationBot(RoomWalkCommand):
             while True:
                 worker_server_name = await queue.get()
 
-                # The 'get_server_version' function was written with the capability of
-                # collecting diagnostic data.
                 try:
                     server_to_server_data[worker_server_name] = (
                         await self.federation_handler.api.federation_transport.server_discovery.exp_dns_resolver.resolve_reg_records(
-                            worker_server_name,
+                            worker_server_name, Diagnostics()
                         )
                     )
                     set_of_server_names.discard(worker_server_name)
