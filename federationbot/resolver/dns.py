@@ -126,7 +126,7 @@ class CachingDNSResolver:
             if check_cname:
                 while True:
                     name = from_text(last_host_found)
-                    last_name_searched = server_name
+
                     try:
                         cname_rrset = answer.response.find_rrset(ANSWER, name, IN, CNAME, create=False)
                     except KeyError:
@@ -135,7 +135,7 @@ class CachingDNSResolver:
                     for rdata in cname_rrset:
                         found_cname_target = str(rdata.target)
 
-                        diagnostics.log(f"    Found CNAME record: {last_name_searched} -> {found_cname_target}")
+                        diagnostics.log(f"    Found CNAME record: {last_host_found} -> {found_cname_target}")
 
                         last_host_found = found_cname_target
             # Use create=True here to simulate an empty list, so iteration doesn't break
