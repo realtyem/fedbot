@@ -16,6 +16,7 @@ import dns.resolver
 
 from federationbot.cache import TTLCache
 from federationbot.errors import FedBotException, WellKnownSchemeError
+from federationbot.resolver import check_and_maybe_split_server_name
 from federationbot.server_result import DiagnosticInfo, ServerResult
 
 server_discovery_logger = logging.getLogger("server_discovery")
@@ -74,34 +75,6 @@ def backoff_dns_giveup_logging_handler(details: Details) -> None:
     )
 
 
-def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[str]]:
-    """
-    Checks that a server name does not have a scheme prepended to it(something seen
-    in the wild), then splits the server_name from any potential port number that is
-    appended.
-
-    Args:
-        server_name: a server domain as expected by the matrix spec, with or without
-            port number
-
-    Returns: Tuple of the domain and(if it exists) the port as strings(or None)
-    """
-    server_host: str = server_name
-    server_port: Optional[str] = None
-
-    if server_name.startswith(("http:", "https")) or "://" in server_name:
-        raise WellKnownSchemeError(server_name)
-
-    # str.split() will raise a ValueError if the value to split by isn't there
-    try:
-        server_host, server_port = server_name.split(":", maxsplit=1)
-    except ValueError:
-        # Accept this gracefully, as it is probably the common path
-        pass
-
-    return server_host, server_port
-
-
 def is_this_an_ip_address(host: str) -> bool:
     """
     Check with the ipaddress library if this is a Literal IP(works for both ipv4 and
@@ -150,7 +123,8 @@ def _parse_and_check_well_known_response(
         # parsing a URL without a scheme, yarl came close. I guess we'll just
         # have to cover the basics by hand.
         try:
-            host, port = check_and_maybe_split_server_name(well_known_result)
+            host, _port = check_and_maybe_split_server_name(well_known_result)
+            port = str(_port)
         except WellKnownSchemeError:
             diag_info.error("Well-Known 'm.server' has a scheme when it should not:")
             diag_info.error(f"{well_known_result}", front_pad="      ")
@@ -838,7 +812,8 @@ class DelegationHandler:
 
         # Try and split the server_name from any potential port
         try:
-            host, port = check_and_maybe_split_server_name(server_name)
+            host, _port = check_and_maybe_split_server_name(server_name)
+            port = str(_port)
 
         except WellKnownSchemeError as e:
             diag_info.error(f"{e}")
