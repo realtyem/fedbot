@@ -57,7 +57,6 @@ class MatrixResponse:
     errcode: str | None = field(default=None)
     error: str | None = field(default=None)
     tracing_context: SimpleNamespace | None = field(default=None)
-    headers: CIMultiDictProxy[str] | None = None
 
 
 @dataclass
@@ -83,9 +82,11 @@ class MatrixFederationResponse(MatrixResponse):
         reason: Status message from federation response
     """
 
+    headers: CIMultiDictProxy[str]
+
 
 @dataclass(kw_only=True)
-class MakeJoinResponse(MatrixResponse):
+class MakeJoinResponse(MatrixFederationResponse):
     """
     Specialized response for the make_join federation endpoint.
 

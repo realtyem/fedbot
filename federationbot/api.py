@@ -445,6 +445,7 @@ class FederationApi:
             errcode=errcode,
             error=error,
             tracing_context=diag_info.trace_ctx,
+            headers=headers,
         )
 
     async def get_server_version(
