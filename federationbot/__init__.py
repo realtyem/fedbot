@@ -4630,6 +4630,10 @@ class FederationBot(RoomWalkCommand):
             # Only if it's not obnoxiously long, saw an over 66 once(you know who you are)
             if not len(server_name) > 30:
                 server_name_col.maybe_update_column_width(len(server_name))
+            if isinstance(response, MatrixFederationResponse):
+                # If this header is not present, just using "" means it will register as a zero length string
+                tls_served_by = response.headers.get("server", "")
+                tls_served_by_col.maybe_update_column_width(len(tls_served_by))
 
         # Just use a fixed width for the results. Should never be larger than 5 for most
         # status_col.maybe_update_column_width(6)
@@ -4686,6 +4690,7 @@ class FederationBot(RoomWalkCommand):
                 )
                 buffered_message += f"{srt_col.pad('%.3f' % response.server_result.time_for_complete_delegation)} | "
                 buffered_message += f"{crt_col.pad('%.3f' % response.time_taken)} | "
+                buffered_message += f"{tls_served_by_col.pad(response.headers.get('server'))} | "
             else:
                 assert isinstance(response, MatrixError)
                 buffered_message += f"{response.reason}"
