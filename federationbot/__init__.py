@@ -4590,7 +4590,7 @@ class FederationBot(RoomWalkCommand):
             delegation_queue.put_nowait(server_name)
 
         reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
-
+        await self.client.set_typing(command_event.room_id, 1000 * 60 * 2)
         self.reaction_task_controller.add_tasks(
             reference_key,
             _discover_worker,
@@ -4602,7 +4602,7 @@ class FederationBot(RoomWalkCommand):
         await delegation_queue.join()
         await self.reaction_task_controller.cancel(reference_key)
         total_time = time.monotonic() - started_at
-
+        await self.client.set_typing(command_event.room_id, 0)
         # Want the full room version to look like this for now
         #
         #   Server Name | WK   | SRV  | DNS  | Test  | SNI | SRT | TLS served by  |
