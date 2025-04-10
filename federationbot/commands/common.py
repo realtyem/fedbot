@@ -20,7 +20,7 @@ from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.federation import FederationHandler
-from federationbot.types import MessageEvent
+from federationbot.protocols import MessageEvent
 
 
 class MaubotConfig(BaseProxyConfig):

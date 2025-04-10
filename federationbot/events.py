@@ -7,7 +7,8 @@ from canonicaljson import encode_canonical_json
 from mautrix.types import EventID
 from unpaddedbase64 import decode_base64, encode_base64
 
-from federationbot.types import KeyID, ServerName, Signature, Signatures, SignatureVerifyResult
+from federationbot.primitives import KeyID, ServerName
+from federationbot.types import Signature, Signatures, SignatureVerifyResult
 from federationbot.utils import (
     DisplayLineColumnConfig,
     extract_max_key_len_from_dict,

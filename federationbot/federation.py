@@ -21,7 +21,8 @@ from federationbot.events import (
     redact_event,
 )
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
-from federationbot.types import KeyContainer, KeyID, RoomAlias, ServerVerifyKeys, SignatureVerifyResult
+from federationbot.primitives import KeyID
+from federationbot.types import KeyContainer, RoomAlias, ServerVerifyKeys, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
 fed_handler_logger = logging.getLogger("federation_handler")

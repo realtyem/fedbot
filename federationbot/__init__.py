@@ -41,7 +41,7 @@ from federationbot.resolver import (
     WellKnownLookupResult,
 )
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
-from federationbot.types import MessageEvent
+from federationbot.protocols import MessageEvent
 from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
 from federationbot.utils.colors import Colors
 from federationbot.utils.display import DisplayLineColumnConfig, Justify, pad
