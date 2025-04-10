@@ -1173,7 +1173,7 @@ class JoinRulesStateEvent(GenericStateEvent):
         return summary
 
     def to_extras_summary(self) -> str:
-        return f"join_rule: {self.raw_data.get("content")} "
+        return f"join_rule: {self.raw_data.get('content')} "
 
     def to_pretty_summary(
         self,
