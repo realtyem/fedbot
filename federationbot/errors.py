@@ -6,7 +6,7 @@ This module defines the exception hierarchy used throughout the federation bot:
 Federation Errors:
 - ServerDiscoveryError: Problems finding/connecting to Matrix servers
 - WellKnownError: Issues with .well-known federation discovery
-- SchemeError: Invalid server name formatting
+- WellKnownSchemeError: Invalid server name formatting
 - ServerSSLException: SSL/TLS connection failures
 - ServerUnreachable: Server offline or unreachable
 
@@ -28,6 +28,7 @@ error handling and reporting in the bot's federation inspection commands.
 from __future__ import annotations
 
 
+# General or legacy exceptions
 class FedBotException(Exception):
     """Base exception for federation-specific errors."""
 
@@ -71,15 +72,78 @@ class ServerUnreachable(FedBotException):
     """Server was offline last time we checked, and temporarily blocked from retries."""
 
 
-class ServerDiscoveryError(FedBotException):
+# Errors while making requests
+class RedirectRetry(Exception):
+    """
+    Not really an error, but used to raise a signal to try the redirect again
+    """
+
+    location: str
+
+    def __init__(self, location) -> None:
+        self.location = location
+
+
+class RequestError(Exception):
+    """
+    General Error during a request
+    """
+
+    reason: str
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+
+class RequestServerError(RequestError):
+    """
+    The server receiving the request had an error
+    """
+
+
+class RequestClientError(RequestError):
+    """
+    The client placing the request had an error
+    """
+
+
+class RequestTimeout(RequestError):
+    """
+    The request timed out
+    """
+
+
+# Errors during the discovery process
+class ServerDiscoveryError(Exception):
     """Error during Matrix server discovery process."""
+
+    reason: str
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+
+
+class ServerDiscoveryDNSError(ServerDiscoveryError):
+    """Error during DNS query"""
 
 
 class WellKnownError(ServerDiscoveryError):
-    """Error during .well-known federation discovery."""
+    """Unknown error during .well-known federation discovery."""
 
 
-class SchemeError(ServerDiscoveryError):
+class WellKnownServerError(WellKnownError):
+    """Connection error from Matrix server to client."""
+
+
+class WellKnownServerTimeout(WellKnownServerError):
+    """Connection Timeout waiting for Matrix server response."""
+
+
+class WellKnownClientError(WellKnownError):
+    """Connection error from client to Matrix server."""
+
+
+class WellKnownSchemeError(WellKnownError):
     """Invalid server name format (contains scheme)."""
 
 
@@ -87,6 +151,11 @@ class WellKnownParsingError(WellKnownError):
     """Error occurred while parsing the well-known response."""
 
 
+class WellKnownClientTimeout(WellKnownClientError):
+    """Connection Timeout submitting Matrix server request."""
+
+
+# Internal Fedbot exceptions
 class MessageAlreadyHasReactions(Exception):
     """The Message given already has Reactions attached."""
 

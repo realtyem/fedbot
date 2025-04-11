@@ -19,7 +19,7 @@ from mautrix.util.logging import TraceLogger
 from federationbot.commands.common import FederationBotCommandBase
 from federationbot.constants import BACKOFF_MULTIPLIER, SECONDS_BETWEEN_EDITS
 from federationbot.errors import FedBotException
-from federationbot.types import MessageEvent
+from federationbot.protocols import MessageEvent
 from federationbot.utils.formatting import wrap_in_code_block_markdown
 from federationbot.utils.matrix import get_domain_from_id, make_into_text_event
 

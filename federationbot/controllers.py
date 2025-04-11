@@ -32,7 +32,7 @@ from federationbot.errors import (
     ReferenceKeyAlreadyExists,
     ReferenceKeyNotFound,
 )
-from federationbot.types import MessageEvent
+from federationbot.protocols import MessageEvent
 
 T = TypeVar("T")
 task_control_logger = logging.getLogger("task_control")

@@ -9,16 +9,18 @@ shared functionality for command handling.
 from __future__ import annotations
 
 from time import time
+import asyncio
 
 from maubot.plugin_base import Plugin
 from mautrix.types import EventType
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
+from federationbot import get_domain_from_id
 from federationbot.constants import HTTP_STATUS_OK
 from federationbot.controllers import ReactionTaskController
 from federationbot.errors import FedBotException, MalformedRoomAliasError
 from federationbot.federation import FederationHandler
-from federationbot.types import MessageEvent
+from federationbot.protocols import MessageEvent
 
 
 class MaubotConfig(BaseProxyConfig):
@@ -43,6 +45,7 @@ class FederationBotCommandBase(Plugin):
     server_signing_keys: dict[str, str]
     federation_handler: FederationHandler
     command_conn_timeouts: dict[str, int]
+    # experimental_resolver: ServerDiscoveryResolver
 
     @classmethod
     def get_config_class(cls) -> type[BaseProxyConfig] | None:
@@ -62,6 +65,8 @@ class FederationBotCommandBase(Plugin):
         max_workers: int = 10
         self.command_conn_timeouts = {}
 
+        loop = asyncio.get_running_loop()
+        loop.set_debug(True)
         if self.config:
             self.config.load_and_update()
             max_workers = self.config["thread_pool_max_workers"]
@@ -80,12 +85,18 @@ class FederationBotCommandBase(Plugin):
             task_controller=self.reaction_task_controller,
         )
 
+        # self.experimental_resolver = ServerDiscoveryResolver()
+
     async def pre_stop(self) -> None:
         """Stop the plugin and clean up resources."""
         self.client.remove_event_handler(EventType.REACTION, self.reaction_task_controller.react_control_handler)
         await self.reaction_task_controller.shutdown()
         # To stop any caching cleanup tasks
         await self.federation_handler.stop()
+        # await self.experimental_resolver.http_client.close()
+
+        loop = asyncio.get_running_loop()
+        loop.set_debug(False)
 
     async def get_room_depth(
         self,
@@ -144,8 +155,8 @@ class FederationBotCommandBase(Plugin):
         self,
         room_id_or_alias: str | None,
         command_event: MessageEvent,
-        origin_server: str,
-    ) -> tuple[str | None, list[str] | None]:
+        origin_server: str | None = None,
+    ) -> tuple[str | None, list[str]]:
         """
         Resolve a room ID or alias to a room ID and list of servers.
 
@@ -161,40 +172,76 @@ class FederationBotCommandBase(Plugin):
         Returns:
             A tuple containing the room ID and a list of servers to join through
         """
-        list_of_servers = None
-        if room_id_or_alias:
-            # Sort out if the room id or alias passed in is valid and resolve the alias
-            # to the room id if it is.
-            if room_id_or_alias.startswith("#"):
-                # look up the room alias. The server is extracted from the alias itself.
-                try:
-                    (
-                        room_id,
-                        list_of_servers,
-                    ) = await self.federation_handler.resolve_room_alias(
-                        origin_server=origin_server,
-                        room_alias=room_id_or_alias,
-                    )
-                except MalformedRoomAliasError as e:
-                    message_id = await command_event.reply(f"{e.summary_exception}: '{room_id_or_alias}'")
-
-                    await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-                    return None, None
-                except FedBotException as e:
-                    message_id = await command_event.reply(
-                        "Received an error while querying for room alias:\n\n"
-                        f"{e.summary_exception}: '{room_id_or_alias}'",
-                    )
-
-                    await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-                    return None, None
-
-            else:
-                room_id = room_id_or_alias
-
-        else:
+        list_of_servers: list[str] = []
+        # TODO: sort out if this is used/needed
+        if not room_id_or_alias:
             # When not supplied a room id, we assume they want the room the command was
             # issued from.
-            room_id = str(command_event.room_id)
+            return str(command_event.room_id), list_of_servers
+
+        # Sort out if the room id or alias passed in is valid and resolve the alias
+        # to the room id if it is.
+        _room_id = is_room_id(room_id_or_alias)
+        if _room_id:
+            return _room_id, list_of_servers
+
+        _room_alias = is_room_alias(room_id_or_alias)
+        if not _room_alias:
+            message_id = await command_event.reply(
+                f"{room_id_or_alias} does not seem to be a room alias or room id",
+            )
+
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+
+            return None, list_of_servers
+        room_alias = RoomAlias(_room_alias)
+
+        # look up the room alias. The server is extracted from the alias itself.
+        try:
+            (
+                room_id,
+                list_of_servers,
+            ) = await self.federation_handler.resolve_room_alias(
+                room_alias,
+                origin_server or room_alias.origin_server,
+            )
+
+        except FedBotException as e:
+            message_id = await command_event.reply(
+                "Received an error while querying for room alias:\n\n" f"{e.summary_exception}: '{_room_alias}'",
+            )
+
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+            return None, []
 
         return room_id, list_of_servers
+
+    async def get_origin_server_and_assert_key_exists(
+        self, command_event: MessageEvent, origin_server: str | None = None
+    ) -> str | None:
+        """
+        Define and check that the origin server to sign any requests is one that we have keys for. When not found,
+        send a message into the relevant room that originated the command. We can not force an exit from here, so
+        make sure to guard for this being None from the calling function/command.
+
+        Args:
+            command_event: The original event that triggered the bot. Used to send the error message into the room
+            origin_server: Optionally an origin server to use. If None, then use the bot's own server
+
+        Returns: None if there is no key to use for signing requests, otherwise the server name that a key exists for
+
+        """
+        # The only way to request from a different server than what the bot is on is to
+        # have the other server's signing keys. So just use the bot's server.
+        if not origin_server:
+            _origin_server = get_domain_from_id(self.client.mxid)
+        else:
+            _origin_server = origin_server
+        if _origin_server not in self.server_signing_keys:
+            await command_event.respond(
+                "This bot does not seem to have the necessary clearance to make "
+                f"requests on the behalf of it's server({origin_server}). Please add "
+                "server signing keys to it's config first.",
+            )
+            return None
+        return _origin_server

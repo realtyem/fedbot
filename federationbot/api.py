@@ -4,8 +4,7 @@ import json
 import logging
 import time
 
-from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, TraceConfig, client_exceptions
-from backoff._typing import Details
+from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, client_exceptions
 from signedjson.key import decode_signing_key_base64
 from signedjson.sign import sign_json
 from yarl import URL
@@ -17,69 +16,29 @@ from federationbot.delegation import DelegationHandler
 from federationbot.errors import (
     FedBotException,
     PluginTimeout,
-    ServerDiscoveryError,
+    ServerDiscoveryDNSError,
     ServerSSLException,
     ServerUnreachable,
 )
+from federationbot.requests import FederationRequests
+from federationbot.requests.backoff import (
+    backoff_logging_backoff_handler,
+    backoff_logging_giveup_handler,
+    backoff_update_retries_handler,
+)
+from federationbot.resolver import StatusEnum
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
-from federationbot.tracing import (
-    on_connection_create_end,
-    on_connection_create_start,
-    on_connection_queued_end,
-    on_connection_queued_start,
-    on_connection_reuseconn,
-    on_dns_cache_hit,
-    on_dns_cache_miss,
-    on_dns_resolvehost_end,
-    on_dns_resolvehost_start,
-    on_request_chunk_sent,
-    on_request_end,
-    on_request_exception,
-    on_request_headers_sent,
-    on_request_redirect,
-    on_request_start,
-    on_response_chunk_received,
-)
+from federationbot.tracing import make_fresh_trace_config
+from federationbot.types import RoomAlias
 
-backoff_logger = logging.getLogger("fed_backoff")
 fedapi_logger = logging.getLogger("federation_api")
 
 SOCKET_TIMEOUT_SECONDS = 5.0
-USER_AGENT_STRING = "PeekingAtYourServerBits 0.0.9"
+USER_AGENT_STRING = "AllYourServerBelongsToUs 0.1.1"
 # Some fools have their anti-indexer system on their reverse proxy that filters out things from inside
 # the /_matrix urlspace. 'bot' and 'Python' trigger it, so use a different name
-# "Maubot/Fedbot 0.0.7"
-
-
-def backoff_logging_backoff_handler(details: Details) -> None:
-    wait = details.get("wait", 0.0)
-    tries = details.get("tries", 0)
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "Backing off %.2f seconds after %d tries on host %s",
-        wait,
-        tries,
-        host,
-    )
-
-
-def backoff_logging_giveup_handler(details: Details) -> None:
-    elapsed = details.get("elapsed", 0.0)
-    tries = details.get("tries", 0)
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "Giving up after %d tries and %.2f seconds on host %s",
-        tries,
-        elapsed,
-        host,
-    )
-
-
-def backoff_update_retries_handler(details: Details) -> None:
-    server_result: Optional[ServerResult] = details.get("kwargs", {}).get("server_result", None)
-    if server_result and server_result.diag_info:
-        server_result.diag_info.retries += 1
+# "Maubot/Fedbot 0.1.1"
 
 
 class FederationApi:
@@ -94,34 +53,19 @@ class FederationApi:
         # Map this cache to server_name -> ServerResult
         self.server_discovery_cache: LRUCache[str, ServerResult] = LRUCache(expire_after_seconds=60 * 30)
 
-        trace_config = TraceConfig()
-        trace_config.on_request_start.append(on_request_start)
-        trace_config.on_request_end.append(on_request_end)
-        trace_config.on_request_chunk_sent.append(on_request_chunk_sent)
-        trace_config.on_request_redirect.append(on_request_redirect)
-        trace_config.on_request_exception.append(on_request_exception)
-        trace_config.on_request_headers_sent.append(on_request_headers_sent)
-        trace_config.on_response_chunk_received.append(on_response_chunk_received)
-        trace_config.on_connection_create_end.append(on_connection_create_end)
-        trace_config.on_connection_create_start.append(on_connection_create_start)
-        trace_config.on_connection_reuseconn.append(on_connection_reuseconn)
-        trace_config.on_connection_queued_end.append(on_connection_queued_end)
-        trace_config.on_connection_queued_start.append(on_connection_queued_start)
-        trace_config.on_dns_cache_hit.append(on_dns_cache_hit)
-        trace_config.on_dns_cache_miss.append(on_dns_cache_miss)
-        trace_config.on_dns_resolvehost_end.append(on_dns_resolvehost_end)
-        trace_config.on_dns_resolvehost_start.append(on_dns_resolvehost_start)
-
         connector = TCPConnector(ttl_dns_cache=60 * 60 * 5, limit=10000, limit_per_host=1, force_close=True)
         # TODO: Make a custom Resolver to handle server discovery
         self.http_client = ClientSession(
             connector=connector,
-            trace_configs=[trace_config],
+            trace_configs=[make_fresh_trace_config()],
         )
         self.delegation_handler = DelegationHandler(self._federation_request)
+        self.federation_transport = FederationRequests(self.server_signing_keys)
+        # self.server_discovery_resolver = ServerDiscoveryResolver(self.http_client)
 
     async def shutdown(self) -> None:
         await self.http_client.close()
+        await self.federation_transport.http_client.close()
         await self.server_discovery_cache.stop()
 
     @backoff.on_predicate(
@@ -182,9 +126,7 @@ class FederationApi:
             try:
                 host, port = ip_port_tuple
             except TypeError:
-                raise ServerDiscoveryError(
-                    "No DNS entries found", f"No DNS queries had answers for {destination_server_name}"
-                )
+                raise ServerDiscoveryDNSError("No IP Address found")
 
             resolved_destination_server = force_ip or host
             destination_port = int(port)
@@ -383,12 +325,16 @@ class FederationApi:
                 **kwargs,
             )
 
-        except FedBotException as e:
+        except (FedBotException, ServerDiscoveryDNSError) as e:
             fedapi_logger.warning(f"Problem on {destination_server_name}: {e}")
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
-            diag_info.error(str(e.long_exception))
+            if isinstance(e, FedBotException):
+                diag_info.error(str(e.long_exception))
+                server_result.unhealthy = str(e.summary_exception)
+            else:
+                diag_info.error("DNS error")
+                server_result.unhealthy = "DNS error"
             # Since there was an exception, cache the result unless it was a timeout error, as that shouldn't count
-            server_result.unhealthy = str(e.summary_exception)
 
             # Errors will be cached for 10 minutes
             server_result.retry_time_s = now + 10 * 60
@@ -398,7 +344,7 @@ class FederationApi:
             return MatrixError(
                 http_code=0,
                 errcode=str(0),
-                reason=str(e.summary_exception),
+                reason=str(e),
                 diag_info=diag_info if diagnostics else None,
                 json_response={},
             )
@@ -474,6 +420,7 @@ class FederationApi:
             errcode=errcode,
             error=error,
             tracing_context=diag_info.trace_ctx,
+            headers=headers,
         )
 
     async def get_server_version(
@@ -483,6 +430,9 @@ class FederationApi:
         diagnostics: bool = False,
         **kwargs,
     ) -> MatrixResponse:
+        # response = await self.federation_transport.request(
+        #     server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
+        # )
         response = await self.federation_request(
             server_name,
             "/_matrix/federation/v1/version",
@@ -500,20 +450,40 @@ class FederationApi:
 
         return response
 
-    async def get_server_keys(self, server_name: str, **kwargs) -> MatrixResponse:
-        response = await self.federation_request(
-            server_name,
-            "/_matrix/key/v2/server",
-            **kwargs,
+    async def get_server_version_new(
+        self,
+        server_name: str,
+        force_rediscover: bool = False,
+        diagnostics: bool = False,
+    ) -> MatrixResponse:
+        response = await self.federation_transport.request(
+            server_name, "/_matrix/federation/v1/version", run_diagnostics=diagnostics
         )
 
+        if diagnostics:
+            # Update the diagnostics info, this is the only request can do this on and is only for the delegation test
+            if response.http_code != 200:
+                response.diagnostics.status.connection = StatusEnum.ERROR
+            else:
+                response.diagnostics.status.connection = StatusEnum.OK
+
+        return response
+
+    async def get_server_keys(self, server_name: str, **kwargs) -> MatrixResponse:
+        # response = await self.federation_request(
+        #     server_name,
+        #     "/_matrix/key/v2/server",
+        #     **kwargs,
+        # )
+        fedapi_logger.debug("Making server keys request to %s", server_name)
+        response = await self.federation_transport.request(server_name, "/_matrix/key/v2/server")
         if response.http_code != 200:
             fedapi_logger.debug(
                 "get_server_keys: %s: got %d: %s %s",
                 server_name,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -523,13 +493,11 @@ class FederationApi:
         fetch_server_name: str,
         from_server_name: str,
         minimum_valid_until_ts: int,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             from_server_name,
             f"/_matrix/key/v2/query/{fetch_server_name}",
             query_args=[("minimum_valid_until_ts", minimum_valid_until_ts)],
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -538,7 +506,7 @@ class FederationApi:
                 from_server_name,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -548,13 +516,11 @@ class FederationApi:
         destination_server: str,
         origin_server: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/event/{event_id}",
             origin_server=origin_server,
-            **kwargs,
         )
 
         return response
@@ -565,14 +531,12 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/state_ids/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -581,7 +545,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -592,14 +556,12 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/state/{room_id}",
             query_args=[("event_id", event_id)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -608,7 +570,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -619,13 +581,11 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/event_auth/{room_id}/{event_id}",
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -634,7 +594,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -645,19 +605,17 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         utc_time_at_ms: int,
-        **kwargs,
     ) -> MatrixResponse:
         # With no errors, will produce a json like:
         # {
         #    "event_id": "$somehash",
         #    "origin_server_ts": 123455676543whatever_int
         # }
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/timestamp_to_event/{room_id}",
             query_args=[("dir", "b"), ("ts", utc_time_at_ms)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -666,7 +624,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -678,15 +636,13 @@ class FederationApi:
         room_id: str,
         event_id: str,
         limit: str = "10",
-        **kwargs,
     ) -> MatrixResponse:
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/backfill/{room_id}",
             query_args=[("v", event_id), ("limit", limit)],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -695,7 +651,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -705,17 +661,15 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         user_mxid: str,
-        **kwargs,
     ) -> MatrixResponse:
         # url = URL(
         #     f"https://{destination_server}/_matrix/federation/v1/user/devices/{mxid}"
         # )
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/user/devices/{user_mxid}",
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -724,7 +678,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -733,15 +687,13 @@ class FederationApi:
         self,
         origin_server: str,
         destination_server: str,
-        room_alias: str,
-        **kwargs,
+        room_alias: str | RoomAlias,
     ) -> MatrixResponse:
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             "/_matrix/federation/v1/query/directory",
-            query_args=[("room_alias", room_alias)],
+            query_args=[("room_alias", f"{room_alias}")],
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -750,7 +702,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -760,7 +712,6 @@ class FederationApi:
         origin_server: str,
         destination_server: str,
         pdus_to_send: Sequence[Dict[str, Any]],
-        **kwargs,
     ) -> MatrixResponse:
         formatted_data: Dict[str, Any] = {}
         now = int(time.time() * 1000)
@@ -776,7 +727,6 @@ class FederationApi:
             method="PUT",
             content=formatted_data,
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -785,7 +735,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -798,7 +748,6 @@ class FederationApi:
         limit: int = 10,
         since: Optional[str] = None,
         third_party_instance_id: Optional[str] = None,
-        **kwargs,
     ) -> MatrixResponse:
         query_args = [
             ("include_all_networks", str(include_all_networks).lower()),
@@ -810,12 +759,11 @@ class FederationApi:
         if third_party_instance_id:
             query_args.append(("third_party_instance_id", third_party_instance_id))
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             "/_matrix/federation/v1/publicRooms",
             query_args=query_args,
             origin_server=origin_server,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -824,7 +772,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response
@@ -835,7 +783,6 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         user_id: str,
-        **kwargs,
     ) -> MatrixResponse:
         # In an ideal world, this would expand correctly in aiohttp. In reality, it does not.
         # query_list={
@@ -846,11 +793,10 @@ class FederationApi:
         for i in range(0, 11):
             query_list.extend([("ver", f"{i + 1}")])
 
-        response = await self.federation_request(
+        response = await self.federation_transport.request(
             destination_server,
             f"/_matrix/federation/v1/make_join/{room_id}/{user_id}",
             query_args=query_list,
-            **kwargs,
             origin_server=origin_server,
         )
 
@@ -860,7 +806,7 @@ class FederationApi:
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason,
+                response.error or response.reason or response.json_response,
             )
 
         return response

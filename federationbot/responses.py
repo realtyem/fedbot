@@ -15,6 +15,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from dataclasses import dataclass, field
 
+from multidict import CIMultiDictProxy
+
+from federationbot.resolver import Diagnostics, ServerDiscoveryBaseResult
+
 if TYPE_CHECKING:
     from types import SimpleNamespace
 
@@ -47,6 +51,9 @@ class MatrixResponse:
     reason: str = field(default="")
     json_response: dict[str, Any] = field(default_factory=dict)
     diag_info: DiagnosticInfo | None = field(default=None)
+    server_result: ServerDiscoveryBaseResult | None = field(default=None)
+    diagnostics: Diagnostics = field(default_factory=Diagnostics)
+    time_taken: float = field(default=0.0)
     errcode: str | None = field(default=None)
     error: str | None = field(default=None)
     tracing_context: SimpleNamespace | None = field(default=None)
@@ -62,7 +69,7 @@ class MatrixError(MatrixResponse, Exception):
     """
 
 
-@dataclass
+@dataclass(kw_only=True)
 class MatrixFederationResponse(MatrixResponse):
     """
     Standard response type for Matrix federation API requests.
@@ -75,9 +82,11 @@ class MatrixFederationResponse(MatrixResponse):
         reason: Status message from federation response
     """
 
+    headers: CIMultiDictProxy[str]
 
-@dataclass
-class MakeJoinResponse(MatrixResponse):
+
+@dataclass(kw_only=True)
+class MakeJoinResponse(MatrixFederationResponse):
     """
     Specialized response for the make_join federation endpoint.
 

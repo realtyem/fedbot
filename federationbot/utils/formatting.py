@@ -177,7 +177,7 @@ def wrap_in_code_block_markdown(existing_buffer: str) -> str:
     Returns:
         String wrapped in ```text tags
     """
-    return f"```text\n{existing_buffer}```\n" if existing_buffer else ""
+    return f"```text\n{existing_buffer}\n```\n" if existing_buffer else ""
 
 
 def wrap_in_code_tags(message: str) -> str:

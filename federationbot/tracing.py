@@ -16,6 +16,7 @@ from asyncio import get_event_loop
 from logging import getLogger as get_logger
 
 from aiohttp.tracing import (
+    TraceConfig,
     TraceConnectionCreateEndParams,
     TraceConnectionCreateStartParams,
     TraceConnectionQueuedEndParams,
@@ -40,6 +41,27 @@ if TYPE_CHECKING:
     from aiohttp import ClientSession
 
 logger = get_logger("aiohttp_tracing")
+
+
+def make_fresh_trace_config() -> TraceConfig:
+    trace_config = TraceConfig()
+    trace_config.on_request_start.append(on_request_start)
+    trace_config.on_request_end.append(on_request_end)
+    trace_config.on_request_chunk_sent.append(on_request_chunk_sent)
+    trace_config.on_request_redirect.append(on_request_redirect)
+    trace_config.on_request_exception.append(on_request_exception)
+    trace_config.on_request_headers_sent.append(on_request_headers_sent)
+    trace_config.on_response_chunk_received.append(on_response_chunk_received)
+    trace_config.on_connection_create_end.append(on_connection_create_end)
+    trace_config.on_connection_create_start.append(on_connection_create_start)
+    trace_config.on_connection_reuseconn.append(on_connection_reuseconn)
+    trace_config.on_connection_queued_end.append(on_connection_queued_end)
+    trace_config.on_connection_queued_start.append(on_connection_queued_start)
+    trace_config.on_dns_cache_hit.append(on_dns_cache_hit)
+    trace_config.on_dns_cache_miss.append(on_dns_cache_miss)
+    trace_config.on_dns_resolvehost_end.append(on_dns_resolvehost_end)
+    trace_config.on_dns_resolvehost_start.append(on_dns_resolvehost_start)
+    return trace_config
 
 
 async def on_request_start(  # noqa: RUF029

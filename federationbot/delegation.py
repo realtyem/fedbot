@@ -1,120 +1,29 @@
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple
 from itertools import chain
 import asyncio
-import ipaddress
 import json
 import logging
 import time
 
 from aiohttp import ClientResponse, client_exceptions
-from backoff._typing import Details
 from dns.asyncresolver import Resolver
 from dns.message import Message
+from dns.nameserver import Do53Nameserver
 import backoff
 import dns.resolver
 
-from federationbot.errors import FedBotException, SchemeError
+from federationbot.cache import TTLCache
+from federationbot.errors import FedBotException, WellKnownSchemeError
+from federationbot.requests.backoff import (
+    backoff_dns_backoff_logging_handler,
+    backoff_dns_giveup_logging_handler,
+    backoff_srv_backoff_logging_handler,
+    backoff_srv_giveup_logging_handler,
+)
+from federationbot.resolver import check_and_maybe_split_server_name, is_this_an_ip_address
 from federationbot.server_result import DiagnosticInfo, ServerResult
 
 server_discovery_logger = logging.getLogger("server_discovery")
-backoff_logger = logging.getLogger("dns_backoff")
-
-
-def backoff_srv_backoff_logging_handler(details: Details) -> None:
-    wait = details.get("wait", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "DNS SRV query backing off %.2f seconds after %d tries on host %s",
-        wait,
-        tries,
-        host,
-    )
-
-
-def backoff_srv_giveup_logging_handler(details: Details) -> None:
-    elapsed = details.get("elapsed", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.info(
-        "DNS SRV query giving up after %d tries and %.2f seconds on host %s",
-        tries,
-        elapsed,
-        host,
-    )
-
-
-def backoff_dns_backoff_logging_handler(details: Details) -> None:
-    wait = details.get("wait", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.debug(
-        "DNS query backing off %.2f seconds after %d tries on host %s",
-        wait,
-        tries,
-        host,
-    )
-
-
-def backoff_dns_giveup_logging_handler(details: Details) -> None:
-    elapsed = details.get("elapsed", 0.0)
-    tries = details.get("tries", 0)
-    # args is a tuple(self, server_name, diag_info), we want the second slot
-    host = details.get("args", (None, "arg not found"))[1]
-    backoff_logger.info(
-        "DNS query giving up after %d tries and %.2f seconds on host %s",
-        tries,
-        elapsed,
-        host,
-    )
-
-
-def check_and_maybe_split_server_name(server_name: str) -> Tuple[str, Optional[str]]:
-    """
-    Checks that a server name does not have a scheme prepended to it(something seen
-    in the wild), then splits the server_name from any potential port number that is
-    appended.
-
-    Args:
-        server_name: a server domain as expected by the matrix spec, with or without
-            port number
-
-    Returns: Tuple of the domain and(if it exists) the port as strings(or None)
-    """
-    server_host: str = server_name
-    server_port: Optional[str] = None
-
-    if server_name.startswith(("http:", "https")) or "://" in server_name:
-        raise SchemeError("SchemeError", f"Scheme should not be present for '{server_name}'")
-
-    # str.split() will raise a ValueError if the value to split by isn't there
-    try:
-        server_host, server_port = server_name.split(":", maxsplit=1)
-    except ValueError:
-        # Accept this gracefully, as it is probably the common path
-        pass
-
-    return server_host, server_port
-
-
-def is_this_an_ip_address(host: str) -> bool:
-    """
-    Check with the ipaddress library if this is a Literal IP(works for both ipv4 and
-        ipv6)
-
-    Returns: bool
-    """
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        # This isn't a real ipv4 or ipv6 address
-        # This is probably the common path
-        return False
-
-    return True
 
 
 def _parse_and_check_well_known_response(
@@ -148,8 +57,9 @@ def _parse_and_check_well_known_response(
         # parsing a URL without a scheme, yarl came close. I guess we'll just
         # have to cover the basics by hand.
         try:
-            host, port = check_and_maybe_split_server_name(well_known_result)
-        except SchemeError:
+            host, _port = check_and_maybe_split_server_name(well_known_result)
+            port = str(_port)
+        except WellKnownSchemeError:
             diag_info.error("Well-Known 'm.server' has a scheme when it should not:")
             diag_info.error(f"{well_known_result}", front_pad="      ")
             diag_info.mark_error_on_well_known()
@@ -166,6 +76,10 @@ def _parse_and_check_well_known_response(
     return host, port
 
 
+DNS_SRV_GOOD_RESULT_CACHE_TTL_MS = 1000 * 60 * 60
+DNS_SRV_BAD_RESULT_CACHE_TTL_MS = 1000 * 60
+
+
 class DelegationHandler:
     def __init__(
         self,
@@ -174,11 +88,18 @@ class DelegationHandler:
             Coroutine[Any, Any, ClientResponse],
         ],
     ) -> None:
+        nameserver = Do53Nameserver("192.168.2.1")
         self.dns_resolver = Resolver()
+        self.dns_resolver.nameservers = [nameserver]
+        self.dns_resolver.cache = dns.resolver.LRUCache()
+        # Mapping of (server_name, query_type) -> DNS Query message
+        self.dns_query_cache: TTLCache[tuple[str, str], Message] = TTLCache()
+
+        # self.dns_resolver = Resolver()
         # DNS timeout for a request default is 2 seconds
         # DNS lifetime of requests default is 5 seconds
         # The lifetime we can touch, make it longer to give some more time for slow DNS servers
-        self.dns_resolver.lifetime = 10.0
+        # self.dns_resolver.lifetime = 10.0
         self.json_decoder = json.JSONDecoder()
         self.fed_request_callback = fed_request_callback
 
@@ -188,15 +109,18 @@ class DelegationHandler:
         query_type: str,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
     ):
-        query = dns.message.make_query(server_name, query_type)
-        nameserver = self.dns_resolver.nameservers[0]
+        response = self.dns_query_cache.get((server_name, query_type))
+        if not response:
+            query = dns.message.make_query(server_name, query_type)
 
-        # This returns a tuple(Message, used_tcp_bool), just get the first part
-        response = dns.query.udp_with_fallback(query, str(nameserver))[0]
-
+            # This returns a tuple(Message, used_tcp_bool), just get the first part
+            response = dns.query.udp_with_fallback(query, "192.168.2.1")[0]
+        bad = False
         if response.rcode() == dns.rcode.SERVFAIL:
+            bad = True
             diag_info.error(f"No '{query_type}' record for '{server_name}'(SERVFAIL) potential DNSSEC validation fail")
         elif response.rcode() == dns.rcode.NXDOMAIN:
+            bad = True
             diag_info.error(f"No '{query_type}' record for '{server_name}'(NXDOMAIN)")
 
         if (
@@ -204,8 +128,9 @@ class DelegationHandler:
             and response.rcode() != dns.rcode.NXDOMAIN
             and response.rcode() != dns.rcode.SERVFAIL
         ):
+            bad = True
             server_discovery_logger.warning(
-                f"DNS query {query_type} for {server_name} got {response.rcode()}, {response.answer}"
+                "DNS query %s for %s got %r, %r", query_type, server_name, response.rcode(), response.answer
             )
 
         # NOTE: To disable DNSSEC validation and try again to see what it says. For now, don't use since seems to work
@@ -215,6 +140,11 @@ class DelegationHandler:
         # server_discovery_logger.info(f"DNSSEC fallback response: {response.answer}")
         #
         # a_records: dns.resolver.Answer = await self.dns_resolver.resolve(server_name, "A")
+        self.dns_query_cache.set(
+            (server_name, query_type),
+            response,
+            DNS_SRV_BAD_RESULT_CACHE_TTL_MS if bad else DNS_SRV_GOOD_RESULT_CACHE_TTL_MS,
+        )
         return response
 
     def check_dns_from_list_for_reg_records(
@@ -252,7 +182,7 @@ class DelegationHandler:
             # TODO: Not sure we hit this any more, needs stress testing
             except dns.resolver.NoNameservers:
                 diag_info.add("Hit a possible SERVFAIL condition, working around")
-                server_discovery_logger.warning(f"Do we still hit this? {host}")
+                server_discovery_logger.warning("Do we still hit this? %s", host)
 
             # This one is still used, I think. It hits the backoff system, so I think yes
             except dns.resolver.LifetimeTimeout:
@@ -266,7 +196,7 @@ class DelegationHandler:
 
             except Exception as e:
                 diag_info.error(f"Hit a DNS exception: {e}")
-                server_discovery_logger.error(f"Hit a DNS exception: {e}")
+                server_discovery_logger.error("Hit a DNS exception: %r", e)
 
             else:
                 for ip4 in ip4_list:
@@ -402,7 +332,7 @@ class DelegationHandler:
         # Still not convinced this is necessary anymore, watch for logging to say we are
         except dns.resolver.NoNameservers:
             diag_info.add("Hit a possible SERVFAIL condition, working around")
-            server_discovery_logger.warning(f"Are we still hitting this? SRV lookup {server_name}")
+            server_discovery_logger.warning("Are we still hitting this? SRV lookup %s", server_name)
             try:
                 return await self._check_dns_for_srv_records(server_name, diag_info)
             except Exception as e:
@@ -685,7 +615,7 @@ class DelegationHandler:
                 port=_resolved_port,
                 host=original_host,
                 well_known_host=well_known_host,
-                host_header=f"{well_known_host}:{_resolved_port}",
+                host_header=f"{well_known_host}{':' + well_known_port if well_known_port else ''}",
                 sni_server_name=well_known_host,
                 diag_info=diag_info,
             )
@@ -783,7 +713,6 @@ class DelegationHandler:
 
         Args:
             server_name: The name as supplied from the back of a mxid
-            fed_req_callback: Pass through the callable to retrieve well-known data
             diag_info: Diagnostic collection object
 
         Returns: A ServerResult(or ServerResultError) object with all the information
@@ -817,10 +746,11 @@ class DelegationHandler:
 
         # Try and split the server_name from any potential port
         try:
-            host, port = check_and_maybe_split_server_name(server_name)
+            host, _port = check_and_maybe_split_server_name(server_name)
+            port = str(_port)
 
-        except SchemeError as e:
-            diag_info.error(e.long_exception)
+        except WellKnownSchemeError as e:
+            diag_info.error(f"{e}")
             # TODO: is there something smarter to do here? Pretty sure this can't happen
             raise e
 
@@ -920,7 +850,10 @@ class DelegationHandler:
         if ip4_address_port_tuples or ip6_address_port_tuples:
             if len(ip4_address_port_tuples) > 1 or len(ip6_address_port_tuples) > 1:
                 server_discovery_logger.warning(
-                    f"STEP 5 ISSUE FOUND: {server_name} ip-port tuples potential issue: {ip4_address_port_tuples} {ip6_address_port_tuples}"
+                    "STEP 5 ISSUE FOUND: %s ip-port tuples potential issue: %r %r",
+                    server_name,
+                    ip4_address_port_tuples,
+                    ip6_address_port_tuples,
                 )
 
             return ServerResult(
@@ -992,6 +925,6 @@ class DelegationHandler:
         try:
             await asyncio.wait(test_task_list)
         except Exception as e:
-            server_discovery_logger.warning(f"discover_server: {server_name} had an exception: {e}")
+            server_discovery_logger.warning("discover_server: %s had an exception: %r", server_name, e)
 
         return result

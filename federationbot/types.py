@@ -9,18 +9,35 @@ Provides strongly-typed classes for handling Matrix federation data structures:
 
 from __future__ import annotations
 
-from typing import Any, NewType, Protocol
+from typing import Any
 from dataclasses import dataclass, field
 from enum import Enum, auto
 
-from aiohttp import ClientSession
-from mautrix.types import EventID, RoomID, TextMessageEventContent
 from unpaddedbase64 import decode_base64
 
+from federationbot.primitives import KeyID, ServerName
 from federationbot.utils import full_dict_copy
 
-ServerName = NewType("ServerName", str)  # Type for Matrix server names
-KeyID = NewType("KeyID", str)  # Type for Matrix key identifiers
+
+@dataclass(slots=True, init=False, repr=False)
+class RoomAlias:
+    """House and split the RoomAlias into it's components"""
+
+    alias: str
+    origin_server: str
+    list_of_servers_can_join_via: list[str]
+
+    def __init__(self, room_alias: str) -> None:
+        _split_alias = room_alias.split(":", maxsplit=1)
+        self.alias = _split_alias[0]
+        self.origin_server = _split_alias[1]
+        self.list_of_servers_can_join_via = []
+
+    # def __str__(self) -> str:
+    #     return f"{self.alias}:{self.origin_server}"
+
+    def __repr__(self) -> str:
+        return f"{self.alias}:{self.origin_server}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,32 +226,6 @@ class ServerVerifyKeys:
         self._raw_data = full_dict_copy(data_from_notary_response)
 
 
-class MessageEvent(Protocol):
     """
-    Type protocol for maubot's MessageEvent class.
-
-    This protocol defines the expected interface for message events that commands
-    will receive and interact with.
     """
 
-    room_id: RoomID
-    event_id: EventID
-    sender: str
-    client: ClientSession
-
-    async def respond(
-        self,
-        content: str | TextMessageEventContent,
-        edits: EventID | str | None = None,
-        allow_html: bool = False,
-    ) -> EventID:
-        """Send a response message to the room where this event was received."""
-        ...
-
-    async def mark_read(self) -> None:
-        """Mark this event as read."""
-        ...
-
-    async def reply(self, content: str | TextMessageEventContent, allow_html: bool = False) -> EventID:
-        """Send a reply to this event."""
-        ...

@@ -1,5 +1,4 @@
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
-from dataclasses import asdict
 import asyncio
 import json
 import logging
@@ -12,7 +11,7 @@ from signedjson.sign import SignatureVerifyException, verify_signed_json
 from federationbot.api import FederationApi
 from federationbot.cache import LRUCache
 from federationbot.controllers import ReactionTaskController
-from federationbot.errors import FedBotException, MalformedRoomAliasError
+from federationbot.errors import FedBotException
 from federationbot.events import (
     Event,
     EventBase,
@@ -22,7 +21,8 @@ from federationbot.events import (
     redact_event,
 )
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
-from federationbot.types import KeyContainer, KeyID, ServerVerifyKeys, SignatureVerifyResult
+from federationbot.primitives import KeyID
+from federationbot.types import KeyContainer, RoomAlias, ServerVerifyKeys, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
 fed_handler_logger = logging.getLogger("federation_handler")
@@ -71,7 +71,6 @@ class FederationHandler:
             fetch_server_name=fetch_server_name,
             from_server_name=from_server_name,
             minimum_valid_until_ts=minimum_valid_until_ts,
-            **kwargs,
         )
 
         server_verify_keys = ServerVerifyKeys({})
@@ -182,7 +181,6 @@ class FederationHandler:
         event_id: str,
         inject_new_data: Optional[Dict[str, Any]] = None,
         keys_to_pop: Optional[str] = None,
-        **kwargs,
     ) -> Dict[str, EventBase]:
         """
         Retrieves a single Event from a server. Since the event id will be known, it can
@@ -191,7 +189,6 @@ class FederationHandler:
             origin_server: The server placing the request
             destination_server: The server receiving the request
             event_id: The opaque string of the id given to the Event
-            timeout:
             inject_new_data: Allow for injecting data into the structure for testing verification later
             keys_to_pop: Allow for removing data by key(s) from the structure for testing verification
 
@@ -209,7 +206,6 @@ class FederationHandler:
             destination_server,
             origin_server,
             event_id,
-            **kwargs,
         )
 
         if response.http_code != 200:
@@ -251,7 +247,6 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         events_list: Union[Sequence[str], Set[str]],
-        **kwargs,
     ) -> Dict[str, EventBase]:
         """
         Retrieve multiple Events from a given server. Uses Async Tasks and a Queue to
@@ -261,7 +256,6 @@ class FederationHandler:
             origin_server: The server to auth the request with
             destination_server: The server to ask about the Event
             events_list: Either a Sequence or a Set of Event ID strings
-            timeout:
 
         Returns: A mapping of the Event ID to the Event(or EventError)
 
@@ -278,7 +272,6 @@ class FederationHandler:
                     origin_server=origin_server,
                     destination_server=destination_server,
                     event_id=worker_event_id,
-                    **kwargs,
                 )
 
                 for r_event_id, event_base in event_base_dict.items():
@@ -289,7 +282,7 @@ class FederationHandler:
                 queue.task_done()
 
         fed_handler_logger.debug(
-            f"get_events_from_server: requesting {len(events_list)} events from {destination_server}"
+            "get_events_from_server: requesting %d events from %s", len(events_list), destination_server
         )
         event_queue: asyncio.Queue[str] = asyncio.Queue()
         for event_id in events_list:
@@ -361,14 +354,12 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> Tuple[List[str], List[str]]:
         response = await self.api.get_state_ids(
             origin_server,
             destination_server,
             room_id,
             event_id,
-            **kwargs,
         )
 
         pdu_list = response.json_response.get("pdu_ids", [])
@@ -382,14 +373,12 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id: str,
-        **kwargs,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         response = await self.api.get_state(
             origin_server,
             destination_server,
             room_id,
             event_id,
-            **kwargs,
         )
 
         pdus_list = response.json_response.get("pdus", [])
@@ -399,7 +388,7 @@ class FederationHandler:
 
     async def resolve_room_alias(
         self,
-        room_alias: str,
+        room_alias: RoomAlias,
         origin_server: str,
     ) -> Tuple[str, List[str]]:
         """
@@ -411,20 +400,10 @@ class FederationHandler:
         Returns:
         Raises: ValueError if room_alias does not start with '#' or contain a ':'
         """
-        # Sort out if the room id or alias passed in is valid and resolve the alias
-        # to the room id if it is.
-        try:
-            assert room_alias.startswith("#")
-            _, destination_server = room_alias.split(":", maxsplit=1)
-        except ValueError as e:
-            raise MalformedRoomAliasError(summary_exception="Room Alias did not have ':'") from e
-        except AssertionError as e:
-            raise MalformedRoomAliasError(summary_exception="Room Alias did not start with '#'") from e
-
         # look up the room alias. The server is extracted from the alias itself.
         alias_result = await self.api.get_room_alias_from_directory(
             origin_server,
-            destination_server,
+            room_alias.origin_server,
             room_alias,
         )
 
@@ -443,13 +422,11 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         event_data: Sequence[Dict[str, Any]],
-        **kwargs,
     ) -> MatrixResponse:
         response = await self.api.put_pdu_transaction(
             origin_server,
             destination_server,
             event_data,
-            **kwargs,
         )
 
         return response
@@ -462,7 +439,6 @@ class FederationHandler:
         limit: int = 10,
         since: Optional[str] = None,
         third_party_instance_id: Optional[str] = None,
-        **kwargs,
     ) -> MatrixResponse:
         if not origin_server:
             origin_server = self.hosting_server
@@ -476,7 +452,6 @@ class FederationHandler:
             limit=limit,
             since=since,
             third_party_instance_id=third_party_instance_id,
-            **kwargs,
         )
 
         return response
@@ -486,7 +461,6 @@ class FederationHandler:
         origin_server: Optional[str],
         destination_server: Optional[str],
         room_id: str,
-        **kwargs,
     ) -> int:
         room_version = self.room_version_cache.get(room_id)
         if room_version:
@@ -503,7 +477,6 @@ class FederationHandler:
                 destination_server=destination_server,
                 room_id=room_id,
                 user_id=self.bot_mxid,
-                **kwargs,
             )
         except MatrixError:
             # TODO: Could do something smarter here, like check state
@@ -560,7 +533,6 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         user_id: str,
-        **kwargs,
     ) -> MakeJoinResponse:
         """
 
@@ -579,13 +551,11 @@ class FederationHandler:
             destination_server=destination_server,
             room_id=room_id,
             user_id=user_id,
-            **kwargs,
         )
-        if response.http_code != 200:
-            assert isinstance(response, MatrixError)
+        if isinstance(response, MatrixError):
             raise response
 
-        return MakeJoinResponse(**asdict(response))
+        return MakeJoinResponse(**response.__dict__)
 
     async def get_events_from_backfill(
         self,
@@ -594,7 +564,6 @@ class FederationHandler:
         room_id: str,
         start_event_id: str,
         limit: int = 1,
-        **kwargs,
     ) -> List[EventBase]:
         """
         Retrieve a series of events from the backfill mechanism. This will have 3 types of
@@ -614,7 +583,7 @@ class FederationHandler:
         """
         room_version = await self.discover_room_version(origin_server, destination_server, room_id)
         response = await self.api.get_backfill(
-            origin_server, destination_server, room_id, start_event_id, limit=str(limit), **kwargs
+            origin_server, destination_server, room_id, start_event_id, limit=str(limit)
         )
         if response.http_code != 200:
             # If there was an error, put it into a format that is expected.
@@ -638,7 +607,6 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         event_id_in_timeline: str,
-        **kwargs,
     ) -> List[str]:
         # Should be a faithful recreation of what Synapse does.
 
@@ -671,7 +639,6 @@ class FederationHandler:
             destination_server,
             room_id,
             event_id_in_timeline,
-            **kwargs,
         )
         fed_handler_logger.debug("get_hosts_in_room_ordered: got %d events from state", len(state_events))
         converted_state_events = []
@@ -708,9 +675,8 @@ class FederationHandler:
             destination_server,
             room_id,
             event_id,
-            **kwargs,
         )
-        room_version = await self.discover_room_version(origin_server, destination_server, room_id, **kwargs)
+        room_version = await self.discover_room_version(origin_server, destination_server, room_id)
         list_from_response = response.json_response.get("auth_chain", [])
         list_of_event_bases = parse_list_response_into_list_of_event_bases(list_from_response, room_version)
         return list_of_event_bases

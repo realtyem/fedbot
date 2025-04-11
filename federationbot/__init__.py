@@ -31,14 +31,21 @@ from federationbot.constants import (
     SERVER_VERSION,
 )
 from federationbot.controllers import EmojiReactionCommandStatus
-from federationbot.types import MessageEvent
-
-from .events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
-from .responses import MakeJoinResponse, MatrixError, MatrixResponse
-from .utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
-from .utils.colors import Colors
-from .utils.display import DisplayLineColumnConfig, Justify, pad
-from .utils.formatting import (
+from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
+from federationbot.resolver import (
+    Diagnostics,
+    ServerDiscoveryDnsResult,
+    ServerDiscoveryResult,
+    WellKnownDiagnosticResult,
+    WellKnownLookupFailure,
+    WellKnownLookupResult,
+)
+from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
+from federationbot.protocols import MessageEvent
+from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
+from federationbot.utils.colors import Colors
+from federationbot.utils.display import DisplayLineColumnConfig, Justify, pad
+from federationbot.utils.formatting import (
     add_color,
     bold,
     combine_lines_to_fit_event,
@@ -46,7 +53,7 @@ from .utils.formatting import (
     wrap_in_code_block_markdown,
     wrap_in_details,
 )
-from .utils.matrix import (
+from federationbot.utils.matrix import (
     get_domain_from_id,
     is_event_id,
     is_mxid,
@@ -54,8 +61,8 @@ from .utils.matrix import (
     is_room_id_or_alias,
     make_into_text_event,
 )
-from .utils.numbers import is_int, round_half_up
-from .utils.time import pretty_print_timestamp
+from federationbot.utils.numbers import is_int, round_half_up
+from federationbot.utils.time import pretty_print_timestamp
 
 json_decoder = json.JSONDecoder()
 
@@ -252,7 +259,7 @@ class FederationBot(RoomWalkCommand):
         """
         origin_server = self.federation_handler.hosting_server
         destination_server = target_server or room_id_or_alias.split(":", maxsplit=1)[1]
-        self.log.warning(f"alias: {destination_server}, alias: {room_id_or_alias}")
+        self.log.warning("alias server: %s, alias: %s", destination_server, room_id_or_alias)
         if room_id_or_alias.startswith("!"):
             await command_event.reply("I need a room alias not a room id")
             return
@@ -296,15 +303,8 @@ class FederationBot(RoomWalkCommand):
             )
             return
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_fix or get_domain_from_id(command_event.sender)
@@ -440,7 +440,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             event_id,
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         good_host_list: list[str] = []
@@ -453,7 +452,7 @@ class FederationBot(RoomWalkCommand):
             if server_check and server_check.unhealthy is None:
                 good_host_list.extend((host,))
             else:
-                self.log.warning(f"not using {host} for room_walk2")
+                self.log.warning("not using %s for room_walk2", host)
         # Can now use good_host_list as an ordered list of servers to check for Events
 
         # Initial messages and lines setup. Never end in newline, as the helper handles
@@ -556,7 +555,7 @@ class FederationBot(RoomWalkCommand):
                         if is_this_a_retry:
                             # This should only be hit after a backfill attempt, and
                             # means the second try succeeded.
-                            self.log.info(f"{worker_name}: Hit a Resolved Error on {next_event_id}")
+                            self.log.info("%s: Hit a Resolved Error on %s", worker_name, next_event_id)
                             event_id_resolved_error_list.add(next_event_id)
 
                         seen_depths_for_progress.add(pulled_event.depth)
@@ -593,7 +592,7 @@ class FederationBot(RoomWalkCommand):
                         # TODO: maybe add a backfill of two at this point, to skip over gaps?
                         if not prev_good_events:
                             self.log.warning(
-                                f"{worker_name}: Unexpectedly found an empty prev_good_events on {next_event_id}",
+                                "%s: Unexpectedly found an empty prev_good_events on %s", worker_name, next_event_id
                             )
                         next_list_to_get.update(prev_good_events)
                         next_list_to_get.update(auth_good_events)
@@ -604,7 +603,7 @@ class FederationBot(RoomWalkCommand):
                         # All other opportunities to hit this will have been handled in the
                         # above filter function.
                         # TODO: not any more they aren't
-                        self.log.warning(f"hit an EventError when shouldn't have: {next_event_id}")
+                        self.log.warning("hit an EventError when shouldn't have: %s", next_event_id)
 
                 _time_spent = time.time() - iter_start_time
                 total_time_spent += _time_spent
@@ -659,11 +658,11 @@ class FederationBot(RoomWalkCommand):
 
                 if next_event_id in event_id_ok_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found room walk fetch event in OK list {next_event_id}",
+                        "%s: Unexpectedly found room walk fetch event in OK list %s", worker_name, next_event_id
                     )
                 if next_event_id in event_id_resolved_error_list:
                     self.log.warning(
-                        f"{worker_name}: Unexpectedly found room walk fetch event in RESOLVED list {next_event_id}",
+                        "%s: Unexpectedly found room walk fetch event in RESOLVED list %s", worker_name, next_event_id
                     )
 
                 # start_time = time.time()
@@ -723,9 +722,11 @@ class FederationBot(RoomWalkCommand):
                                 # (filling them in order)
                                 list_of_server_and_event_id_to_send.append((_event_base,))
                                 self.log.info(
-                                    f"{worker_name}: found {popped_event_id} on "
-                                    f"{server_name} after "
-                                    f"{count_of_how_many_servers_tried - 1} other servers",
+                                    "%s: found %s on " "%s after " "%s other servers",
+                                    worker_name,
+                                    popped_event_id,
+                                    server_name,
+                                    count_of_how_many_servers_tried - 1,
                                 )
                                 # But, do we need more
 
@@ -742,8 +743,10 @@ class FederationBot(RoomWalkCommand):
                                         # Already tried searching for this
                                         continue
                                     self.log.warning(
-                                        f"{worker_name}: for: "
-                                        f"{_event_base.event_id}, need prev_event: {_ancestor_event_id}",
+                                        "%s: for: " "%s, need prev_event: %s",
+                                        worker_name,
+                                        _event_base.event_id,
+                                        _ancestor_event_id,
                                     )
                                     already_searching_for_event_id.add(_ancestor_event_id)
 
@@ -754,8 +757,10 @@ class FederationBot(RoomWalkCommand):
                                         # Already tried searching for this
                                         continue
                                     self.log.warning(
-                                        f"{worker_name}: for: "
-                                        f"{_event_base.event_id}, need auth_event: {_ancestor_event_id}",
+                                        "%s: for: " "%s, need auth_event: %s",
+                                        worker_name,
+                                        _event_base.event_id,
+                                        _ancestor_event_id,
                                     )
                                     already_searching_for_event_id.add(_ancestor_event_id)
 
@@ -763,13 +768,13 @@ class FederationBot(RoomWalkCommand):
 
                                 if not prev_bad_events and not auth_bad_events:
                                     self.log.info(
-                                        f"{worker_name}: All events for {_event_base.event_id} were found locally",
+                                        "%s: All events for %s were found locally", worker_name, _event_base.event_id
                                     )
                                 # The event was found, we can skip the rest of the host list on this iteration
 
                             else:
                                 self.log.warning(
-                                    f"{worker_name}: Event did not pass signature check, {_event_base.event_id}",
+                                    "%s: Event did not pass signature check, %s", worker_name, _event_base.event_id
                                 )
                         # else:
                         #     self.log.warning(
@@ -787,7 +792,10 @@ class FederationBot(RoomWalkCommand):
                 # Need to do these in reverse, or the destination server will barf
                 list_of_server_and_event_id_to_send.reverse()
                 self.log.info(
-                    f"{worker_name}: Size of PDU list about to send: {len(list_of_server_and_event_id_to_send)} for {next_event_id}",
+                    "%s: Size of PDU list about to send: %d for %s",
+                    worker_name,
+                    len(list_of_server_and_event_id_to_send),
+                    next_event_id,
                 )
                 list_of_pdus_to_send = []
                 for (event_base,) in list_of_server_and_event_id_to_send:
@@ -797,7 +805,7 @@ class FederationBot(RoomWalkCommand):
                 while list_of_pdus_to_send:
                     limited_list_of_pdus = list_of_pdus_to_send[:50]
                     list_of_pdus_to_send = list_of_pdus_to_send[50:]
-                    self.log.info(f"Size of PDU list about to send: {len(limited_list_of_pdus)}")
+                    self.log.info("Size of PDU list about to send: %d", len(limited_list_of_pdus))
                     response = await self.federation_handler.send_events_to_server(
                         origin_server,
                         destination_server,
@@ -815,7 +823,10 @@ class FederationBot(RoomWalkCommand):
                     ) in response_break_down.items():
                         if pdu_received_result:
                             self.log.info(
-                                f"{worker_name}: Received error from {pdu_event_id} got response of {pdu_received_result}",
+                                "%s: Received error from %s got response of %s",
+                                worker_name,
+                                pdu_event_id,
+                                pdu_received_result,
                             )
 
                 # Update for the render
@@ -837,7 +848,7 @@ class FederationBot(RoomWalkCommand):
                     )
 
                 else:
-                    self.log.warning(f"{worker_name}: Nothing to do, as no events were sent out for {next_event_id}")
+                    self.log.warning("%s: Nothing to do, as no events were sent out for %s", worker_name, next_event_id)
 
                 bot_working[worker_name] = False
 
@@ -894,9 +905,12 @@ class FederationBot(RoomWalkCommand):
                     # found the event, send it back to the event fetch queue for retry
                     not_found = False
                     self.log.info(
-                        f"{worker_name}: Potentially found event on roomwalk(after "
-                        f"{retry_counter} attempts), sending {event_id_to_check} back "
+                        "%s: Potentially found event on roomwalk(after "
+                        "%d attempts), sending %s back "
                         "to event fetcher",
+                        worker_name,
+                        retry_counter,
+                        event_id_to_check,
                     )
                     # The back off mech shouldn't need to wait in this instance, as the
                     # event will already be in the cache. This is considered a 'retry'
@@ -905,7 +919,7 @@ class FederationBot(RoomWalkCommand):
 
             if not_found:
                 self.log.warning(
-                    f"{worker_name}: Not found after {retry_counter} tries, giving up on {event_id_to_check}",
+                    "%s: Not found after %d tries, giving up on %s", worker_name, retry_counter, event_id_to_check
                 )
             # Register the bot as not working, so the render loop knows it's not waiting
             # for anything.
@@ -976,7 +990,7 @@ class FederationBot(RoomWalkCommand):
             if roomwalk_fetch_queue.qsize() == 0 and roomwalk_error_queue.qsize() == 0:
                 if all({not x for x in bot_working.values()}):
                     retry_for_finish += 1
-                    self.log.warning(f"Unexpectedly found no work being processed. Retry count: {retry_for_finish}")
+                    self.log.warning("Unexpectedly found no work being processed. Retry count: %d", retry_for_finish)
                     if retry_for_finish > 5:
                         finish_on_this_round = True
                 else:
@@ -1008,7 +1022,7 @@ class FederationBot(RoomWalkCommand):
             # TODO: Fix this too
             # if new_items_to_render or finish_on_this_round:
 
-            self.log.info(f"mid-render, room_depth difference: {len(seen_depths_for_progress)} / {room_depth}")
+            self.log.info("mid-render, room_depth difference: %d / %d", len(seen_depths_for_progress), room_depth)
             progress_bar.update(seen_depths_for_progress)
             progress_line = progress_bar.render_bitmap_bar()
 
@@ -1099,15 +1113,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_fix or origin_server
@@ -1154,7 +1161,6 @@ class FederationBot(RoomWalkCommand):
             list_of_room_alias_servers[0] if list_of_room_alias_servers else destination_server,
             room_id,
             str(self.client.mxid),
-            timeout=self.command_conn_timeouts["head"] or 10,
         )
         # 2. Get the hosts in the room, test which ones are live and filter out the dead
         await command_event.respond("Retrieving list of hosts in room")
@@ -1163,7 +1169,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             head_data.prev_events[0],
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         good_host_list: list[str] = []
@@ -1225,13 +1230,15 @@ class FederationBot(RoomWalkCommand):
                             _inner_event_base_check = response_check_for_this_event.get(_prev_event_id)
                             if isinstance(_inner_event_base_check, EventError):
                                 # We hit an error, that's what we want to keep looking
-                                self.log.warning(f"event retrieved during inner check: {_inner_event_base_check.error}")
+                                self.log.warning(
+                                    "event retrieved during inner check: %s", _inner_event_base_check.error
+                                )
 
                                 event_ids_to_try_next.put_nowait(_prev_event_id)
-                                self.log.info(f"repair_event: adding event_id to next to try: {_prev_event_id}")
+                                self.log.info("repair_event: adding event_id to next to try: %s", _prev_event_id)
                             elif isinstance(_inner_event_base_check, Event):
                                 self.log.warning(
-                                    f"event retrieved during inner check: {_inner_event_base_check.raw_data}",
+                                    "event retrieved during inner check: %s", _inner_event_base_check.raw_data
                                 )
 
                         break
@@ -1261,14 +1268,14 @@ class FederationBot(RoomWalkCommand):
                     destination_server,
                     [event_base.raw_data],
                 )
-                self.log.info(f"SENT, got response of {response.json_response}")
+                self.log.info("SENT, got response of %s", response.json_response)
                 list_of_buffer_lines.extend(
                     [
                         f"response from server_to_fix:\n{json.dumps(response.json_response, indent=4)}",
                     ]
                 )
             else:
-                self.log.info(f"Unexpectedly not sent {event_base}")
+                self.log.info("Unexpectedly not sent %s", event_base)
 
         # await command_event.respond(
         #     f"Retrieving Hosts for \n"
@@ -1314,15 +1321,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -1367,7 +1367,6 @@ class FederationBot(RoomWalkCommand):
             destination_server,
             room_id,
             event_id,
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         # Time to start rendering. Build the header lines first
@@ -1512,15 +1511,8 @@ class FederationBot(RoomWalkCommand):
         """
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
@@ -1569,15 +1561,8 @@ class FederationBot(RoomWalkCommand):
         """
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         if not event_id:
@@ -1678,7 +1663,7 @@ class FederationBot(RoomWalkCommand):
         if not room_id:
             # The user facing error message was already sent
             return
-        self.log.warning(f"list_of_servers: {list_of_room_alias_servers}")
+        self.log.warning("list_of_servers: %r", list_of_room_alias_servers)
         destination_server = origin_server
         if list_of_room_alias_servers:
             destination_server = list_of_room_alias_servers[0]
@@ -1689,7 +1674,6 @@ class FederationBot(RoomWalkCommand):
                 destination_server,
                 room_id,
                 str(self.client.mxid),
-                timeout=self.command_conn_timeouts["head"] or 10,
             )
         except MatrixError as e:
             message_id = cast(
@@ -1700,13 +1684,12 @@ class FederationBot(RoomWalkCommand):
             return
 
         # room_version = head_response.room_version
-        self.log.info(f"head: {head_response.prev_events}")
+        self.log.info("head: %r", head_response.prev_events)
         host_list = await self.federation_handler.get_hosts_in_room_ordered(
             origin_server,
             destination_server,
             room_id,
             head_response.prev_events[0],
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
         list_of_message_ids: list[EventID] = []
 
@@ -1744,7 +1727,6 @@ class FederationBot(RoomWalkCommand):
                     _host,
                     room_id,
                     str(self.client.mxid),
-                    timeout=self.command_conn_timeouts["head"] or 10,
                 )
             except MatrixError as _e:
                 # self.log.warning(f"_head_task: {_host}: {_e}")
@@ -1789,7 +1771,7 @@ class FederationBot(RoomWalkCommand):
                     assert isinstance(_result_sort, MakeJoinResponse)
                     good_results_queue.put_nowait((_host_sort, _result_sort))
             except BaseException as e:
-                self.log.warning(f"Found an exception: {e}")
+                self.log.warning("Found an exception: %r", e)
 
         async def _head_parsing_worker(_queue: asyncio.Queue[tuple[str, MakeJoinResponse]]) -> None:
             _host, _result = _queue.get_nowait()
@@ -2015,10 +1997,9 @@ class FederationBot(RoomWalkCommand):
                         worker_server_name,
                         force_rediscover=True,
                         diagnostics=True,
-                        timeout=10.0,
                     )
                 except Exception as e:
-                    self.log.debug(f"delegation worker error: {e}")
+                    self.log.debug("delegation worker error: %r", e)
                 queue.task_done()
 
         delegation_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -2173,15 +2154,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -2240,15 +2214,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         if server_to_request_from:
@@ -2283,15 +2250,15 @@ class FederationBot(RoomWalkCommand):
             and "{" in test_json_to_inject_or_keys_to_pop
             and "}" in test_json_to_inject_or_keys_to_pop
         ):
-            self.log.info(f"test_json_to_inject_or_keys_to_pop: {test_json_to_inject_or_keys_to_pop}")
+            self.log.info("test_json_to_inject_or_keys_to_pop: %r", test_json_to_inject_or_keys_to_pop)
             right_most_bracket = test_json_to_inject_or_keys_to_pop.rindex("}")
             json_bit = test_json_to_inject_or_keys_to_pop[: right_most_bracket + 1]
-            self.log.info(f"incoming inject: {json_bit}")
+            self.log.info("incoming inject: %s", json_bit)
             test_json_dumped = json.loads(json_bit)
-            self.log.info(f"after json.loads: {test_json_dumped}")
+            self.log.info("after json.loads: %r", test_json_dumped)
 
             remove_bit = test_json_to_inject_or_keys_to_pop[right_most_bracket + 1 :]
-            self.log.info(f"remove_bit: {remove_bit}")
+            self.log.info("remove_bit: %r", remove_bit)
             # returned_event.raw_data.update(test_json_dumped)
             # self.log.info(f"dumped raw_data:\n{json.dumps(returned_event.raw_data, indent=4)}")
 
@@ -2404,15 +2371,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -2458,7 +2418,6 @@ class FederationBot(RoomWalkCommand):
             destination_server=destination_server,
             room_id=room_id,
             event_id=event_id,
-            timeout=self.command_conn_timeouts["state"] or 10,
         )
 
         prerender_message_2 = await command_event.respond(
@@ -2644,7 +2603,7 @@ class FederationBot(RoomWalkCommand):
         header_messages.extend([f"{pad('', header_message_line_size, pad_with='-')}"])
 
         # Alphabetical looks nicer
-        sorted_list_of_servers = sorted(list_of_servers_to_check)
+        sorted_list_of_servers = sorted(server_to_version_data.keys())
 
         # Collect all the output lines for chunking afterward
         list_of_result_data = []
@@ -2669,8 +2628,8 @@ class FederationBot(RoomWalkCommand):
                 buffered_message += f"{add_color(bold(ok_or_fail_col.pad('PASS')), foreground=Colors.GREEN)}"
                 buffered_message += f"{ok_or_fail_col.horizontal_separator}"
                 calculated_time = -1.0
-                if server_data.diag_info:
-                    context = server_data.diag_info.trace_ctx
+                if server_data.tracing_context:
+                    context = server_data.tracing_context
                     if context:
                         end_time = context.request_end
                         # if context.request_chunk_sent:
@@ -2816,10 +2775,9 @@ class FederationBot(RoomWalkCommand):
             if server_data:
                 # Federation request may have had an error, handle those errors here
                 if server_data.http_code != 200:
-                    # Pad the software column with spaces, so the error and the code end up in the version column
-                    # Additionally, since this is the error clause, don't include the vertical line to separate
-                    # the column, giving a more distinctive visual indicator.
-                    buffered_message += f"{server_software_col.pad('')}   "
+                    # Don't include the vertical line to separate the column, giving a more distinctive visual
+                    # indicator.
+                    buffered_message += "❌ "
 
                     buffered_message += f"{str(server_data.http_code) + ': ' if server_data.http_code > 0 else ''}{server_data.reason}\n"
 
@@ -2869,13 +2827,16 @@ class FederationBot(RoomWalkCommand):
         async def _version_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
+                try:
+                    result = await self.federation_handler.api.get_server_version_new(
+                        worker_server_name,
+                        diagnostics=True,
+                    )
 
-                result = await self.federation_handler.api.get_server_version(
-                    worker_server_name,
-                    diagnostics=True,
-                )
-
-                server_to_version_data[worker_server_name] = result
+                    server_to_version_data[worker_server_name] = result
+                except Exception as e:
+                    self.log.warning("_version_worker: %s: %r", worker_server_name, e)
+                    pass
                 queue.task_done()
 
         version_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -2900,7 +2861,7 @@ class FederationBot(RoomWalkCommand):
     async def server_keys_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info",
+                "**Usage**: !fed server_keys <server_name>\n - Check a server for its public server keys",
             )
             return
         await self._server_keys(command_event, server_to_check)
@@ -2910,7 +2871,7 @@ class FederationBot(RoomWalkCommand):
     async def server_keys_raw_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
         if not server_to_check:
             await command_event.reply(
-                "**Usage**: !fed server_keys <server_name>\n - Check a server in the room for version info",
+                "**Usage**: !fed server_keys <server_name>\n - Check a server for its public server keys(but with raw json returned)",
             )
             return
         await self._server_keys(command_event, server_to_check, display_raw=True)
@@ -2997,12 +2958,13 @@ class FederationBot(RoomWalkCommand):
         async def _server_keys_worker(queue: asyncio.Queue[str]) -> None:
             while True:
                 worker_server_name = await queue.get()
-
-                server_to_server_data[worker_server_name] = await self.federation_handler.api.get_server_keys(
-                    worker_server_name,
-                    timeout=10.0,
-                )
-
+                try:
+                    server_to_server_data[worker_server_name] = await self.federation_handler.api.get_server_keys(
+                        worker_server_name,
+                    )
+                except Exception as e:
+                    self.log.error("_server_keys_worker: %r", e, stack_info=True)
+                    pass
                 queue.task_done()
 
         keys_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -3420,15 +3382,8 @@ class FederationBot(RoomWalkCommand):
             await command_event.reply(f"I got a limit number that could not be converted into an integer: {limit}")
             return
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -3517,7 +3472,7 @@ class FederationBot(RoomWalkCommand):
             line_summary = event_base.to_template_line_summary(template_list)
             line_summary += " "
             line_summary += event_base.to_extras_summary()
-            line_summary += f"{line_summary}\n"
+            line_summary += "\n"
 
             list_of_buffer_lines.extend([line_summary])
 
@@ -3548,15 +3503,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         destination_server = server_to_request_from or origin_server
@@ -3600,7 +3548,6 @@ class FederationBot(RoomWalkCommand):
                 destination_server,
                 room_id,
                 event_id,
-                timeout=self.command_conn_timeouts["state"] or 10,
             )
         except MatrixError as e:
             await command_event.respond(f"Some kind of error\n{e.http_code}:{e.reason}")
@@ -3683,15 +3630,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         _, destination_server = user_mxid.split(":", maxsplit=1)
@@ -3744,15 +3684,8 @@ class FederationBot(RoomWalkCommand):
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # The only way to request from a different server than what the bot is on is to
-        # have the other server's signing keys. So just use the bot's server.
-        origin_server = get_domain_from_id(self.client.mxid)
-        if origin_server not in self.server_signing_keys:
-            await command_event.respond(
-                "This bot does not seem to have the necessary clearance to make "
-                f"requests on the behalf of it's server({origin_server}). Please add "
-                "server signing keys to it's config first.",
-            )
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
 
         room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
@@ -3787,14 +3720,13 @@ class FederationBot(RoomWalkCommand):
         else:
             event_id_from_room_right_now: str | None = ts_response.json_response.get("event_id", None)
             assert event_id_from_room_right_now is not None
-            self.log.debug(f"Timestamp to event responded with event_id: {event_id_from_room_right_now}")
+            self.log.debug("Timestamp to event responded with event_id: %r", event_id_from_room_right_now)
             # Get all the hosts in the supplied room
             host_list = await self.federation_handler.get_hosts_in_room_ordered(
                 origin_server,
                 origin_server,
                 room_id,
                 event_id_from_room_right_now,
-                timeout=self.command_conn_timeouts["state"] or 10,
             )
 
         use_ordered_list = True
@@ -3971,7 +3903,7 @@ class FederationBot(RoomWalkCommand):
             )
             if public_room_result.http_code != 200:
                 self.log.warning(
-                    f"Hit an error on public rooms: {public_room_result.http_code} {public_room_result.reason}",
+                    "Hit an error on public rooms: %d %s", public_room_result.http_code, public_room_result.reason
                 )
                 if retry_count > 3:
                     await command_event.respond(
@@ -3983,7 +3915,7 @@ class FederationBot(RoomWalkCommand):
                 continue
 
             since = public_room_result.json_response.get("next_batch", None)
-            self.log.info(f"Next batch: {since}")
+            self.log.info("Next batch: %r", since)
             if not since:
                 done = True
 
@@ -4055,6 +3987,673 @@ class FederationBot(RoomWalkCommand):
             list_of_message_ids.extend([message_id])
         for message_id in list_of_message_ids:
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+
+    @test_command.subcommand(name="wellknown")
+    @command.argument(name="server_to_check", label="Server To Check", required=True)
+    async def well_know_command(self, command_event: MessageEvent, server_to_check: str) -> None:
+        """
+        Check server delegation information.
+
+        Checks server discovery and delegation setup including well-known
+        records and SRV records.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check delegation for
+        """
+        list_of_servers_to_check = set()
+
+        await command_event.mark_read()
+
+        # It may be that they are using their mxid as the server to check, parse that
+        maybe_user_mxid = is_mxid(server_to_check)
+        if maybe_user_mxid:
+            server_to_check = get_domain_from_id(maybe_user_mxid)
+
+        # As an undocumented option, allow passing in a room_id to check an entire room.
+        # This can be rather long(and time consuming) so we'll place limits later.
+        maybe_room_id = is_room_id_or_alias(server_to_check)
+        if maybe_room_id:
+            origin_server = get_domain_from_id(self.client.mxid)
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
+            # Need to cancel server_to_check, but can't use None
+            server_to_check = ""
+            if not room_to_check:
+                # Don't need to actually display an error, that's handled in the above
+                # function
+                return
+        else:
+            # with server_to_check being set, this will be ignored any way
+            room_to_check = command_event.room_id
+
+        # server_to_check has survived this far, add it to the set of servers to search
+        # for. Since we allow for searching an entire room, it will be the only server
+        # in the set.
+        if server_to_check:
+            list_of_servers_to_check.add(server_to_check)
+
+        # The list of servers was empty. This implies that a room_id was provided,
+        # let's check.
+        if not list_of_servers_to_check:
+            try:
+                assert room_to_check is not None
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+
+            except MForbidden:
+                await command_event.respond(NOT_IN_ROOM_ERROR)
+                return
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
+        number_of_servers = len(list_of_servers_to_check)
+
+        # Some quality of life niceties
+        prerender_message = await command_event.respond(
+            f"Retrieving data from federation for {number_of_servers} "
+            f"server{'s.' if number_of_servers > 1 else '.'}\n"
+            "This may take up to 30 seconds to complete.",
+        )
+        list_of_message_ids: list[EventID] = [prerender_message]
+
+        # map of server name -> (server brand, server version)
+        server_to_server_data: dict[str, WellKnownLookupResult] = {}
+        set_of_server_names = set(list_of_servers_to_check)
+
+        async def _delegation_worker(queue: asyncio.Queue[str]) -> None:
+            while True:
+                worker_server_name = await queue.get()
+
+                # The 'get_server_version' function was written with the capability of
+                # collecting diagnostic data.
+                try:
+                    server_to_server_data[worker_server_name] = (
+                        await self.federation_handler.api.federation_transport.server_discovery.get_well_known(
+                            worker_server_name, [], Diagnostics()
+                        )
+                    )
+                    set_of_server_names.discard(worker_server_name)
+                except Exception as e:
+                    self.log.warning("delegation worker error on %s: %r", worker_server_name, e, exc_info=True)
+                    raise
+                queue.task_done()
+
+        delegation_queue: asyncio.Queue[str] = asyncio.Queue()
+        for server_name in list_of_servers_to_check:
+            delegation_queue.put_nowait(server_name)
+
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
+
+        self.reaction_task_controller.add_tasks(
+            reference_key,
+            _delegation_worker,
+            delegation_queue,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
+        )
+
+        started_at = time.monotonic()
+        await delegation_queue.join()
+        await self.reaction_task_controller.cancel(reference_key)
+        total_time = time.monotonic() - started_at
+
+        # Want the full room version it to look like this for now
+        #
+        #   Server Name | Status | Host                 | Port  | TLS served by  |
+        # ------------------------------------------------------------------
+        #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
+        # somewhere.net |    404 | None                 | Error | resty          | Long error....
+        #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
+
+        # The single server version will be the same in that a single line like above
+        # will be printed, then the rendered diagnostic data
+
+        # Create the columns to be used
+        server_name_col = DisplayLineColumnConfig("Server Name")
+        status_col = DisplayLineColumnConfig("Status")
+        host_col = DisplayLineColumnConfig("Host")
+        port_col = DisplayLineColumnConfig("Port")
+        tls_served_by_col = DisplayLineColumnConfig("TLS served by")
+        # errors_col = DisplayLineColumnConfig("Errors")
+
+        # Iterate through the server names to widen the column, if necessary.
+        for server_name, response in server_to_server_data.items():
+            # Only if it's not obnoxiously long, saw an over 66 once(you know who you are)
+            if not len(server_name) > 30:
+                server_name_col.maybe_update_column_width(len(server_name))
+            if isinstance(response, WellKnownDiagnosticResult):
+                host_col.maybe_update_column_width(response.host)
+                port_col.maybe_update_column_width(response.port)
+                if maybe_tls_server := response.headers.get("server", None):
+                    tls_served_by_col.maybe_update_column_width(len(maybe_tls_server))
+
+        # Just use a fixed width for the results. Should never be larger than 5 for most
+        status_col.maybe_update_column_width(6)
+
+        # Begin constructing the message
+        #
+        # Use a sorted list of server names, so it displays in alphabetical order.
+        server_results_sorted = sorted(server_to_server_data.keys())
+
+        servers_missing = list_of_servers_to_check - set(server_results_sorted)
+        # Build the header line
+        header_message = (
+            f"{server_name_col.front_pad()} | "
+            f"{status_col.pad()} | "
+            f"{host_col.pad()} | "
+            f"{port_col.pad()} | "
+            f"{tls_served_by_col.pad()} | "
+            f"Errors\n"
+        )
+
+        # Need the total of the width for the code block table to make the delimiter
+        header_line_size = len(header_message)
+
+        # Create the delimiter line under the header
+        header_message += f"{pad('', header_line_size, pad_with='-')}\n"
+
+        list_of_result_data = []
+        # Use the sorted list from earlier, alphabetical looks nicer
+        for server_name in server_results_sorted:
+            response = server_to_server_data[server_name]
+
+            # Want the full room version it to look like this for now
+            #
+            #   Server Name | Status | Host                 | Port  | TLS served by  | Errors
+            # ------------------------------------------------------------------
+            #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
+            # somewhere.net |    404 | None                 | Error | resty          | Long error....
+            #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
+
+            buffered_message = f"{server_name_col.front_pad(server_name)} | "
+            if isinstance(response, WellKnownDiagnosticResult):
+                buffered_message += f"{status_col.pad(response.status_code)} | "
+                buffered_message += f"{host_col.pad(response.host)} | "
+                buffered_message += f"{port_col.pad(response.port)} | "
+
+                maybe_tls_server = response.headers.get("server")
+                buffered_message += f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')} | "
+
+                buffered_message += "\n"
+
+            else:
+                assert isinstance(response, WellKnownLookupFailure)
+                # Sometimes status_code can be None, but if we let that ride it shows up as the header name of the column
+                buffered_message += f"{status_col.pad(response.status_code or '')} | "
+                buffered_message += f"{response.reason}\n"
+
+            list_of_result_data.extend([buffered_message])
+
+        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_missing}\n"
+        list_of_result_data.extend([footer_message])
+
+        # For a single server test, the response will fit into a single message block.
+        # However, for a roomful it could be several pages long. Chunk those responses
+        # to fit into the size limit of an Event.
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
+
+        for chunk in final_list_of_data:
+            current_message = await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for current_message in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
+
+    @test_command.subcommand(name="dns")
+    @command.argument(name="server_to_check", label="Server To Check", required=True)
+    async def dns_command(self, command_event: MessageEvent, server_to_check: str) -> None:
+        """
+        Check server delegation information.
+
+        Checks server discovery and delegation setup including well-known
+        records and SRV records.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check delegation for
+        """
+        list_of_servers_to_check = set()
+
+        await command_event.mark_read()
+
+        # It may be that they are using their mxid as the server to check, parse that
+        maybe_user_mxid = is_mxid(server_to_check)
+        if maybe_user_mxid:
+            server_to_check = get_domain_from_id(maybe_user_mxid)
+
+        # As an undocumented option, allow passing in a room_id to check an entire room.
+        # This can be rather long(and time consuming) so we'll place limits later.
+        maybe_room_id = is_room_id_or_alias(server_to_check)
+        if maybe_room_id:
+            origin_server = get_domain_from_id(self.client.mxid)
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
+            # Need to cancel server_to_check, but can't use None
+            server_to_check = ""
+            if not room_to_check:
+                # Don't need to actually display an error, that's handled in the above
+                # function
+                return
+        else:
+            # with server_to_check being set, this will be ignored any way
+            room_to_check = command_event.room_id
+
+        # server_to_check has survived this far, add it to the set of servers to search
+        # for. Since we allow for searching an entire room, it will be the only server
+        # in the set.
+        if server_to_check:
+            list_of_servers_to_check.add(server_to_check)
+
+        # The list of servers was empty. This implies that a room_id was provided,
+        # let's check.
+        if not list_of_servers_to_check:
+            try:
+                assert room_to_check is not None
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+
+            except MForbidden:
+                await command_event.respond(NOT_IN_ROOM_ERROR)
+                return
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
+        number_of_servers = len(list_of_servers_to_check)
+
+        # Some quality of life niceties
+        prerender_message = await command_event.respond(
+            f"Retrieving data from federation for {number_of_servers} "
+            f"server{'s.' if number_of_servers > 1 else '.'}\n"
+            "This may take up to 30 seconds to complete.",
+        )
+        list_of_message_ids: list[EventID] = [prerender_message]
+
+        # map of server name -> (server brand, server version)
+        server_to_server_data: dict[str, ServerDiscoveryDnsResult] = {}
+        set_of_server_names = set(list_of_servers_to_check)
+
+        async def _delegation_worker(queue: asyncio.Queue[str]) -> None:
+            while True:
+                worker_server_name = await queue.get()
+
+                try:
+                    server_to_server_data[worker_server_name] = (
+                        await self.federation_handler.api.federation_transport.server_discovery.exp_dns_resolver.resolve_reg_records(
+                            worker_server_name, Diagnostics()
+                        )
+                    )
+                    set_of_server_names.discard(worker_server_name)
+                except Exception as e:
+                    self.log.warning("delegation worker error on %s: %r", worker_server_name, e, exc_info=True)
+                    raise
+                queue.task_done()
+
+        delegation_queue: asyncio.Queue[str] = asyncio.Queue()
+        for server_name in list_of_servers_to_check:
+            delegation_queue.put_nowait(server_name)
+
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
+
+        self.reaction_task_controller.add_tasks(
+            reference_key,
+            _delegation_worker,
+            delegation_queue,
+            limit=MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
+        )
+
+        started_at = time.monotonic()
+        await delegation_queue.join()
+        await self.reaction_task_controller.cancel(reference_key)
+        total_time = time.monotonic() - started_at
+
+        # Want the full room version it to look like this for now
+        #
+        #   Server Name | Status | Host                 | Port  | TLS served by  |
+        # ------------------------------------------------------------------
+        #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
+        # somewhere.net |    404 | None                 | Error | resty          | Long error....
+        #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
+
+        # The single server version will be the same in that a single line like above
+        # will be printed, then the rendered diagnostic data
+
+        # Create the columns to be used
+        server_name_col = DisplayLineColumnConfig("Server Name")
+        results_col = DisplayLineColumnConfig("Results")
+        # host_col = DisplayLineColumnConfig("Host")
+        # port_col = DisplayLineColumnConfig("Port")
+        # tls_served_by_col = DisplayLineColumnConfig("TLS served by")
+        # errors_col = DisplayLineColumnConfig("Errors")
+
+        # Iterate through the server names to widen the column, if necessary.
+        for server_name, response in server_to_server_data.items():
+            # Only if it's not obnoxiously long, saw an over 66 once(you know who you are)
+            if not len(server_name) > 30:
+                server_name_col.maybe_update_column_width(len(server_name))
+            # if isinstance(response, WellKnownDiagnosticResult):
+            # results_col.maybe_update_column_width(response.host)
+            # port_col.maybe_update_column_width(response.port)
+            # if maybe_tls_server := response.headers.get("server", None):
+            #     tls_served_by_col.maybe_update_column_width(len(maybe_tls_server))
+
+        # Just use a fixed width for the results. Should never be larger than 5 for most
+        # status_col.maybe_update_column_width(6)
+
+        # Begin constructing the message
+        #
+        # Use a sorted list of server names, so it displays in alphabetical order.
+        server_results_sorted = sorted(server_to_server_data.keys())
+
+        servers_missing = list_of_servers_to_check - set(server_results_sorted)
+        # Build the header line
+        header_message = (
+            f"{server_name_col.front_pad()} | "
+            f"{results_col.pad()} | \n"
+            # f"{host_col.pad()} | "
+            # f"{port_col.pad()} | "
+            # f"{tls_served_by_col.pad()} | "
+            # f"Errors\n"
+        )
+
+        # Need the total of the width for the code block table to make the delimiter
+        header_line_size = len(header_message)
+
+        # Create the delimiter line under the header
+        header_message += f"{pad('', header_line_size, pad_with='-')}\n"
+
+        list_of_result_data = []
+        # Use the sorted list from earlier, alphabetical looks nicer
+        for server_name in server_results_sorted:
+            response = server_to_server_data[server_name]
+
+            # Want the full room version it to look like this for now
+            #
+            #   Server Name | Status | Host                 | Port  | TLS served by  | Errors
+            # ------------------------------------------------------------------
+            #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
+            # somewhere.net |    404 | None                 | Error | resty          | Long error....
+            #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
+
+            buffered_message = f"{server_name_col.front_pad(server_name)} | "
+            # if isinstance(response, WellKnownDiagnosticResult):
+            buffered_message += f"{results_col.pad(str(response))}"
+            # buffered_message += f"{host_col.pad(response.host)} | "
+            # buffered_message += f"{port_col.pad(response.port)} | "
+            #
+            # maybe_tls_server = response.headers.get("server")
+            # buffered_message += f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')} | "
+            #
+            buffered_message += "\n"
+
+            # else:
+            #     assert isinstance(response, WellKnownLookupFailure)
+            #     # Sometimes status_code can be None, but if we let that ride it shows up as the header name of the column
+            #     buffered_message += f"{status_col.pad(response.status_code or '')} | "
+            #     buffered_message += f"{response.reason}\n"
+
+            list_of_result_data.extend([buffered_message])
+
+        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_missing}\n"
+        list_of_result_data.extend([footer_message])
+
+        # For a single server test, the response will fit into a single message block.
+        # However, for a roomful it could be several pages long. Chunk those responses
+        # to fit into the size limit of an Event.
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
+
+        for chunk in final_list_of_data:
+            current_message = await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for current_message in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
+
+    @test_command.subcommand(name="delegation")
+    @command.argument(name="server_to_check", label="Server To Check", required=True)
+    async def discover_server_command(self, command_event: MessageEvent, server_to_check: str) -> None:
+        """
+        Check server delegation information.
+
+        Checks server discovery and delegation setup including well-known
+        records and SRV records.
+
+        Args:
+            command_event: Event that triggered the command
+            server_to_check: Server name to check delegation for
+        """
+        list_of_servers_to_check = set()
+
+        await command_event.mark_read()
+
+        # It may be that they are using their mxid as the server to check, parse that
+        maybe_user_mxid = is_mxid(server_to_check)
+        if maybe_user_mxid:
+            server_to_check = get_domain_from_id(maybe_user_mxid)
+
+        # As an undocumented option, allow passing in a room_id to check an entire room.
+        # This can be rather long(and time consuming) so we'll place limits later.
+        maybe_room_id = is_room_id_or_alias(server_to_check)
+        if maybe_room_id:
+            origin_server = get_domain_from_id(self.client.mxid)
+            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
+            # Need to cancel server_to_check, but can't use None
+            server_to_check = ""
+            if not room_to_check:
+                # Don't need to actually display an error, that's handled in the above
+                # function
+                return
+        else:
+            # with server_to_check being set, this will be ignored any way
+            room_to_check = command_event.room_id
+
+        # server_to_check has survived this far, add it to the set of servers to search
+        # for. Since we allow for searching an entire room, it will be the only server
+        # in the set.
+        if server_to_check:
+            list_of_servers_to_check.add(server_to_check)
+
+        # The list of servers was empty. This implies that a room_id was provided,
+        # let's check.
+        if not list_of_servers_to_check:
+            try:
+                assert room_to_check is not None
+                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
+
+            except MForbidden:
+                await command_event.respond(NOT_IN_ROOM_ERROR)
+                return
+
+            for member in joined_members:
+                list_of_servers_to_check.add(get_domain_from_id(member))
+
+        number_of_servers = len(list_of_servers_to_check)
+
+        # Some quality of life niceties
+        prerender_message = await command_event.respond(
+            f"Retrieving data from federation for {number_of_servers} "
+            f"server{'s.' if number_of_servers > 1 else '.'}\n"
+            "This may take up to 30 seconds to complete.",
+        )
+        list_of_message_ids: list[EventID] = [prerender_message]
+
+        # map of server name -> (server brand, server version)
+        server_to_server_data: dict[str, MatrixResponse] = {}
+        set_of_server_names = set(list_of_servers_to_check)
+
+        async def _discover_worker(queue: asyncio.Queue[str]) -> None:
+            while True:
+                worker_server_name = await queue.get()
+
+                try:
+                    server_to_server_data[worker_server_name] = (
+                        await self.federation_handler.api.get_server_version_new(
+                            worker_server_name,
+                            diagnostics=True,
+                        )
+                    )
+                    set_of_server_names.discard(worker_server_name)
+                except Exception:
+                    # self.log.warning("discover worker error on %s: %r", worker_server_name, e, exc_info=True)
+                    pass
+                queue.task_done()
+
+        delegation_queue: asyncio.Queue[str] = asyncio.Queue()
+        for server_name in list_of_servers_to_check:
+            delegation_queue.put_nowait(server_name)
+
+        reference_key = self.reaction_task_controller.setup_task_set(command_event.event_id)
+        await self.client.set_typing(command_event.room_id, 1000 * 60 * 2)
+        self.reaction_task_controller.add_tasks(
+            reference_key,
+            _discover_worker,
+            delegation_queue,
+            limit=100,
+        )
+
+        started_at = time.monotonic()
+        await delegation_queue.join()
+        await self.reaction_task_controller.cancel(reference_key)
+        total_time = time.monotonic() - started_at
+        await self.client.set_typing(command_event.room_id, 0)
+        # Want the full room version to look like this for now
+        #
+        #   Server Name | WK   | SRV  | DNS  | Test  | SNI | SRT | TLS served by  |
+        # ------------------------------------------------------------------
+        #   example.org | OK   | None | OK   | OK    |     |     | Synapse 1.92.0 |
+        # somewhere.net | None | None | None | Error |     |     | resty          | Long error....
+        #   maunium.net | OK   | OK   | OK   | OK    | SNI |     | Caddy          |
+
+        # The single server version will be the same in that a single line like above
+        # will be printed, then the rendered diagnostic data
+
+        # Create the columns to be used
+        server_name_col = DisplayLineColumnConfig("Server Name")
+        well_known_status_col = DisplayLineColumnConfig("WK", initial_size=5)
+        srv_status_col = DisplayLineColumnConfig("SRV", initial_size=5)
+        dns_status_col = DisplayLineColumnConfig("DNS", initial_size=5)
+        connective_test_status_col = DisplayLineColumnConfig("Test", initial_size=5)
+        sni_col = DisplayLineColumnConfig("SNI")
+        srt_col = DisplayLineColumnConfig("SRT", 5, justify=Justify.RIGHT)
+        crt_col = DisplayLineColumnConfig("CRT", 5, justify=Justify.RIGHT)
+        tls_served_by_col = DisplayLineColumnConfig("TLS served by")
+
+        # Iterate through the server names to widen the column, if necessary.
+        for server_name, response in server_to_server_data.items():
+            # Only if it's not obnoxiously long, saw an over 66 once(you know who you are)
+            if not len(server_name) > 30:
+                server_name_col.maybe_update_column_width(len(server_name))
+            if isinstance(response, MatrixFederationResponse):
+                well_known_status_col.maybe_update_column_width(response.diagnostics.status.well_known)
+                srv_status_col.maybe_update_column_width(response.diagnostics.status.srv)
+                dns_status_col.maybe_update_column_width(response.diagnostics.status.dns)
+                connective_test_status_col.maybe_update_column_width(response.diagnostics.status.connection)
+
+                # If this header is not present, just using "" means it will register as a zero length string
+                tls_served_by = response.headers.get("server", "")
+                tls_served_by_col.maybe_update_column_width(len(tls_served_by))
+
+        # Just use a fixed width for the results. Should never be larger than 5 for most
+        # status_col.maybe_update_column_width(6)
+
+        # Begin constructing the message
+        #
+        # Use a sorted list of server names, so it displays in alphabetical order.
+        server_results_sorted = sorted(server_to_server_data.keys())
+
+        servers_missing = list_of_servers_to_check - set(server_results_sorted)
+        # Build the header line
+
+        header_message = (
+            f"{server_name_col.front_pad()} | "
+            f"{well_known_status_col.pad()} | "
+            f"{srv_status_col.pad()} | "
+            f"{dns_status_col.pad()} | "
+            f"{connective_test_status_col.pad()} | "
+            f"{sni_col.pad()} | "
+            f"{srt_col.pad()} | "
+            f"{crt_col.pad()} | "
+            f"{tls_served_by_col.pad()}\n"
+        )
+
+        # Need the total of the width for the code block table to make the delimiter
+        header_line_size = len(header_message)
+
+        # Create the delimiter line under the header
+        header_message += f"{pad('', header_line_size, pad_with='-')}\n"
+
+        list_of_result_data = []
+        # Use the sorted list from earlier, alphabetical looks nicer
+        for server_name in server_results_sorted:
+            response = server_to_server_data[server_name]
+
+            # Want the full room version it to look like this for now
+            #
+            #   Server Name | WK   | SRV  | DNS  | Test  | SNI | SRT | CRT | TLS served by  |
+            # ------------------------------------------------------------------
+            #   example.org | OK   | None | OK   | OK    |     |     |     | Synapse 1.92.0 |
+            # somewhere.net | None | None | None | Error |     |     |     | resty          | Long error....
+            #   maunium.net | OK   | OK   | OK   | OK    | SNI |     |     | Caddy          |
+
+            buffered_message = f"{server_name_col.front_pad(server_name)} | "
+            assert isinstance(response.diagnostics, Diagnostics)
+            buffered_message += f"{well_known_status_col.pad(response.diagnostics.status.well_known)} | "
+            buffered_message += f"{srv_status_col.pad(response.diagnostics.status.srv)} | "
+            buffered_message += f"{dns_status_col.pad(response.diagnostics.status.dns)} | "
+            buffered_message += f"{connective_test_status_col.pad(response.diagnostics.status.connection)} | "
+            if isinstance(response, MatrixFederationResponse):
+                assert isinstance(response.server_result, ServerDiscoveryResult)
+                buffered_message += (
+                    f"{sni_col.pad('X' if response.server_result.sni != response.server_result.hostname else '')} | "
+                )
+                buffered_message += f"{srt_col.pad('%.3f' % response.server_result.time_for_complete_delegation)} | "
+                buffered_message += f"{crt_col.pad('%.3f' % response.time_taken)} | "
+                buffered_message += f"{tls_served_by_col.pad(response.headers.get('server'))} | "
+            else:
+                assert isinstance(response, MatrixError)
+                buffered_message += f"{response.reason}"
+
+            # maybe_tls_server = response.headers.get("server")
+            # buffered_message += f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')} | "
+
+            # else:
+            #     buffered_message += f"{response}"
+
+            buffered_message += "\n"
+            if number_of_servers == 1:
+                # Print the diagnostic summary, since there is only one server there
+                # is no need to be brief.
+                buffered_message += f"{pad('', header_line_size, pad_with='-')}\n"
+                for line in response.diagnostics.output_list:
+                    buffered_message += f"{pad('', 3)}{line}\n"
+
+                buffered_message += f"{pad('', header_line_size, pad_with='-')}\n"
+
+            # else:
+            #     assert isinstance(response, WellKnownLookupFailure)
+            #     # Sometimes status_code can be None, but if we let that ride it shows up as the header name of the column
+            #     buffered_message += f"{status_col.pad(response.status_code or '')} | "
+            #     buffered_message += f"{response.reason}\n"
+
+            list_of_result_data.extend([buffered_message])
+
+        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_missing}\n"
+        list_of_result_data.extend([footer_message])
+
+        # For a single server test, the response will fit into a single message block.
+        # However, for a roomful it could be several pages long. Chunk those responses
+        # to fit into the size limit of an Event.
+        final_list_of_data = combine_lines_to_fit_event(list_of_result_data, header_message)
+
+        for chunk in final_list_of_data:
+            current_message = await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
+            )
+            list_of_message_ids.extend([current_message])
+
+        for current_message in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
 
     async def _discover_event_ids_and_room_ids(
         self,
