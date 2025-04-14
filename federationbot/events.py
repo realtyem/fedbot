@@ -55,11 +55,13 @@ class EventBase:
     event_type: str
     room_id: str
     sender: str
+    origin_server_ts: int
     # For giving out the raw JSON
     raw_data: Dict[str, Any]
     unrecognized: Dict[str, Any]
     # Unused in this class, but is used in subclasses
     depth: int = 0
+    hashes: Dict[str, str]
     auth_events: List[str] = []
     prev_events: List[str] = []
     error: Optional[str] = None
@@ -77,6 +79,8 @@ class EventBase:
         self.event_type = self.unrecognized.pop("type", "Event Type Not Found")
         self.room_id = self.unrecognized.pop("room_id", "Room ID Not Found")
         self.sender = self.unrecognized.pop("sender", "Sender Not Found")
+        self.origin_server_ts = self.unrecognized.pop("origin_server_ts", 0)
+        self.hashes = self.unrecognized.pop("hashes", {})
         # unsigned.age is a pointless thing, just remove it for now
         self.unrecognized.get("unsigned", {}).pop("age", None)
 
@@ -425,9 +429,7 @@ class Event(EventBase):
     """
 
     depth: int
-    hashes: Dict[str, str]
     origin: str
-    origin_server_ts: int
     signatures: Signatures
     relations: Optional[RelatesTo] = None
     signatures_verified: Dict[ServerName, SignatureVerifyResult]
@@ -439,9 +441,7 @@ class Event(EventBase):
         self.prev_events = self.unrecognized.pop("prev_events", [])
 
         self.depth = self.unrecognized.pop("depth", 0)
-        self.hashes = self.unrecognized.pop("hashes", {})
         self.origin = self.unrecognized.pop("origin", "Origin Server Not Found")
-        self.origin_server_ts = self.unrecognized.pop("origin_server_ts", 0)
         signatures = self.unrecognized.pop("signatures", {})
         if signatures:
             self.signatures = Signatures(signatures)
