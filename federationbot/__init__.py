@@ -626,12 +626,12 @@ class FederationBot(RoomWalkCommand):
                 _event_fetch_queue.task_done()
                 bot_working[worker_name] = False
 
-        room_version_of_found_event = 0
+        room_version_of_found_event = "1"
         local_set_of_events_already_tried = set()
 
         async def _room_repair_worker(
             worker_name: str,
-            room_version: int,
+            room_version: str,
             _event_fetch_queue: asyncio.Queue[tuple[float, bool, set[str]]],
             _event_error_queue: asyncio.Queue[str],
         ) -> None:
@@ -1085,8 +1085,8 @@ class FederationBot(RoomWalkCommand):
     async def repair_event_command(
         self,
         command_event: MessageEvent,
-        room_id_or_alias: str | None,
-        event_id: str | None,
+        room_id_or_alias: str,
+        event_id: str,
         server_to_fix: str | None = None,
     ) -> None:
         """
@@ -1187,10 +1187,6 @@ class FederationBot(RoomWalkCommand):
         await command_event.respond("Hunting for event on list of good hosts")
 
         room_version_of_found_event = head_data.room_version
-        if not room_version_of_found_event:
-            room_version_of_found_event = int(
-                await self.federation_handler.discover_room_version(origin_server, destination_server, room_id),
-            )
 
         list_of_server_and_event_id_to_send = []
         event_ids_to_try_next: asyncio.Queue[str] = asyncio.Queue()
@@ -1571,13 +1567,12 @@ class FederationBot(RoomWalkCommand):
             )
             return
 
-        room_version_int = None
         if not from_server:
             from_server = origin_server
         else:
             # in case they skipped a from_server and just used a room_version
             with suppress(ValueError):
-                room_version_int = int(from_server)
+                room_version = str(from_server)
 
         event_map = await self.federation_handler.get_event_from_server(
             origin_server=origin_server,
@@ -1596,35 +1591,25 @@ class FederationBot(RoomWalkCommand):
 
         room_id = event.room_id
 
-        if room_version:
-            try:
-                room_version_int = int(room_version)
-            except ValueError:
-                await command_event.reply(
-                    f"You passed me a room version to use that couldn't be converted to an integer: {room_version}",
-                )
-                return
-
-        if not room_version_int:
+        if not room_version:
             try:
                 # Try and catch the exception if the value returned was None
-                room_version_int = int(
-                    await self.federation_handler.discover_room_version(
-                        origin_server=origin_server,
-                        destination_server=origin_server,
-                        room_id=room_id,
-                    ),
+                room_version = await self.federation_handler.discover_room_version(
+                    origin_server=origin_server,
+                    destination_server=origin_server,
+                    room_id=room_id,
                 )
+
             except ValueError as e:
                 await command_event.reply(f"Error getting room version from room {room_id}: {str(e)}")
                 return
 
-        assert room_version_int is not None
+        assert room_version is not None
 
         current_message = await command_event.respond(f"Original:\n{wrap_in_code_block_markdown(event.to_json())}")
         list_of_message_ids: list[EventID] = [current_message]
 
-        redacted_data = redact_event(room_version_int, event.raw_data)
+        redacted_data = redact_event(room_version, event.raw_data)
         redacted_data.pop("signatures", None)
         redacted_data.pop("unsigned", None)
         current_message = await command_event.respond(
@@ -2291,7 +2276,8 @@ class FederationBot(RoomWalkCommand):
             list_of_a_event_ids.extend(returned_event.prev_events)
 
             # For the verification display, grab the room version in these events
-            found_room_version = 1
+            # TODO: might be better to just get the room version directly
+            found_room_version = "1"
             a_returned_events = await self.federation_handler.get_events_from_server(
                 origin_server=origin_server,
                 destination_server=destination_server,
@@ -2309,7 +2295,7 @@ class FederationBot(RoomWalkCommand):
 
             # It may be, but is unlikely outside of connection errors, that room_version
             # was not found. This is handled gracefully inside of to_pretty_summary()
-            buffered_message += returned_event.to_pretty_summary(room_version=found_room_version)
+            buffered_message += returned_event.to_pretty_summary(found_room_version)
             # Add a little gap at the bottom of the previous for better separation
             buffered_message += "\n"
             buffered_message += returned_event.to_pretty_summary_content()

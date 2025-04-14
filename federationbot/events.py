@@ -85,12 +85,12 @@ class EventBase:
         # should intercept it
         return False
 
-    def generate_event_id(self, room_version: int) -> str:
+    def generate_event_id(self, room_version: str) -> str:
         raw_data_copy = full_dict_copy(self.raw_data)
         generated_event_id = construct_event_id_from_event_v3(room_version, raw_data_copy)
         return generated_event_id
 
-    def verify_event_id(self, room_version: int, event_id_to_test: str) -> bool:
+    def verify_event_id(self, room_version: str, event_id_to_test: str) -> bool:
         generated_event_id = self.generate_event_id(room_version)
         return generated_event_id == event_id_to_test
 
@@ -166,8 +166,8 @@ class EventBase:
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         """
         Construct a vertical summary of most(all) the fields from the Event.
@@ -198,7 +198,7 @@ class EventBase:
         # Give the column width here as the largest of the key names, which is Event ID
         dc.maybe_update_column_width(len(event_id_header))
         verify_event_id = False
-        if room_version and room_version > 0:
+        if room_version:
             verify_event_id = self.verify_event_id(room_version, self.event_id)
 
         is_event_id_ok = f"{'✅' if verify_event_id else '❌'}"
@@ -469,8 +469,8 @@ class Event(EventBase):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         """
         Adds to the superclass version of to_pretty_summary(). Specifically, adds:
@@ -497,7 +497,7 @@ class Event(EventBase):
         hashes_header = "Hashes"
         dc.maybe_update_column_width(len(origin_ts_header))
 
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(depth_header, self.depth)
         summary += dc.render_pretty_line(origin_header, self.origin)
 
@@ -582,8 +582,8 @@ class EncryptedRoomEvent(Event):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         """
         Adds to the superclass version of to_pretty_summary(). Specifically, adds:
@@ -606,7 +606,7 @@ class EncryptedRoomEvent(Event):
         ciphertext_size_header = "CipherText Size"
         dc.maybe_update_column_width(len(ciphertext_size_header))
 
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(algo_header, self.encrypted_content.algorithm)
         summary += dc.render_pretty_line(sess_id_header, self.encrypted_content.session_id)
         summary += dc.render_pretty_line(ciphertext_size_header, self.encrypted_content.ciphertext_size)
@@ -877,8 +877,8 @@ class UnencryptedRoomEvent(Event):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         msgtype_header = "Message Type"
         mentions_header = "Mentions"
@@ -886,7 +886,7 @@ class UnencryptedRoomEvent(Event):
         if self.rc.msgtype:
             column_width = max(column_width, len(msgtype_header))
         dc.maybe_update_column_width(column_width)
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += self.rc.to_pretty_content_summary(dc)
         if self.rc.mentions:
             summary += dc.render_pretty_list(mentions_header, self.rc.mentions.to_list())
@@ -915,12 +915,12 @@ class StickerRoomEvent(Event):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         mentions_header = "Mentions"
         dc.maybe_update_column_width(len(mentions_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += self.rc.to_pretty_content_summary(dc)
         if self.rc.mentions:
             summary += dc.render_pretty_list(mentions_header, self.rc.mentions.to_list())
@@ -942,12 +942,12 @@ class StrippedStateEvent(EventBase):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         state_key_header = "State Key"
         dc.maybe_update_column_width(len(state_key_header))
-        buffered_message = super().to_pretty_summary(dc, room_version)
+        buffered_message = super().to_pretty_summary(room_version, dc)
         buffered_message += f"{dc.front_pad(state_key_header)}: {self.state_key}\n"
         return buffered_message
 
@@ -999,13 +999,13 @@ class CanonicalAliasStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         alias_header = "Alias"
         alt_alias_header = "Alt Aliases"
         dc.maybe_update_column_width(9)
-        summary = super().to_pretty_summary(dc=dc, room_version=room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(alias_header, self.alias)
         summary += dc.render_pretty_list(alt_alias_header, self.alt_aliases)
         return summary
@@ -1055,7 +1055,7 @@ class CreateRoomStateEvent(GenericStateEvent):
     predecessor: Optional[PreviousRoom] = None
     predecessor_last_event_id: Optional[EventID]
     predecessor_last_room_id: Optional[str]
-    room_version: int
+    room_version: str
     room_type: Optional[str]
 
     def __init__(self, event_id: EventID, raw_data: Dict[str, Any]) -> None:
@@ -1068,13 +1068,13 @@ class CreateRoomStateEvent(GenericStateEvent):
         last_room_id: Optional[str] = predecessor_content.get("room_id", None)
         if last_event_id and last_room_id:
             self.predecessor = PreviousRoom(room_id=last_room_id, event_id=last_event_id)
-        self.room_version = int(self.content.pop("room_version", 1))
+        self.room_version = self.content.pop("room_version", "1")
         self.room_type = self.content.pop("room_type", None)
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         creator_header = "Room Creator"
         fed_allowed_header = "m.federate"
@@ -1084,7 +1084,7 @@ class CreateRoomStateEvent(GenericStateEvent):
         # JOIN_RULE = "Join Rule"
 
         dc.maybe_update_column_width(12)
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(creator_header, self.creator)
         summary += dc.render_pretty_line(fed_allowed_header, self.federation_allowed)
         if self.predecessor:
@@ -1178,13 +1178,13 @@ class JoinRulesStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         join_rule_header = "Join Rule"
         dc.maybe_update_column_width(len(join_rule_header))
 
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(join_rule_header, self.join_rule)
         summary += dc.render_pretty_list("Allow List", self.allow.to_pretty_list())
         return summary
@@ -1264,8 +1264,8 @@ class RoomMemberStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         membership_header = "Membership"
         is_direct_header = "Is Direct"
@@ -1289,7 +1289,7 @@ class RoomMemberStateEvent(GenericStateEvent):
             dc.maybe_update_column_width(len(JAVUS_header))
         if self.third_party_invite:
             dc.maybe_update_column_width(len(third_party_invite_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(membership_header, self.membership)
         summary += dc.render_pretty_line(is_direct_header, self.is_direct)
         summary += dc.render_pretty_line(reason_header, self.reason)
@@ -1334,8 +1334,8 @@ class PowerLevelStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         # This one is more complicated. Beyond the standard power level
         # sections/defaults, there are also(potentially) three columns to display.
@@ -1383,7 +1383,7 @@ class PowerLevelStateEvent(GenericStateEvent):
             notif_val_col.maybe_update_column_width(max_len_of_notif_vals)
 
         # Render the main summary bits
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line("Users Default", self.users_default)
         summary += dc.render_pretty_line("Events Default", self.events_default)
         summary += dc.render_pretty_line("State Default", self.state_default)
@@ -1451,11 +1451,11 @@ class RedactionStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         dc.maybe_update_column_width(7)
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line("Redacts", self.redacts)
         summary += dc.render_pretty_line("Reason", self.reason)
         return summary
@@ -1489,12 +1489,12 @@ class RoomNameStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         room_name_header = "Room Name"
         dc.maybe_update_column_width(len(room_name_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(room_name_header, self.name)
         return summary
 
@@ -1512,12 +1512,12 @@ class RoomTopicStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         topic_header = "Room Topic"
         dc.maybe_update_column_width(len(topic_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(topic_header, self.topic)
         return summary
 
@@ -1550,12 +1550,12 @@ class RoomAvatarStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         avatar_url_header = "Avatar URL"
         dc.maybe_update_column_width(len(avatar_url_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(avatar_url_header, self.url)
         return summary
 
@@ -1587,12 +1587,12 @@ class RoomEncryptionStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         algo_header = "Algorithm"
         dc.maybe_update_column_width(len(algo_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(algo_header, self.algorithm)
         return summary
 
@@ -1624,12 +1624,12 @@ class RoomPinnedEventsStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         pinned_header = "Pinned Events"
         dc.maybe_update_column_width(len(pinned_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_list(pinned_header, self.pinned)
         return summary
 
@@ -1647,12 +1647,12 @@ class HistoryVisibilityStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         hv_header = "History Visibility"
         dc.maybe_update_column_width(len(hv_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(hv_header, self.history_visibility)
         return summary
 
@@ -1687,14 +1687,14 @@ class SpaceParentStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         sp_header = "Space Parent"
         via_header = "Via"
         can_header = "Canonical"
         dc.maybe_update_column_width(len(sp_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(sp_header, self.state_key)
         summary += dc.render_pretty_list(via_header, self.via)
         summary += dc.render_pretty_line(can_header, self.canonical)
@@ -1733,15 +1733,15 @@ class SpaceChildStateEvent(GenericStateEvent):
 
     def to_pretty_summary(
         self,
+        room_version: str,
         dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
-        room_version: Optional[int] = None,
     ) -> str:
         sc_header = "Space Child"
         suggested_header = "Suggested"
         order_header = "Order"
         via_header = "Via"
         dc.maybe_update_column_width(len(sc_header))
-        summary = super().to_pretty_summary(dc, room_version)
+        summary = super().to_pretty_summary(room_version, dc)
         summary += dc.render_pretty_line(sc_header, self.state_key)
         summary += dc.render_pretty_list(via_header, self.via)
         summary += dc.render_pretty_line(suggested_header, self.suggested)
@@ -1766,7 +1766,7 @@ class SpaceChildStateEvent(GenericStateEvent):
 
 def determine_what_kind_of_event(
     event_id: Optional[EventID],
-    room_version: Optional[int],
+    room_version: Optional[str],
     data_to_use: Dict[str, Any],
 ) -> EventBase:
     # Everything is a kind of Event
@@ -1774,7 +1774,7 @@ def determine_what_kind_of_event(
     # it. Create an empty one, as it's not a big deal. Since it's for display, if it's
     # not there it won't be displayed
     if not event_id:
-        if room_version and room_version > 3:
+        if room_version and room_version not in ("1", "2"):
             # For the moment, we can only discover Event ID's from room version's before 4
             event_id = EventID(construct_event_id_from_event_v3(room_version, data_to_use))
         else:
@@ -1826,7 +1826,7 @@ def determine_what_kind_of_event(
 
 
 def construct_event_id_from_event_v3(
-    room_version: int,
+    room_version: str,
     data_to_use: Dict[str, Any],
 ) -> str:
     """
@@ -2123,22 +2123,22 @@ def _redact_with(
     return redacted_data_result
 
 
-def redact_event(room_version: int, data_to_use: Dict[str, Any]) -> Dict[str, Any]:
-    if room_version <= 5:
+def redact_event(room_version: str, data_to_use: Dict[str, Any]) -> Dict[str, Any]:
+    if room_version in ("3", "4", "5"):
         return _redact_with(
             data_to_use,
             v1_to_v5_list_of_keys_to_keep,
             v1_to_v5_map_of_keys_from_content_to_keep,
         )
-    if 5 < room_version <= 7:
+    if room_version in ("6", "7"):
         return _redact_with(
             data_to_use,
             v6_to_v7_list_of_keys_to_keep,
             v6_to_v7_map_of_keys_from_content_to_keep,
         )
-    if room_version == 8:
+    if room_version == "8":
         return _redact_with(data_to_use, v8_list_of_keys_to_keep, v8_map_of_keys_from_content_to_keep)
-    if 8 < room_version <= 10:
+    if room_version in ("9", "10"):
         return _redact_with(
             data_to_use,
             v9_to_v10_list_of_keys_to_keep,

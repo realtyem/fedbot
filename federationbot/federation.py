@@ -43,7 +43,7 @@ class FederationHandler:
         # Map the key to (server_name, event_id) -> Event
         self._events_cache: LRUCache[Tuple[str, str], EventBase] = LRUCache()
         self._server_keys_cache: LRUCache[str, ServerVerifyKeys] = LRUCache()
-        self.room_version_cache: LRUCache[str, int] = LRUCache(
+        self.room_version_cache: LRUCache[str, str] = LRUCache(
             expire_after_seconds=float(60 * 60 * 6),
             cleanup_task_sleep_time_seconds=float(60 * 60),
         )
@@ -106,7 +106,7 @@ class FederationHandler:
     async def verify_signatures_and_annotate_event(
         self,
         event: Event,
-        room_version: int,
+        room_version: str,
     ) -> None:
         # There are two places that discuss verifying the signatures:
 
@@ -235,7 +235,8 @@ class FederationHandler:
 
                 data.pop(key_to_lose, None)
             # This path is only taken on success, errors are sorted above
-            new_event_base = determine_what_kind_of_event(EventID(event_id), None, data)
+            room_version: str = await self.discover_room_version(origin_server, destination_server, data["room_id"])
+            new_event_base = determine_what_kind_of_event(EventID(event_id), room_version, data)
             if not (inject_new_data or keys_to_pop):
                 self._events_cache.set((destination_server, event_id), new_event_base)
 
@@ -461,7 +462,7 @@ class FederationHandler:
         origin_server: Optional[str],
         destination_server: Optional[str],
         room_id: str,
-    ) -> int:
+    ) -> str:
         room_version = self.room_version_cache.get(room_id)
         if room_version:
             return room_version
@@ -480,12 +481,10 @@ class FederationHandler:
             )
         except MatrixError:
             # TODO: Could do something smarter here, like check state
-            room_version = 0
+            room_version = "1"
 
         else:
             room_version = response.room_version
-
-        if room_version > 0:
             self.room_version_cache.set(room_id, room_version)
 
         return room_version
@@ -701,7 +700,7 @@ def filter_state_events_based_on_membership(
 
 
 def parse_list_response_into_list_of_event_bases(
-    list_from_response: List[Dict[str, Any]], room_version: Optional[int] = None
+    list_from_response: List[Dict[str, Any]], room_version: Optional[str] = None
 ) -> List[EventBase]:
     """
     Parse a list returned from a federation request into a list of EventBase type

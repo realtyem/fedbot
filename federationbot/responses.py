@@ -85,7 +85,7 @@ class MatrixFederationResponse(MatrixResponse):
     headers: CIMultiDictProxy[str]
 
 
-@dataclass(kw_only=True)
+@dataclass(slots=True, kw_only=True)
 class MakeJoinResponse(MatrixFederationResponse):
     """
     Specialized response for the make_join federation endpoint.
@@ -96,14 +96,14 @@ class MakeJoinResponse(MatrixFederationResponse):
     Note: Room version is received as a string but stored as an integer.
 
     Attributes:
-        room_version: Version number of the room being joined
+        room_version: Version of the room being joined
         prev_events: List of parent event IDs in the room's DAG
         auth_events: List of event IDs needed to authenticate this join
     """
 
-    room_version: int = field(default=0, init=False)
-    prev_events: list[str] = field(default_factory=list, init=False)
-    auth_events: list[str] = field(default_factory=list, init=False)
+    room_version: str = field(init=False)
+    prev_events: list[str] = field(init=False)
+    auth_events: list[str] = field(init=False)
 
     def __post_init__(self) -> None:
         """
@@ -112,6 +112,6 @@ class MakeJoinResponse(MatrixFederationResponse):
         Extracts and converts room version, previous events, and auth events
         from the make_join response JSON. Sets defaults if fields are missing.
         """
-        self.room_version = int(self.json_response.get("room_version", 1))
+        self.room_version = self.json_response.get("room_version", "1")
         self.prev_events = self.json_response.get("event", {}).get("prev_events", [])
         self.auth_events = self.json_response.get("event", {}).get("auth_events", [])
