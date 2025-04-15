@@ -115,3 +115,25 @@ class MakeJoinResponse(MatrixFederationResponse):
         self.room_version = self.json_response.get("room_version", "1")
         self.prev_events = self.json_response.get("event", {}).get("prev_events", [])
         self.auth_events = self.json_response.get("event", {}).get("auth_events", [])
+
+
+@dataclass(slots=True, init=False)
+class TimestampToEventResponse:
+    """
+    Specialized response for the `/timestamp_to_event` endpoint
+
+    Attributes:
+        event_id: The event ID closest to the time requested
+        origin_server_ts: The timestamp on that event
+    """
+
+    event_id: str
+    origin_server_ts: int
+
+    def __init__(self, matrix_response: MatrixResponse) -> None:
+        event_id = matrix_response.json_response.get("event_id")
+        assert isinstance(event_id, str)
+        self.event_id = event_id
+        origin_server_ts = matrix_response.json_response.get("origin_server_ts")
+        assert isinstance(origin_server_ts, int)
+        self.origin_server_ts = origin_server_ts

@@ -20,8 +20,14 @@ from federationbot.events import (
     determine_what_kind_of_event,
     redact_event,
 )
-from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.primitives import KeyID
+from federationbot.responses import (
+    MakeJoinResponse,
+    MatrixError,
+    MatrixFederationResponse,
+    MatrixResponse,
+    TimestampToEventResponse,
+)
 from federationbot.types import KeyContainer, RoomAlias, ServerVerifyKeys, SignatureVerifyResult
 from federationbot.utils import full_dict_copy, get_domain_from_id
 
@@ -555,6 +561,37 @@ class FederationHandler:
             raise response
 
         return MakeJoinResponse(**response.__dict__)
+
+    async def get_last_event_id_in_room(
+        self,
+        origin_server: str,
+        destination_server: str,
+        room_id: str,
+    ) -> TimestampToEventResponse:
+        """
+
+        Args:
+            origin_server:
+            destination_server:
+            room_id:
+
+        Returns: A TimestampToEventResponse
+        Raises: MatrixError with the data of why, TypeError when data is missing(like not in the room, forbidden, etc)
+
+        """
+        now = int(time.time() * 1000)
+        response = await self.api.get_timestamp_to_event(origin_server, destination_server, room_id, now)
+        if isinstance(response, MatrixError):
+            raise response
+
+        if response.http_code != 200:
+            raise MatrixError(
+                http_code=response.http_code,
+                errcode=response.json_response.get("errcode"),
+                error=response.json_response.get("error"),
+            )
+
+        return TimestampToEventResponse(response)
 
     async def get_events_from_backfill(
         self,
