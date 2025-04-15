@@ -153,7 +153,7 @@ class FederationBotCommandBase(Plugin):
 
     async def resolve_room_id_or_alias(
         self,
-        room_id_or_alias: str | None,
+        room_id_or_alias: str,
         command_event: MessageEvent,
         origin_server: str | None = None,
     ) -> tuple[str | None, list[str]]:
@@ -161,8 +161,10 @@ class FederationBotCommandBase(Plugin):
         Resolve a room ID or alias to a room ID and list of servers.
 
         If this is a room id, just return that and no list of server.
-        If it was nothing, return the room id of the room the command was issued from.
         Depending on errors, let the user know there was a problem.
+
+        Allow that the room id of the room the command was issued from be used
+        if none other was passed in.
 
         Args:
             room_id_or_alias: The room ID or alias to resolve
@@ -170,14 +172,9 @@ class FederationBotCommandBase(Plugin):
             origin_server: The server the command was issued from
 
         Returns:
-            A tuple containing the room ID and a list of servers to join through
+            A tuple containing the room ID and a list of servers to join through if it was an alias
         """
         list_of_servers: list[str] = []
-        # TODO: sort out if this is used/needed
-        if not room_id_or_alias:
-            # When not supplied a room id, we assume they want the room the command was
-            # issued from.
-            return str(command_event.room_id), list_of_servers
 
         # Sort out if the room id or alias passed in is valid and resolve the alias
         # to the room id if it is.

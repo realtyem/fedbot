@@ -1495,7 +1495,7 @@ class FederationBot(RoomWalkCommand):
 
     @test_command.subcommand(name="room_version", help="experiment to get room version from room id")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
-    async def room_version_command(self, command_event: MessageEvent, room_id_or_alias: str | None) -> None:
+    async def room_version_command(self, command_event: MessageEvent, room_id_or_alias: str) -> None:
         """
         Get room version information.
 
@@ -1540,7 +1540,7 @@ class FederationBot(RoomWalkCommand):
     async def discover_event_id_command(
         self,
         command_event: MessageEvent,
-        event_id: str | None,
+        event_id: str,
         from_server: str | None,
         room_version: str | None,
     ) -> None:
@@ -3665,7 +3665,7 @@ class FederationBot(RoomWalkCommand):
         self,
         command_event: MessageEvent,
         event_id: str | None,
-        room_id_or_alias: str | None,
+        room_id_or_alias: str,
     ) -> None:
         # Let the user know the bot is paying attention
         await command_event.mark_read()
@@ -4667,6 +4667,7 @@ class FederationBot(RoomWalkCommand):
             ValueError: If the event ID is not a string
             TypeError: If the room ID or alias is not valid
         """
+        room_id_or_alias = room_id_or_alias or str(command_event.room_id)
         room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
         if not room_id:
             # Don't need to actually display an error, that's handled in the above
