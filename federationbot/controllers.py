@@ -229,7 +229,7 @@ class TaskSetEntry(Generic[T]):
         for _ in range(limit):
             self.coros.append(await self.loop.run_in_executor(executor, functools.partial(new_task, *args, **kwargs)))
 
-    async def gather_results(self, return_exceptions: bool = True) -> Sequence[T]:
+    async def gather_results(self, return_exceptions: bool = True) -> Sequence[T | BaseException]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
 
@@ -246,7 +246,7 @@ class TaskSetEntry(Generic[T]):
         thing = await asyncio.gather(*self.tasks, return_exceptions=return_exceptions)
         return thing
 
-    async def gather_threaded_results(self, return_exceptions: bool = True) -> Tuple[BaseException | T]:
+    async def gather_threaded_results(self, return_exceptions: bool = True) -> Tuple[T | BaseException, ...]:
         """
         If you have elected for your Task to return a result, this will get them as a Sequence.
 
