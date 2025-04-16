@@ -12,15 +12,19 @@ from time import time
 import asyncio
 
 from maubot.plugin_base import Plugin
-from mautrix.types import EventType
+from mautrix.errors import MForbidden
+from mautrix.types import EventType, Membership, RoomAlias as MautrixRoomAlias, RoomID
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
-from federationbot import get_domain_from_id
-from federationbot.constants import HTTP_STATUS_OK
+from federationbot.constants import HTTP_STATUS_OK, NOT_IN_ROOM_ERROR, NOT_IN_ROOM_TRYING_FALLBACK
 from federationbot.controllers import ReactionTaskController
-from federationbot.errors import FedBotException, MalformedRoomAliasError
+from federationbot.errors import FedBotException
+from federationbot.events import EventError
 from federationbot.federation import FederationHandler
 from federationbot.protocols import MessageEvent
+from federationbot.responses import MatrixError
+from federationbot.types import RoomAlias, RoomConfigData
+from federationbot.utils.matrix import get_domain_from_id, is_room_alias, is_room_id
 
 
 class MaubotConfig(BaseProxyConfig):
@@ -209,10 +213,144 @@ class FederationBotCommandBase(Plugin):
                 f"{e.summary_exception}: '{_room_alias}'\nTrying fallback method",
             )
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-            room_alias_info = await self.client.resolve_room_alias(mautrix.types.RoomAlias(_room_alias))
+            room_alias_info = await self.client.resolve_room_alias(MautrixRoomAlias(_room_alias))
             return str(room_alias_info.room_id), room_alias_info.servers
 
         return room_id, list_of_servers
+
+    async def get_room_data(
+        self,
+        origin_server: str,
+        destination_server: str,
+        command_event: MessageEvent,
+        room_id_or_alias: str | None = None,
+        get_servers_in_room: bool = False,
+        use_origin_room: bool = False,
+    ) -> RoomConfigData | None:
+        """
+        Retrieve data about a room. If there was an alias, resolve it. Get the list of hosts in that room
+
+        If no room id/alias was supplied, use the room the command came from
+
+        Args:
+            origin_server: Used to determine how/if to auth request
+            destination_server: target server name. Can be the same as origin
+            command_event: The command from maubot that originated this request
+            room_id_or_alias:
+            get_servers_in_room: if it is required to get a list of servers in the room currently
+            use_origin_room: if nothing else, use the room id from the command_event
+
+        Returns: RoomConfigData, or None if needs to error out(a message will have been supplied to the client window)
+
+        """
+        # check for a room_id
+        # resolve any alias
+        # if there was neither, use origin_event
+        # get list of servers from room
+        start_time = time()
+        room_id = None
+        if room_id_or_alias:
+            if is_room_id(room_id_or_alias):
+                room_id = room_id_or_alias
+            elif is_room_alias(room_id_or_alias):
+                # resolve alias, do we want the hosts?
+                room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
+        if not room_id:
+            if use_origin_room:
+                room_id = command_event.room_id
+            else:
+                await command_event.respond(
+                    "No data was provided to help resolve the room data needed",
+                )
+                return None
+
+        list_of_servers: list[str] | None = None
+        # it may be we can side-step getting the room version if we already have the make_join response
+        join_response = None
+        newest_event_id = None
+        timestamp = 0
+        if get_servers_in_room:
+            list_of_servers = await self.get_current_hosts_in_room_client(command_event, room_id)
+            if list_of_servers is None:
+                # Let the audience know this might take a bit longer
+                await command_event.respond(NOT_IN_ROOM_TRYING_FALLBACK)
+
+                # To get the state, we need an event_id. We already know we are not in the room, so use make_join
+                join_response = await self.federation_handler.make_join_to_server(
+                    origin_server, destination_server, room_id, self.client.mxid
+                )
+                # itemize the join response to figure out which event_id is last
+                for prev_event in join_response.prev_events:
+                    event_response = await self.federation_handler.get_event_from_server(
+                        origin_server, destination_server, prev_event
+                    )
+                    event = event_response.get(prev_event)
+                    if isinstance(event, EventError):
+                        await command_event.respond(
+                            "I'm sorry, the server is not disclosing details about this room",
+                        )
+                        return None
+                    assert event is not None, "Event was None in get_room_data"
+                    if timestamp < event.origin_server_ts:
+                        timestamp = event.origin_server_ts
+                        newest_event_id = prev_event
+                if newest_event_id is None:
+                    await command_event.respond(
+                        "I'm sorry, the server is not disclosing details about this room",
+                    )
+                    return None
+                list_of_servers = await self.federation_handler.get_hosts_in_room_ordered(
+                    origin_server, destination_server, room_id, newest_event_id
+                )
+            else:
+                try:
+                    ts_response = await self.federation_handler.get_last_event_id_in_room(
+                        origin_server, destination_server, room_id
+                    )
+                    newest_event_id = ts_response.event_id
+                    timestamp = ts_response.origin_server_ts
+                except MatrixError as e:
+                    await command_event.respond(
+                        "I'm sorry, the server is not disclosing details about this room\n" f"{e.errcode}: {e.error}",
+                    )
+                    return None
+
+        if join_response:
+            room_version = join_response.room_version
+        else:
+            room_version = await self.federation_handler.discover_room_version(
+                origin_server, destination_server, room_id
+            )
+
+        if use_origin_room and not newest_event_id:
+            newest_event_id = str(command_event.event_id)
+        end_time = time()
+
+        assert newest_event_id is not None, "newest_event_id was not at an inconvenient time"
+        return RoomConfigData(
+            room_id,
+            room_version,
+            list_of_servers,
+            timestamp,
+            newest_event_id,
+            int(1000 * (end_time - start_time)),
+        )
+
+    async def get_current_hosts_in_room_client(self, command_event: MessageEvent, room_id: str) -> list[str] | None:
+        servers: set[str] = set()
+        try:
+            joined_members = await self.client.get_joined_members(RoomID(room_id))
+
+        except MForbidden:
+            await command_event.respond(NOT_IN_ROOM_ERROR)
+            return None
+
+        for member, status in joined_members.items():
+            # In case of members not being JOINed, just filter them out
+            if status.membership == Membership.JOIN:
+                servers.add(get_domain_from_id(member))
+
+        return list(servers)
 
     async def get_origin_server_and_assert_key_exists(
         self, command_event: MessageEvent, origin_server: str | None = None

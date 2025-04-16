@@ -226,6 +226,15 @@ class ServerVerifyKeys:
         self._raw_data = full_dict_copy(data_from_notary_response)
 
 
+@dataclass(slots=True)
+class RoomConfigData:
     """
+    Data about the room being targeted
     """
 
+    room_id: str
+    room_version: str
+    list_of_servers_in_room: list[str] | None
+    timestamp_of_returned_list: int
+    detected_last_event_id: str
+    processing_time: int

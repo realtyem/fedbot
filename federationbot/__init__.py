@@ -32,6 +32,7 @@ from federationbot.constants import (
 )
 from federationbot.controllers import EmojiReactionCommandStatus
 from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
+from federationbot.protocols import MessageEvent
 from federationbot.resolver import (
     Diagnostics,
     ServerDiscoveryDnsResult,
@@ -41,7 +42,6 @@ from federationbot.resolver import (
     WellKnownLookupResult,
 )
 from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
-from federationbot.protocols import MessageEvent
 from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
 from federationbot.utils.colors import Colors
 from federationbot.utils.display import DisplayLineColumnConfig, Justify, pad
@@ -1323,50 +1323,28 @@ class FederationBot(RoomWalkCommand):
 
         destination_server = server_to_request_from or origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(
+        room_data = await self.get_room_data(
             origin_server,
             destination_server,
             command_event,
             room_id_or_alias,
-            event_id,
+            get_servers_in_room=True,
+            use_origin_room=True,
         )
-        if not discovered_info:
+        if not room_data:
             # The user facing error message was already sent
             return
 
-        room_id, event_id, origin_server_ts = discovered_info
-
-        if origin_server_ts:
-            # A nice little addition for the status updated before the command runs
-            special_time_formatting = (
-                f"\n  * which took place at: {datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
-            )
-        else:
-            special_time_formatting = ""
-
-        # One way or another, we have a room id by now
-        # assert room_id is not None
-
         preresponse_message = await command_event.respond(
             f"Retrieving Hosts for \n"
-            f"* Room: {room_id_or_alias or room_id}\n"
-            f"* at Event ID: {event_id}{special_time_formatting}\n"
+            f"* Room: {room_id_or_alias or room_data.room_id}\n"
+            f"* at {pretty_print_timestamp(room_data.timestamp_of_returned_list)}\n"
             f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids: list[EventID] = [preresponse_message]
 
-        # This will be assigned by now
-        assert event_id is not None
-
-        host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server,
-            destination_server,
-            room_id,
-            event_id,
-        )
-
-        # Time to start rendering. Build the header lines first
-        header_message = "Hosts in order of state membership joins\n"
+        assert room_data.list_of_servers_in_room is not None
+        host_list = room_data.list_of_servers_in_room.copy()
 
         list_of_buffer_lines = []
 
@@ -1379,8 +1357,9 @@ class FederationBot(RoomWalkCommand):
             for host in host_list:
                 list_of_buffer_lines.extend([f"['{host}']\n"])
 
+        list_of_buffer_lines.extend([f"Process took: {room_data.processing_time} milliseconds"])
         # Chunk the data as there may be a few 'pages' of it
-        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
+        final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, None)
 
         for chunk in final_list_of_data:
             current_message_id = await command_event.respond(

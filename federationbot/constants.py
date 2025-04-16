@@ -36,3 +36,4 @@ CODE: Final[str] = "Code"
 
 # Error message displayed when bot cannot access a room it needs to operate on
 NOT_IN_ROOM_ERROR: Final[str] = "Cannot process for a room I'm not in. Invite this bot to that room and try again."
+NOT_IN_ROOM_TRYING_FALLBACK: Final[str] = "I do not seem to be in that room to access the data. Trying work-around."
