@@ -414,7 +414,7 @@ class FederationHandler:
             room_alias,
         )
 
-        if alias_result.http_code != 200:
+        if alias_result.http_code != 200 or isinstance(alias_result, MatrixError):
             raise FedBotException(
                 summary_exception=f"{alias_result.errcode or alias_result.http_code}: {alias_result.error or alias_result.reason}"
             )

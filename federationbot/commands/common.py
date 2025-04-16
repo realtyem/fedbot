@@ -205,11 +205,12 @@ class FederationBotCommandBase(Plugin):
 
         except FedBotException as e:
             message_id = await command_event.reply(
-                "Received an error while querying for room alias:\n\n" f"{e.summary_exception}: '{_room_alias}'",
+                "Received an error while querying for room alias:\n\n"
+                f"{e.summary_exception}: '{_room_alias}'\nTrying fallback method",
             )
-
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-            return None, []
+            room_alias_info = await self.client.resolve_room_alias(mautrix.types.RoomAlias(_room_alias))
+            return str(room_alias_info.room_id), room_alias_info.servers
 
         return room_id, list_of_servers
 
