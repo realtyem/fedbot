@@ -1568,7 +1568,7 @@ class FederationBot(RoomWalkCommand):
             return
 
         if not from_server:
-            from_server = origin_server
+            from_server = str(origin_server)
         else:
             # in case they skipped a from_server and just used a room_version
             with suppress(ValueError):
