@@ -456,6 +456,9 @@ class ServerDiscoveryResolver:
                         diagnostics.log(
                             f"    JSONDecodeError, work-around failed. Content length was: {len(text_result) if text_result else 0}"
                         )
+                        if not text_result and status_code == 200:
+                            # Caddy condition
+                            return NoWellKnown(status_code=status_code)
                         return WellKnownSchemeFailure(status_code=status_code, reason=e.msg)
 
             else:

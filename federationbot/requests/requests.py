@@ -193,9 +193,10 @@ class FederationRequests:
 
         except RequestError as e:
             stop_time = time.time()
-            if run_diagnostics and diagnostics:
-                diagnostics.status.connection = StatusEnum.ERROR
-                diagnostics.output_list.append(f"    Error: {e.reason}")
+
+            diagnostics.status.connection = StatusEnum.ERROR
+            diagnostics.output_list.append(f"    Error: {e.reason}")
+            diagnostics.log("Request failed")
             error_return = MatrixError(
                 reason=e.reason, diagnostics=diagnostics, server_result=server_result, time_taken=stop_time - start_time
             )
@@ -210,16 +211,27 @@ class FederationRequests:
             context_tracing = response._traces[0]._trace_config_ctx  # noqa: W0212  # pylint:disable=protected-access
 
             # There can be a range of status codes, but only 404 specifically is called out
-            if 200 <= status_code < 600 and not status_code == 404:
+            if 200 <= status_code < 600:
                 try:
                     text_content = await response.text()
+                    if not text_content and status_code == 200:
+                        # Caddy condition: Caddy likes to default to returning a 200 response when it should be 404.
+                        # They see nothing wrong with this. I disagree, and so does the matrix spec. Fail it
+                        diagnostics.log("Request failed")
+                        return MatrixError(
+                            http_code=status_code,
+                            reason="Caddy condition: No usable data in response even with status OK",
+                            diagnostics=diagnostics,
+                            server_result=server_result,
+                            time_taken=time.time() - start_time,
+                        )
                     response_content = self.json_decoder.decode(text_content)
                     stop_time = time.time()
 
                 except json.decoder.JSONDecodeError as e:
-                    if run_diagnostics and diagnostics:
-                        diagnostics.status.connection = StatusEnum.ERROR
-                        diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.msg}")
+                    diagnostics.status.connection = StatusEnum.ERROR
+                    diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.msg}")
+                    diagnostics.log("Request failed")
                     return MatrixError(
                         http_code=status_code,
                         reason="JSONDecodeError: No usable data in response",
@@ -228,9 +240,9 @@ class FederationRequests:
                         time_taken=time.time() - start_time,
                     )
                 except client_exceptions.ServerTimeoutError as e:
-                    if run_diagnostics and diagnostics:
-                        diagnostics.status.connection = StatusEnum.ERROR
-                        diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.strerror}")
+                    diagnostics.status.connection = StatusEnum.ERROR
+                    diagnostics.output_list.append(f"    Code: {status_code}, Error: {e.strerror}")
+                    diagnostics.log("Request failed")
                     return MatrixError(
                         http_code=status_code,
                         reason=f"{e.__class__.__name__}: Timed out while reading response",
@@ -239,9 +251,8 @@ class FederationRequests:
                         time_taken=time.time() - start_time,
                     )
             else:
-                if run_diagnostics and diagnostics:
-                    diagnostics.output_list.append(f"    Code: {status_code}")
-
+                diagnostics.log(f"    Code: {status_code}")
+                diagnostics.log("Request failed")
                 return MatrixError(
                     http_code=status_code,
                     diagnostics=diagnostics,
@@ -251,6 +262,9 @@ class FederationRequests:
 
         # TODO: parse the headers for the cache control stuff, sort out ttl options
         diagnostics.status.connection = StatusEnum.OK
+        if run_diagnostics:
+            # This one we trap behind the condition, if we logged this each time the size would be huge
+            diagnostics.log(f"{response_content}")
 
         return MatrixFederationResponse(
             http_code=status_code,
