@@ -13,6 +13,7 @@ import asyncio
 
 from maubot.plugin_base import Plugin
 from mautrix.errors import MForbidden
+from mautrix.api import Method
 from mautrix.types import EventType, Membership, RoomAlias as MautrixRoomAlias, RoomID
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
@@ -225,7 +226,7 @@ class FederationBotCommandBase(Plugin):
         command_event: MessageEvent,
         room_id_or_alias: str | None = None,
         get_servers_in_room: bool = False,
-        use_origin_room: bool = False,
+        use_origin_room_as_fallback: bool = False,
     ) -> RoomConfigData | None:
         """
         Retrieve data about a room. If there was an alias, resolve it. Get the list of hosts in that room
@@ -238,7 +239,7 @@ class FederationBotCommandBase(Plugin):
             command_event: The command from maubot that originated this request
             room_id_or_alias:
             get_servers_in_room: if it is required to get a list of servers in the room currently
-            use_origin_room: if nothing else, use the room id from the command_event
+            use_origin_room_as_fallback: if nothing else, use the room id from the command_event
 
         Returns: RoomConfigData, or None if needs to error out(a message will have been supplied to the client window)
 
@@ -256,8 +257,12 @@ class FederationBotCommandBase(Plugin):
                 # resolve alias, do we want the hosts?
                 room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
         if not room_id:
-            if use_origin_room:
-                room_id = command_event.room_id
+            if use_origin_room_as_fallback:
+                if room_id_or_alias:
+                    # Tried everything we could find to resolve the room, give up
+                    return None
+                else:
+                    room_id = command_event.room_id
             else:
                 await command_event.respond(
                     "No data was provided to help resolve the room data needed",
@@ -269,61 +274,88 @@ class FederationBotCommandBase(Plugin):
         join_response = None
         newest_event_id = None
         timestamp = 0
+        client_fall_back = False
         if get_servers_in_room:
+            # Try and use the client API to get the list of servers in the room, it is usually faster. However, if
+            # the bot is not in whatever room it is, but the server is, then fallback to using federation state data
             list_of_servers = await self.get_current_hosts_in_room_client(command_event, room_id)
             if list_of_servers is None:
-                # Let the audience know this might take a bit longer
-                await command_event.respond(NOT_IN_ROOM_TRYING_FALLBACK)
+                client_fall_back = True
 
-                # To get the state, we need an event_id. We already know we are not in the room, so use make_join
-                join_response = await self.federation_handler.make_join_to_server(
-                    origin_server, destination_server, room_id, self.client.mxid
+        if client_fall_back:
+            # Let the audience know this might take a bit longer
+            await command_event.respond(NOT_IN_ROOM_TRYING_FALLBACK)
+
+            # To get the state, we need an event_id. We already know we are not in the room, so use make_join
+            join_response = await self.federation_handler.make_join_to_server(
+                origin_server, destination_server, room_id, self.client.mxid
+            )
+            # itemize the join response to figure out which event_id is last
+            for prev_event in join_response.prev_events:
+                event_response = await self.federation_handler.get_event_from_server(
+                    origin_server, destination_server, prev_event
                 )
-                # itemize the join response to figure out which event_id is last
-                for prev_event in join_response.prev_events:
-                    event_response = await self.federation_handler.get_event_from_server(
-                        origin_server, destination_server, prev_event
-                    )
-                    event = event_response.get(prev_event)
-                    if isinstance(event, EventError):
-                        await command_event.respond(
-                            "I'm sorry, the server is not disclosing details about this room",
-                        )
-                        return None
-                    assert event is not None, "Event was None in get_room_data"
-                    if timestamp < event.origin_server_ts:
-                        timestamp = event.origin_server_ts
-                        newest_event_id = prev_event
-                if newest_event_id is None:
+                event = event_response.get(prev_event)
+                if isinstance(event, EventError):
                     await command_event.respond(
                         "I'm sorry, the server is not disclosing details about this room",
                     )
                     return None
+                assert event is not None, "Event was None in get_room_data"
+                if timestamp < event.origin_server_ts:
+                    timestamp = event.origin_server_ts
+                    newest_event_id = prev_event
+            if newest_event_id is None:
+                await command_event.respond(
+                    "I'm sorry, the server is not disclosing details about this room",
+                )
+                return None
+            if get_servers_in_room:
                 list_of_servers = await self.federation_handler.get_hosts_in_room_ordered(
                     origin_server, destination_server, room_id, newest_event_id
                 )
-            else:
-                try:
-                    ts_response = await self.federation_handler.get_last_event_id_in_room(
-                        origin_server, destination_server, room_id
-                    )
-                    newest_event_id = ts_response.event_id
-                    timestamp = ts_response.origin_server_ts
-                except MatrixError as e:
-                    await command_event.respond(
-                        "I'm sorry, the server is not disclosing details about this room\n" f"{e.errcode}: {e.error}",
-                    )
-                    return None
+        else:
+            try:
+                ts_response = await self.federation_handler.get_last_event_id_in_room(
+                    origin_server, destination_server, room_id
+                )
+                newest_event_id = ts_response.event_id
+                timestamp = ts_response.origin_server_ts
+            except MatrixError as e:
+                await command_event.respond(
+                    "I'm sorry, the server is not disclosing details about this room\n" f"{e.errcode}: {e.error}",
+                )
+                return None
 
         if join_response:
             room_version = join_response.room_version
         else:
-            room_version = await self.federation_handler.discover_room_version(
-                origin_server, destination_server, room_id
-            )
+            # If it was that the client api was used above, try it here. If that bot is in the room, this will be faster
+            try:
+                create_event: dict = await self.client.api.request(
+                    Method.GET, f"/_matrix/client/v3/rooms/{room_id}/state/m.room.create"
+                )
+                room_version = create_event.get("content", {}).get("room_version", "1")
+            except Exception:
+                # Well the bot wasn't in the room, try the federation handler instead
+                room_version = await self.federation_handler.discover_room_version(
+                    origin_server, destination_server, room_id
+                )
 
-        if use_origin_room and not newest_event_id:
+        if use_origin_room_as_fallback and not newest_event_id:
+            # So if we were not able to get the last event in the room, then we check the fallback switch to see if
+            # should just use the data about the room the command was sent from instead. It's possible this will never
+            # be used, as I think it all gets taken care of above
+            self.log.warning(
+                "HIT 'use_origin_room_as_fallback' and not 'newest_event_id' condition. Room ID: %s", room_id
+            )
             newest_event_id = str(command_event.event_id)
+            newest_event_as_mapping = await self.federation_handler.get_event_from_server(
+                origin_server, destination_server, newest_event_id
+            )
+            newest_event = newest_event_as_mapping.get(newest_event_id)
+            if newest_event:
+                timestamp = newest_event.origin_server_ts
         end_time = time()
 
         assert newest_event_id is not None, "newest_event_id was not at an inconvenient time"

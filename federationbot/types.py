@@ -235,6 +235,6 @@ class RoomConfigData:
     room_id: str
     room_version: str
     list_of_servers_in_room: list[str] | None
-    timestamp_of_returned_list: int
+    timestamp_of_last_event_id: int
     detected_last_event_id: str
     processing_time: int

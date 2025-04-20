@@ -1303,14 +1303,12 @@ class FederationBot(RoomWalkCommand):
 
     @test_command.subcommand(name="room_hosts", help="List all hosts in a room, in order from earliest")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
-    @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="limit", parser=is_int, required=False)
     @command.argument(name="server_to_request_from", required=False)
     async def room_host_command(
         self,
         command_event: MessageEvent,
         room_id_or_alias: str | None,
-        event_id: str | None,
         limit: int | None,
         server_to_request_from: str | None = None,
     ) -> None:
@@ -1329,7 +1327,7 @@ class FederationBot(RoomWalkCommand):
             command_event,
             room_id_or_alias,
             get_servers_in_room=True,
-            use_origin_room=True,
+            use_origin_room_as_fallback=True,
         )
         if not room_data:
             # The user facing error message was already sent
@@ -1338,7 +1336,7 @@ class FederationBot(RoomWalkCommand):
         preresponse_message = await command_event.respond(
             f"Retrieving Hosts for \n"
             f"* Room: {room_id_or_alias or room_data.room_id}\n"
-            f"* at {pretty_print_timestamp(room_data.timestamp_of_returned_list)}\n"
+            f"* at {pretty_print_timestamp(room_data.timestamp_of_last_event_id)}\n"
             f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids: list[EventID] = [preresponse_message]
@@ -2288,35 +2286,30 @@ class FederationBot(RoomWalkCommand):
 
     @fed_command.subcommand(name="state", help="Request state over federation for a room.")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
-    @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="server_to_request_from", required=False)
     async def state_command(
         self,
         command_event: MessageEvent,
         room_id_or_alias: str | None,
-        event_id: str | None,
         server_to_request_from: str | None,
     ) -> None:
-        await self._state_command(command_event, room_id_or_alias, event_id, server_to_request_from)
+        await self._state_command(command_event, room_id_or_alias, server_to_request_from)
 
     @fed_command.subcommand(name="state_no_members", help="Request state over federation for a room.")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
-    @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="server_to_request_from", required=False)
     async def state_no_members_command(
         self,
         command_event: MessageEvent,
         room_id_or_alias: str | None,
-        event_id: str | None,
         server_to_request_from: str | None,
     ) -> None:
-        await self._state_command(command_event, room_id_or_alias, event_id, server_to_request_from, no_members=True)
+        await self._state_command(command_event, room_id_or_alias, server_to_request_from, no_members=True)
 
     async def _state_command(
         self,
         command_event: MessageEvent,
         room_id_or_alias: str | None,
-        event_id: str | None,
         server_to_request_from: str | None,
         no_members: bool = False,
     ) -> None:
@@ -2329,7 +2322,6 @@ class FederationBot(RoomWalkCommand):
         Args:
             command_event: Event that triggered the command
             room_id_or_alias: Room ID or alias to get state for
-            event_id: Event ID to get state at, defaults to latest
             server_to_request_from: Server to query, defaults to origin server
             no_members: Whether to filter out member events
         """
@@ -2342,37 +2334,29 @@ class FederationBot(RoomWalkCommand):
 
         destination_server = server_to_request_from or origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(
+        room_data = await self.get_room_data(
             origin_server,
             destination_server,
             command_event,
             room_id_or_alias,
-            event_id,
+            get_servers_in_room=False,
+            use_origin_room_as_fallback=True,
         )
-        if not discovered_info:
+        if not room_data:
             # The user facing error message was already sent
             return
 
-        room_id, event_id, origin_server_ts = discovered_info
-
-        if origin_server_ts:
-            # A nice little addition for the status updated before the command runs
-            special_time_formatting = (
-                f"\n  * which took place at: {datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
-            )
-        else:
-            special_time_formatting = ""
+        room_id = room_data.room_id
+        event_id = room_data.detected_last_event_id
+        origin_server_ts = room_data.timestamp_of_last_event_id
 
         prerender_message = await command_event.respond(
             f"Retrieving State for:\n"
             f"* Room: {room_id_or_alias or room_id}\n"
-            f"* at Event ID: {event_id}{special_time_formatting}\n"
+            f"* which took place at: {pretty_print_timestamp(origin_server_ts)} UTC\n"
             f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids: list[EventID] = [prerender_message]
-
-        # This will be assigned by now
-        assert event_id is not None
 
         # This will retrieve the events and the auth chain, we only use the former here
         (
