@@ -12,8 +12,8 @@ from time import time
 import asyncio
 
 from maubot.plugin_base import Plugin
-from mautrix.errors import MForbidden
 from mautrix.api import Method
+from mautrix.errors import MForbidden, MUnknown
 from mautrix.types import EventType, Membership, RoomAlias as MautrixRoomAlias, RoomID
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
@@ -189,11 +189,7 @@ class FederationBotCommandBase(Plugin):
 
         _room_alias = is_room_alias(room_id_or_alias)
         if not _room_alias:
-            message_id = await command_event.reply(
-                f"{room_id_or_alias} does not seem to be a room alias or room id",
-            )
-
-            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+            await self.log_to_client(command_event, f"{room_id_or_alias} does not seem to be a room alias or room id")
 
             return None, list_of_servers
         room_alias = RoomAlias(_room_alias)
@@ -209,12 +205,20 @@ class FederationBotCommandBase(Plugin):
             )
 
         except FedBotException as e:
-            message_id = await command_event.reply(
+            await self.log_to_client(
+                command_event,
                 "Received an error while querying for room alias:\n\n"
-                f"{e.summary_exception}: '{_room_alias}'\nTrying fallback method",
+                f"{e.summary_exception}: '{_room_alias}'\n\nTrying fallback method",
             )
-            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-            room_alias_info = await self.client.resolve_room_alias(MautrixRoomAlias(_room_alias))
+            try:
+                room_alias_info = await self.client.resolve_room_alias(MautrixRoomAlias(_room_alias))
+            except MUnknown as e:
+                await self.log_to_client(
+                    command_event,
+                    "Received an error while using client API for room alias:\n\n" f"{e.errcode}: {e.message}",
+                )
+                return None, []
+
             return str(room_alias_info.room_id), room_alias_info.servers
 
         return room_id, list_of_servers
@@ -413,3 +417,24 @@ class FederationBotCommandBase(Plugin):
             )
             return None
         return _origin_server
+
+    async def log_to_client(
+        self, command_event: MessageEvent, message: str, reply: bool = True, add_cleanup: bool = True
+    ) -> None:
+        """
+        Send a message back to the client window, usually for errors or responses.
+
+        Args:
+            command_event: The origin event that triggered the bot, useful interface to interact with the room
+            message: The data to send back
+            reply: True if the response needs to be a reply to the original event, or just posted as an m.notice
+            add_cleanup: If the message should be tagged for easy cleanup
+
+        Returns: None
+        """
+        if reply:
+            message_id = await command_event.reply(message)
+        else:
+            message_id = await command_event.respond(message, None)
+        if add_cleanup:
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
