@@ -180,6 +180,8 @@ class FederationBotCommandBase(Plugin):
             A tuple containing the room ID and a list of servers to join through if it was an alias
         """
         list_of_servers: list[str] = []
+        if origin_server is None:
+            origin_server = self.federation_handler.hosting_server
 
         # Sort out if the room id or alias passed in is valid and resolve the alias
         # to the room id if it is.
@@ -201,7 +203,7 @@ class FederationBotCommandBase(Plugin):
                 list_of_servers,
             ) = await self.federation_handler.resolve_room_alias(
                 room_alias,
-                origin_server or room_alias.origin_server,
+                origin_server,
             )
 
         except FedBotException as e:
@@ -212,10 +214,10 @@ class FederationBotCommandBase(Plugin):
             )
             try:
                 room_alias_info = await self.client.resolve_room_alias(MautrixRoomAlias(_room_alias))
-            except MUnknown as e:
+            except MUnknown as e2:
                 await self.log_to_client(
                     command_event,
-                    "Received an error while using client API for room alias:\n\n" f"{e.errcode}: {e.message}",
+                    "Received an error while using client API for room alias:\n\n" f"{e2.errcode}: {e2.message}",
                 )
                 return None, []
 
@@ -265,8 +267,7 @@ class FederationBotCommandBase(Plugin):
                 if room_id_or_alias:
                     # Tried everything we could find to resolve the room, give up
                     return None
-                else:
-                    room_id = command_event.room_id
+                room_id = command_event.room_id
             else:
                 await command_event.respond(
                     "No data was provided to help resolve the room data needed",
