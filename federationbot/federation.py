@@ -515,14 +515,41 @@ class FederationHandler:
                 room_id=room_id,
                 user_id=self.bot_mxid,
             )
+
         except MatrixError:
-            # TODO: Could do something smarter here, like check state
-            room_version = "1"
+            # whine about it
+            fed_handler_logger.warning("discover_room_version: Failed to make_join to room: %s", room_id)
 
         else:
-            room_version = response.room_version
+            if response.http_code == 200:
+                room_version = response.room_version
+                self.room_version_cache.set(room_id, room_version)
+
+                return room_version
+
+        try:
+            # perhaps retrieve the last event in the room, and use its auth events to triangulate the create event
+            timestamp_response = await self.get_last_event_id_in_room(origin_server, destination_server, room_id)
+            last_event_id = timestamp_response.event_id
+            fed_handler_logger.info("discover_room_version: trying ts2e response, found event_id: %s", last_event_id)
+            last_event_raw_pdu = await self.get_raw_pdu(origin_server, destination_server, last_event_id)
+
+            auth_event_id_list = last_event_raw_pdu.get("auth_events", [])
+            for auth_event_id in auth_event_id_list:
+                auth_event = await self.get_raw_pdu(origin_server, destination_server, auth_event_id)
+                if room_version := auth_event.get("content", {}).get("room_version"):
+                    # Found it
+                    self.room_version_cache.set(room_id, room_version)
+                    break
+        except MatrixError as e:
+            fed_handler_logger.warning(
+                "discover_room_version: Hit exception pulling last event in room: %s\n%r", room_id, e
+            )
+
+        else:
             self.room_version_cache.set(room_id, room_version)
 
+        assert room_version is not None, f"room_version was unexpectedly None for {room_id}"
         return room_version
 
     async def filter_state_for_type(
