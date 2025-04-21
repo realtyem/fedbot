@@ -24,7 +24,7 @@ from federationbot.events import EventError
 from federationbot.federation import FederationHandler
 from federationbot.protocols import MessageEvent
 from federationbot.responses import MatrixError
-from federationbot.types import RoomAlias, RoomConfigData
+from federationbot.types import RoomConfigData
 from federationbot.utils.matrix import get_domain_from_id, is_room_alias, is_room_id
 
 
@@ -180,8 +180,6 @@ class FederationBotCommandBase(Plugin):
             A tuple containing the room ID and a list of servers to join through if it was an alias
         """
         list_of_servers: list[str] = []
-        if origin_server is None:
-            origin_server = self.federation_handler.hosting_server
 
         # Sort out if the room id or alias passed in is valid and resolve the alias
         # to the room id if it is.
@@ -194,36 +192,17 @@ class FederationBotCommandBase(Plugin):
             await self.log_to_client(command_event, f"{room_id_or_alias} does not seem to be a room alias or room id")
 
             return None, list_of_servers
-        room_alias = RoomAlias(_room_alias)
 
-        # look up the room alias. The server is extracted from the alias itself.
         try:
-            (
-                room_id,
-                list_of_servers,
-            ) = await self.federation_handler.resolve_room_alias(
-                room_alias,
-                origin_server,
-            )
-
-        except FedBotException as e:
+            room_alias_info = await self.client.resolve_room_alias(MautrixRoomAlias(_room_alias))
+        except MUnknown as e2:
             await self.log_to_client(
                 command_event,
-                "Received an error while querying for room alias:\n\n"
-                f"{e.summary_exception}: '{_room_alias}'\n\nTrying fallback method",
+                f"Received an error while querying for room alias:\n\n{e2.errcode}: {e2.message}",
             )
-            try:
-                room_alias_info = await self.client.resolve_room_alias(MautrixRoomAlias(_room_alias))
-            except MUnknown as e2:
-                await self.log_to_client(
-                    command_event,
-                    "Received an error while using client API for room alias:\n\n" f"{e2.errcode}: {e2.message}",
-                )
-                return None, []
+            return None, []
 
-            return str(room_alias_info.room_id), room_alias_info.servers
-
-        return room_id, list_of_servers
+        return str(room_alias_info.room_id), room_alias_info.servers
 
     async def get_room_data(
         self,
