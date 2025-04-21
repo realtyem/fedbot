@@ -1472,7 +1472,10 @@ class FederationBot(RoomWalkCommand):
 
     @test_command.subcommand(name="room_version", help="experiment to get room version from room id")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
-    async def room_version_command(self, command_event: MessageEvent, room_id_or_alias: str) -> None:
+    @command.argument(name="target_server", required=False)
+    async def room_version_command(
+        self, command_event: MessageEvent, room_id_or_alias: str, target_server: str | None = None
+    ) -> None:
         """
         Get room version information.
 
@@ -1481,6 +1484,7 @@ class FederationBot(RoomWalkCommand):
         Args:
             command_event: The event that triggered the command
             room_id_or_alias: Room ID or alias to check version for
+            target_server: optional server to target, if omitted the origin will be used
         """
         await command_event.mark_read()
 
@@ -1488,26 +1492,22 @@ class FederationBot(RoomWalkCommand):
         if not origin_server:
             return
 
-        room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
-            room_id_or_alias,
-            command_event,
+        if not target_server:
+            target_server = origin_server
+        room_data = await self.get_room_data(
             origin_server,
+            target_server,
+            command_event,
+            room_id_or_alias,
+            get_servers_in_room=False,
+            use_origin_room_as_fallback=False,
         )
-        if not room_id:
-            # Don't need to actually display an error, that's handled in the above
-            # function
+        if not room_data:
             return
 
-        room_version = await self.federation_handler.discover_room_version(
-            origin_server=origin_server,
-            destination_server=origin_server,
-            room_id=room_id,
+        pinned_message = cast(
+            "EventID", await command_event.reply(f"{room_data.room_id} version is {room_data.room_version}")
         )
-        if not room_version:
-            await command_event.reply(f"Error getting room version from room {room_id}")
-            return
-
-        pinned_message = cast("EventID", await command_event.reply(f"{room_id} version is {room_version}"))
         await self.reaction_task_controller.add_cleanup_control(pinned_message, command_event.room_id)
 
     @test_command.subcommand(name="discover_event_id", help="experiment to get event id from PDU event")
