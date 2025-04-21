@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, Collection, Sequence, cast
 from asyncio import QueueEmpty
 from contextlib import suppress
-from datetime import datetime
 from itertools import chain
 import asyncio
 import hashlib
@@ -3307,7 +3306,11 @@ class FederationBot(RoomWalkCommand):
         for message_id in list_of_message_ids:
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
-    @fed_command.subcommand(name="backfill", help="Request backfill over federation for a room.")
+    @fed_command.subcommand(
+        name="backfill",
+        help="Request backfill over federation for a room. Provide a room ID/Alias to get latest from that room. "
+        "Provide an Event ID to backfill from that place in time",
+    )
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="event_id", parser=is_event_id, required=False)
     @command.argument(name="limit", required=False)
@@ -3317,7 +3320,7 @@ class FederationBot(RoomWalkCommand):
         command_event: MessageEvent,
         room_id_or_alias: str | None,
         event_id: str | None,
-        limit: str | None,
+        limit: str | None = None,
         server_to_request_from: str | None = None,
     ) -> None:
         # Let the user know the bot is paying attention
@@ -3337,37 +3340,33 @@ class FederationBot(RoomWalkCommand):
 
         destination_server = server_to_request_from or origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(
+        room_data = await self.get_room_data(
             origin_server,
             destination_server,
             command_event,
             room_id_or_alias,
-            event_id,
+            get_servers_in_room=False,
+            use_origin_room_as_fallback=True,
         )
-        if not discovered_info:
-            # The user facing error message was already sent
-            return
 
-        room_id, event_id, origin_server_ts = discovered_info
-
-        if origin_server_ts:
-            # A nice little addition for the status updated before the command runs
-            special_time_formatting = (
-                f"\n  * which took place at: {datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
-            )
+        if not event_id and room_data:
+            event_id = room_data.detected_last_event_id
+            timestamp = room_data.timestamp_of_last_event_id
+            room_id = room_data.room_id
         else:
-            special_time_formatting = ""
+            assert event_id is not None, "Event ID can not be None here"
+            event = await self.federation_handler.get_event(origin_server, destination_server, event_id)
+            timestamp = event.origin_server_ts
+            room_id = event.room_id
 
         prerender_message = await command_event.respond(
             f"Retrieving last {limit} Events for \n"
-            f"* Room: {room_id_or_alias or room_id}\n"
-            f"* at Event ID: {event_id}{special_time_formatting}\n"
+            f"* Room: {room_id}\n"
+            f"* at Event ID: {event_id}\n"
+            f"\n  * which took place at: {pretty_print_timestamp(timestamp)} UTC"
             f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids: list[EventID] = [prerender_message]
-
-        # This will be assigned by now
-        assert event_id is not None
 
         pdu_list_from_response = await self.federation_handler.get_events_from_backfill(
             origin_server,
