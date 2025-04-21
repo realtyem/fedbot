@@ -1500,7 +1500,7 @@ class FederationBot(RoomWalkCommand):
 
         room_version = await self.federation_handler.discover_room_version(
             origin_server=origin_server,
-            destination_server=list_of_room_alias_servers[0] if list_of_room_alias_servers else origin_server,
+            destination_server=origin_server,
             room_id=room_id,
         )
         if not room_version:
