@@ -249,7 +249,7 @@ class FederationBotCommandBase(Plugin):
                 room_id = command_event.room_id
             else:
                 await command_event.respond(
-                    "No data was provided to help resolve the room data needed",
+                    "Was not able to resolve the room alias provided",
                 )
                 return None
 
@@ -258,15 +258,15 @@ class FederationBotCommandBase(Plugin):
         join_response = None
         newest_event_id = None
         timestamp = 0
-        client_fall_back = False
+        use_s2s_api = False
         if get_servers_in_room:
             # Try and use the client API to get the list of servers in the room, it is usually faster. However, if
             # the bot is not in whatever room it is, but the server is, then fallback to using federation state data
             list_of_servers = await self.get_current_hosts_in_room_client(command_event, room_id)
             if list_of_servers is None:
-                client_fall_back = True
+                use_s2s_api = True
 
-        if client_fall_back:
+        if use_s2s_api:
             # Let the audience know this might take a bit longer
             await command_event.respond(NOT_IN_ROOM_TRYING_FALLBACK)
 
@@ -307,7 +307,7 @@ class FederationBotCommandBase(Plugin):
                 timestamp = ts_response.origin_server_ts
             except MatrixError as e:
                 await command_event.respond(
-                    "I'm sorry, the server is not disclosing details about this room\n" f"{e.errcode}: {e.error}",
+                    f"I'm sorry, the server is not disclosing details about this room\n\n{e.errcode}: {e.error}",
                 )
                 return None
 
