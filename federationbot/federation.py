@@ -307,6 +307,36 @@ class FederationHandler:
         await self.task_controller.cancel(reference_key)
         return event_to_event_base
 
+    async def get_raw_pdu(
+        self,
+        origin_server: str,
+        destination_server: str,
+        event_id: str,
+    ) -> dict[str, Any]:
+        """
+        Retrieves a single Event PDU from a server. This will be in the raw JSON converted format
+
+        Args:
+            origin_server: The server placing the request
+            destination_server: The server receiving the request
+            event_id: The opaque string of the id given to the Event
+
+        Returns: A dict format json response of a single PDU
+
+        """
+        response = await self.api.get_event(
+            destination_server,
+            origin_server,
+            event_id,
+        )
+
+        if isinstance(response, MatrixError):
+            raise response
+
+        pdu_list: List[Dict[str, Any]] = response.json_response.get("pdus", [])
+        assert len(pdu_list) == 1, f"More than one PDU was retrieved: {event_id}"
+        return pdu_list[0]
+
     async def find_event_on_servers(
         self, origin_server: str, event_id: str, servers_to_check: Collection[str]
     ) -> Dict[str, EventBase]:
