@@ -257,7 +257,7 @@ class FederationHandler:
     ) -> Dict[str, EventBase]:
         """
         Retrieve multiple Events from a given server. Uses Async Tasks and a Queue to
-        be efficient. Creates number of event_ids up to 10 Tasks for concurrency.
+        be efficient. Creates number of event_ids up to 3 Tasks for concurrency.
 
         Args:
             origin_server: The server to auth the request with
