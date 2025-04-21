@@ -337,6 +337,24 @@ class FederationHandler:
         assert len(pdu_list) == 1, f"More than one PDU was retrieved: {event_id}"
         return pdu_list[0]
 
+    async def get_event(self, origin_server: str, destination_server: str, event_id: str) -> EventBase:
+        """
+
+        Args:
+            origin_server:
+            destination_server:
+            event_id:
+
+        Returns:
+
+        """
+        pdu = await self.get_raw_pdu(origin_server, destination_server, event_id)
+        room_id = pdu.get("room_id")
+        if room_id is None:
+            raise MatrixError(errcode=pdu.get("errcode"), error=pdu.get("error"))
+        room_version = await self.discover_room_version(origin_server, destination_server, room_id)
+        return determine_what_kind_of_event(event_id=None, room_version=room_version, data_to_use=pdu)
+
     async def find_event_on_servers(
         self, origin_server: str, event_id: str, servers_to_check: Collection[str]
     ) -> Dict[str, EventBase]:
