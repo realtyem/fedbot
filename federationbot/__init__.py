@@ -3436,14 +3436,12 @@ class FederationBot(RoomWalkCommand):
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @fed_command.subcommand(name="event_auth", help="Request the auth chain for an event over federation")
-    @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="event_id", parser=is_event_id, required=True)
     @command.argument(name="server_to_request_from", required=False)
     async def event_auth_command(
         self,
         command_event: MessageEvent,
-        room_id_or_alias: str | None,
-        event_id: str | None,
+        event_id: str,
         server_to_request_from: str | None = None,
     ) -> None:
         # Unlike some of the other commands, this one *requires* an event_id passed in.
@@ -3457,37 +3455,25 @@ class FederationBot(RoomWalkCommand):
 
         destination_server = server_to_request_from or origin_server
 
-        discovered_info = await self._discover_event_ids_and_room_ids(
-            origin_server,
-            destination_server,
-            command_event,
-            room_id_or_alias,
-            event_id,
-        )
-        if not discovered_info:
-            # The user facing error message was already sent
+        event_mapping = await self.federation_handler.get_event_from_server(origin_server, destination_server, event_id)
+        event = event_mapping.get(event_id)
+        if isinstance(event, EventError):
+            await self.log_to_client(
+                command_event, f"The event ID supplied produced an error\n\n{event.errcode}:{event.error}"
+            )
             return
 
-        room_id, event_id, origin_server_ts = discovered_info
-
-        if origin_server_ts:
-            # A nice little addition for the status updated before the command runs
-            special_time_formatting = (
-                f"\n  * which took place at: {datetime.fromtimestamp(float(origin_server_ts / 1000))} UTC"
-            )
-        else:
-            special_time_formatting = ""
+        assert isinstance(event, EventBase)
+        room_id = event.room_id
 
         prerender_message = await command_event.respond(
             "Retrieving the chain of Auth Events for:\n"
-            f"* Event ID: {event_id}{special_time_formatting}\n"
-            f"* in Room: {room_id_or_alias or room_id}\n"
+            f"* Event ID: {event_id}\n"
+            f"* in Room: {room_id}\n"
+            f"\n  * which took place at: {pretty_print_timestamp(event.origin_server_ts)} UTC"
             f"* From {destination_server} using {origin_server}",
         )
         list_of_message_ids: list[EventID] = [prerender_message]
-
-        # This will be assigned by now
-        assert event_id is not None
 
         started_at = time.monotonic()
         try:
