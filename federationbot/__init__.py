@@ -4147,7 +4147,7 @@ class FederationBot(RoomWalkCommand):
             command_event: Event that triggered the command
             server_to_check: Server name to check delegation for
         """
-        list_of_servers_to_check = set()
+        list_of_servers_to_check: list[str] = []
 
         await command_event.mark_read()
 
@@ -4156,41 +4156,34 @@ class FederationBot(RoomWalkCommand):
         if maybe_user_mxid:
             server_to_check = get_domain_from_id(maybe_user_mxid)
 
+        if not server_to_check:
+            server_to_check = str(command_event.room_id)
+
         # As an undocumented option, allow passing in a room_id to check an entire room.
         # This can be rather long(and time consuming) so we'll place limits later.
-        maybe_room_id = is_room_id_or_alias(server_to_check)
-        if maybe_room_id:
-            origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
-            # Need to cancel server_to_check, but can't use None
-            server_to_check = ""
-            if not room_to_check:
+        if is_room_id_or_alias(server_to_check):
+            origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+            if origin_server is None:
+                return
+            destination_server = origin_server
+            room_data = await self.get_room_data(
+                origin_server,
+                destination_server,
+                command_event,
+                server_to_check,
+                get_servers_in_room=True,
+                use_origin_room_as_fallback=False,
+            )
+            if not room_data:
                 # Don't need to actually display an error, that's handled in the above
                 # function
                 return
-        else:
-            # with server_to_check being set, this will be ignored any way
-            room_to_check = command_event.room_id
+            assert room_data.list_of_servers_in_room is not None
+            list_of_servers_to_check = room_data.list_of_servers_in_room
 
-        # server_to_check has survived this far, add it to the set of servers to search
-        # for. Since we allow for searching an entire room, it will be the only server
-        # in the set.
-        if server_to_check:
-            list_of_servers_to_check.add(server_to_check)
-
-        # The list of servers was empty. This implies that a room_id was provided,
-        # let's check.
+        # If the whole room was to be searched, this will already be filled in. Otherwise, there is our target
         if not list_of_servers_to_check:
-            try:
-                assert room_to_check is not None
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-
-            for member in joined_members:
-                list_of_servers_to_check.add(get_domain_from_id(member))
+            list_of_servers_to_check.append(server_to_check)
 
         number_of_servers = len(list_of_servers_to_check)
 
@@ -4204,7 +4197,7 @@ class FederationBot(RoomWalkCommand):
 
         # map of server name -> (server brand, server version)
         server_to_server_data: dict[str, ServerDiscoveryDnsResult] = {}
-        set_of_server_names = set(list_of_servers_to_check)
+        servers_to_contact = set(list_of_servers_to_check)
 
         async def _delegation_worker(queue: asyncio.Queue[str]) -> None:
             while True:
@@ -4216,7 +4209,7 @@ class FederationBot(RoomWalkCommand):
                             worker_server_name, Diagnostics()
                         )
                     )
-                    set_of_server_names.discard(worker_server_name)
+                    servers_to_contact.discard(worker_server_name)
                 except Exception as e:
                     self.log.warning("delegation worker error on %s: %r", worker_server_name, e, exc_info=True)
                     raise
@@ -4240,54 +4233,23 @@ class FederationBot(RoomWalkCommand):
         await self.reaction_task_controller.cancel(reference_key)
         total_time = time.monotonic() - started_at
 
-        # Want the full room version it to look like this for now
-        #
-        #   Server Name | Status | Host                 | Port  | TLS served by  |
-        # ------------------------------------------------------------------
-        #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
-        # somewhere.net |    404 | None                 | Error | resty          | Long error....
-        #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
-
-        # The single server version will be the same in that a single line like above
-        # will be printed, then the rendered diagnostic data
-
         # Create the columns to be used
         server_name_col = DisplayLineColumnConfig("Server Name")
         results_col = DisplayLineColumnConfig("Results")
-        # host_col = DisplayLineColumnConfig("Host")
-        # port_col = DisplayLineColumnConfig("Port")
-        # tls_served_by_col = DisplayLineColumnConfig("TLS served by")
-        # errors_col = DisplayLineColumnConfig("Errors")
 
         # Iterate through the server names to widen the column, if necessary.
         for server_name, response in server_to_server_data.items():
             # Only if it's not obnoxiously long, saw an over 66 once(you know who you are)
             if not len(server_name) > 30:
                 server_name_col.maybe_update_column_width(len(server_name))
-            # if isinstance(response, WellKnownDiagnosticResult):
-            # results_col.maybe_update_column_width(response.host)
-            # port_col.maybe_update_column_width(response.port)
-            # if maybe_tls_server := response.headers.get("server", None):
-            #     tls_served_by_col.maybe_update_column_width(len(maybe_tls_server))
-
-        # Just use a fixed width for the results. Should never be larger than 5 for most
-        # status_col.maybe_update_column_width(6)
 
         # Begin constructing the message
         #
         # Use a sorted list of server names, so it displays in alphabetical order.
         server_results_sorted = sorted(server_to_server_data.keys())
 
-        servers_missing = list_of_servers_to_check - set(server_results_sorted)
         # Build the header line
-        header_message = (
-            f"{server_name_col.front_pad()} | "
-            f"{results_col.pad()} | \n"
-            # f"{host_col.pad()} | "
-            # f"{port_col.pad()} | "
-            # f"{tls_served_by_col.pad()} | "
-            # f"Errors\n"
-        )
+        header_message = f"{server_name_col.front_pad()} | " f"{results_col.pad()} | \n"
 
         # Need the total of the width for the code block table to make the delimiter
         header_line_size = len(header_message)
@@ -4299,35 +4261,21 @@ class FederationBot(RoomWalkCommand):
         # Use the sorted list from earlier, alphabetical looks nicer
         for server_name in server_results_sorted:
             response = server_to_server_data[server_name]
-
-            # Want the full room version it to look like this for now
-            #
-            #   Server Name | Status | Host                 | Port  | TLS served by  | Errors
-            # ------------------------------------------------------------------
-            #   example.org |    200 | matrix.example.org   | 8448  | Synapse 1.92.0 |
-            # somewhere.net |    404 | None                 | Error | resty          | Long error....
-            #   maunium.net |    200 | meow.host.mau.fi     | 443   | Caddy          |
-
             buffered_message = f"{server_name_col.front_pad(server_name)} | "
-            # if isinstance(response, WellKnownDiagnosticResult):
-            buffered_message += f"{results_col.pad(str(response))}"
-            # buffered_message += f"{host_col.pad(response.host)} | "
-            # buffered_message += f"{port_col.pad(response.port)} | "
-            #
-            # maybe_tls_server = response.headers.get("server")
-            # buffered_message += f"{tls_served_by_col.pad(maybe_tls_server if maybe_tls_server else '')} | "
-            #
+            if response.a_result is not None:
+                count = len(response.a_result.hosts)
+                for a_address in response.a_result.hosts:
+                    buffered_message += f"{results_col.pad(a_address)}"
+                    if count > 1:
+                        buffered_message += f"\n{server_name_col.front_pad('')} | "
+                    count -= 1
             buffered_message += "\n"
-
-            # else:
-            #     assert isinstance(response, WellKnownLookupFailure)
-            #     # Sometimes status_code can be None, but if we let that ride it shows up as the header name of the column
-            #     buffered_message += f"{status_col.pad(response.status_code or '')} | "
-            #     buffered_message += f"{response.reason}\n"
 
             list_of_result_data.extend([buffered_message])
 
-        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_missing}\n"
+        footer_message = (
+            f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_to_contact}\n"
+        )
         list_of_result_data.extend([footer_message])
 
         # For a single server test, the response will fit into a single message block.
