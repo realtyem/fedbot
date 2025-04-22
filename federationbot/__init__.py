@@ -22,6 +22,7 @@ from unpaddedbase64 import encode_base64
 from federationbot.commands.room_walk import RoomWalkCommand
 from federationbot.constants import (
     BACKOFF_MULTIPLIER,
+    MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST,
     MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
     NOT_IN_ROOM_ERROR,
     SECONDS_BETWEEN_EDITS,
@@ -1615,67 +1616,26 @@ class FederationBot(RoomWalkCommand):
             room_id_or_alias: Room ID or alias to get head for
         """
         await command_event.mark_read()
-        origin_server = get_domain_from_id(self.client.mxid)
-        room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
-            room_id_or_alias,
-            command_event,
-            origin_server,
-        )
-        if not room_id:
-            # The user facing error message was already sent
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
             return
-        self.log.warning("list_of_servers: %r", list_of_room_alias_servers)
         destination_server = origin_server
-        if list_of_room_alias_servers:
-            destination_server = list_of_room_alias_servers[0]
-
-        try:
-            head_response = await self.federation_handler.make_join_to_server(
-                origin_server,
-                destination_server,
-                room_id,
-                str(self.client.mxid),
-            )
-        except MatrixError as e:
-            message_id = cast(
-                "EventID",
-                await command_event.reply(f"Could not get latest event in room for pulling state to get members: {e}"),
-            )
-            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
-            return
-
-        # room_version = head_response.room_version
-        self.log.info("head: %r", head_response.prev_events)
-        host_list = await self.federation_handler.get_hosts_in_room_ordered(
+        room_data = await self.get_room_data(
             origin_server,
             destination_server,
-            room_id,
-            head_response.prev_events[0],
+            command_event,
+            room_id_or_alias,
+            get_servers_in_room=True,
+            use_origin_room_as_fallback=True,
         )
+        if not room_data:
+            return
+        assert isinstance(room_data.list_of_servers_in_room, list), "List of servers was None, they must be escaping"
+
         list_of_message_ids: list[EventID] = []
 
-        if not host_list:
-            # Either the origin server doesn't have the state, or some other problem
-            # occurred. Fall back to the client api with current state. Obviously there
-            # are problems with this, but it will allow forward progress.
-            current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, falling back to client API",
-            )
-            list_of_message_ids.extend([current_message])
-            try:
-                joined_members = await self.client.get_joined_members(RoomID(room_id))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-
-            for member in joined_members:
-                host = get_domain_from_id(member)
-                if host not in host_list:
-                    host_list.extend([host])
-
         host_queue: asyncio.Queue[str] = asyncio.Queue()
-        for host in host_list:
+        for host in room_data.list_of_servers_in_room:
             host_queue.put_nowait(host)
 
         async def _head_task(
@@ -1686,7 +1646,7 @@ class FederationBot(RoomWalkCommand):
                 join_response = await self.federation_handler.make_join_to_server(
                     origin_server,
                     _host,
-                    room_id,
+                    room_data.room_id,
                     str(self.client.mxid),
                 )
             except MatrixError as _e:
@@ -1705,7 +1665,7 @@ class FederationBot(RoomWalkCommand):
             reference_task_key,
             _head_task,
             host_queue,
-            limit=len(host_list),
+            limit=min(len(room_data.list_of_servers_in_room), MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST),
         )
 
         results: Sequence[tuple[str, MakeJoinResponse | MatrixError]] = (
