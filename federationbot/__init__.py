@@ -30,7 +30,7 @@ from federationbot.constants import (
     SERVER_VERSION,
 )
 from federationbot.controllers import EmojiReactionCommandStatus
-from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, GenericStateEvent, redact_event
+from federationbot.events import CreateRoomStateEvent, Event, EventBase, EventError, redact_event
 from federationbot.protocols import MessageEvent
 from federationbot.resolver import (
     Diagnostics,
@@ -4357,7 +4357,7 @@ class FederationBot(RoomWalkCommand):
             command_event: Event that triggered the command
             server_to_check: Server name to check delegation for
         """
-        list_of_servers_to_check = set()
+        list_of_servers_to_check: list[str] = []
 
         await command_event.mark_read()
 
@@ -4366,41 +4366,34 @@ class FederationBot(RoomWalkCommand):
         if maybe_user_mxid:
             server_to_check = get_domain_from_id(maybe_user_mxid)
 
+        if not server_to_check:
+            server_to_check = str(command_event.room_id)
+
         # As an undocumented option, allow passing in a room_id to check an entire room.
         # This can be rather long(and time consuming) so we'll place limits later.
-        maybe_room_id = is_room_id_or_alias(server_to_check)
-        if maybe_room_id:
-            origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
-            # Need to cancel server_to_check, but can't use None
-            server_to_check = ""
-            if not room_to_check:
+        if is_room_id_or_alias(server_to_check):
+            origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+            if origin_server is None:
+                return
+            destination_server = origin_server
+            room_data = await self.get_room_data(
+                origin_server,
+                destination_server,
+                command_event,
+                server_to_check,
+                get_servers_in_room=True,
+                use_origin_room_as_fallback=False,
+            )
+            if not room_data:
                 # Don't need to actually display an error, that's handled in the above
                 # function
                 return
-        else:
-            # with server_to_check being set, this will be ignored any way
-            room_to_check = command_event.room_id
+            assert room_data.list_of_servers_in_room is not None
+            list_of_servers_to_check = room_data.list_of_servers_in_room
 
-        # server_to_check has survived this far, add it to the set of servers to search
-        # for. Since we allow for searching an entire room, it will be the only server
-        # in the set.
-        if server_to_check:
-            list_of_servers_to_check.add(server_to_check)
-
-        # The list of servers was empty. This implies that a room_id was provided,
-        # let's check.
+        # If the whole room was to be searched, this will already be filled in. Otherwise, there is our target
         if not list_of_servers_to_check:
-            try:
-                assert room_to_check is not None
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-
-            for member in joined_members:
-                list_of_servers_to_check.add(get_domain_from_id(member))
+            list_of_servers_to_check.append(server_to_check)
 
         number_of_servers = len(list_of_servers_to_check)
 
@@ -4414,7 +4407,8 @@ class FederationBot(RoomWalkCommand):
 
         # map of server name -> (server brand, server version)
         server_to_server_data: dict[str, MatrixResponse] = {}
-        set_of_server_names = set(list_of_servers_to_check)
+        # Use this to show which servers were uncontactable when rendering
+        servers_to_contact = set(list_of_servers_to_check)
 
         async def _discover_worker(queue: asyncio.Queue[str]) -> None:
             while True:
@@ -4427,7 +4421,7 @@ class FederationBot(RoomWalkCommand):
                             diagnostics=True,
                         )
                     )
-                    set_of_server_names.discard(worker_server_name)
+                    servers_to_contact.discard(worker_server_name)
                 except Exception:
                     # self.log.warning("discover worker error on %s: %r", worker_server_name, e, exc_info=True)
                     pass
@@ -4496,7 +4490,6 @@ class FederationBot(RoomWalkCommand):
         # Use a sorted list of server names, so it displays in alphabetical order.
         server_results_sorted = sorted(server_to_server_data.keys())
 
-        servers_missing = list_of_servers_to_check - set(server_results_sorted)
         # Build the header line
 
         header_message = (
@@ -4543,7 +4536,7 @@ class FederationBot(RoomWalkCommand):
                 )
                 buffered_message += f"{srt_col.pad('%.3f' % response.server_result.time_for_complete_delegation)} | "
                 buffered_message += f"{crt_col.pad('%.3f' % response.time_taken)} | "
-                buffered_message += f"{tls_served_by_col.pad(response.headers.get('server'))} | "
+                buffered_message += f"{tls_served_by_col.pad(response.headers.get('server', ''))} | "
             else:
                 assert isinstance(response, MatrixError)
                 buffered_message += f"{response.reason}"
@@ -4572,7 +4565,9 @@ class FederationBot(RoomWalkCommand):
 
             list_of_result_data.extend([buffered_message])
 
-        footer_message = f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_missing}\n"
+        footer_message = (
+            f"\nTotal time for retrieval: {total_time:.3f} seconds\nservers missing: {servers_to_contact}\n"
+        )
         list_of_result_data.extend([footer_message])
 
         # For a single server test, the response will fit into a single message block.
