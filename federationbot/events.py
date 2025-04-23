@@ -62,8 +62,8 @@ class EventBase:
     # Unused in this class, but is used in subclasses
     depth: int = 0
     hashes: Dict[str, str]
-    auth_events: List[str] = []
-    prev_events: List[str] = []
+    auth_events: List[str]
+    prev_events: List[str]
     error: Optional[str] = None
     errcode: Optional[str] = None
 
