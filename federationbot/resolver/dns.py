@@ -6,7 +6,7 @@ from dns.name import from_text
 from dns.nameserver import Do53Nameserver, Nameserver
 from dns.rdataclass import IN
 from dns.rdatatype import AAAA, CNAME, SRV, A, RdataType
-from dns.resolver import NXDOMAIN, LRUCache, NoAnswer
+from dns.resolver import NXDOMAIN, LRUCache, NoAnswer, NoNameservers
 import dns
 
 from federationbot.cache import TTLCache
@@ -147,7 +147,7 @@ class CachingDNSResolver:
                 diagnostics.status.dns = StatusEnum.OK
                 diagnostics.log(f"    Found Resolved IP address: {str(rdata.address)}")
 
-        except (NoAnswer, NXDOMAIN) as e:
+        except (NoAnswer, NXDOMAIN, NoNameservers) as e:
             error_message = str(e)
             # If one of the two queries done was OK, just use that. Stupid ipv6
             if diagnostics.status.dns != StatusEnum.OK:
