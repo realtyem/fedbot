@@ -1,12 +1,10 @@
-from typing import Any, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Optional, Sequence, Tuple
 from asyncio import sleep
 import json
 import logging
 import time
 
 from aiohttp import ClientResponse, ClientSession, ClientTimeout, TCPConnector, client_exceptions
-from signedjson.key import decode_signing_key_base64
-from signedjson.sign import sign_json
 from yarl import URL
 import backoff
 
@@ -26,6 +24,7 @@ from federationbot.requests.backoff import (
     backoff_logging_giveup_handler,
     backoff_update_retries_handler,
 )
+from federationbot.requests.requests import authorization_headers
 from federationbot.resolver import StatusEnum
 from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse
 from federationbot.server_result import DiagnosticInfo, ResponseStatusType, ServerResult
@@ -810,54 +809,3 @@ class FederationApi:
             )
 
         return response
-
-
-# https://spec.matrix.org/v1.9/server-server-api/#request-authentication
-# {
-#     "method": "GET",
-#     "uri": "/target",
-#     "origin": "origin.hs.example.com",
-#     "destination": "destination.hs.example.com",
-#     "content": <JSON-parsed request body>,
-#     "signatures": {
-#         "origin.hs.example.com": {
-#             "ed25519:key1": "ABCDEF..."
-#         }
-#     }
-# }
-def authorization_headers(
-    origin_name: str,
-    origin_signing_key: str,
-    destination_name: str,
-    request_method: str,
-    uri: str,
-    content: Optional[Union[str, Dict[str, Any]]] = None,
-) -> str:
-    # Extremely borrowed from Matrix spec docs, linked above. Spelunked a bit into
-    # Synapse code to identify how the signing key is stored and decoded.
-    request_json: Dict[str, Any] = {
-        "method": request_method,
-        "uri": uri,
-        "origin": origin_name,
-        "destination": destination_name,
-    }
-    algorithm, version, key_base64 = origin_signing_key.split()
-
-    key = decode_signing_key_base64(algorithm, version, key_base64)
-    if content is not None:
-        request_json["content"] = content
-
-    # canon_request_json = canonical_json(request_json)
-    signed_json = sign_json(request_json, origin_name, key)
-
-    authorization_header = ""
-
-    for key, sig in signed_json["signatures"][origin_name].items():
-        # 'X-Matrix origin="%s",key="%s",sig="%s",destination="%s"'
-        #
-        # authorization_header = f'X-Matrix origin=\"{origin_name}\",key=\"{key}\",sig=\"{sig}\",destination=\"{destination_name}\"'
-        authorization_header = (
-            f'X-Matrix origin="{origin_name}",key="{key}",sig="{sig}",destination="{destination_name}"'
-        )
-
-    return authorization_header

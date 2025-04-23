@@ -411,6 +411,19 @@ class FederationRequests:
         return response
 
 
+# https://spec.matrix.org/v1.9/server-server-api/#request-authentication
+# {
+#     "method": "GET",
+#     "uri": "/target",
+#     "origin": "origin.hs.example.com",
+#     "destination": "destination.hs.example.com",
+#     "content": <JSON-parsed request body>,
+#     "signatures": {
+#         "origin.hs.example.com": {
+#             "ed25519:key1": "ABCDEF..."
+#         }
+#     }
+# }
 def authorization_headers(
     origin_name: str,
     origin_signing_key: str,
