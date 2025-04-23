@@ -136,6 +136,10 @@ class LRUCache(Generic[KT, VT]):
         """
         return len(self._cache)
 
+    def __contains__(self, item) -> bool:
+        with self._lock:
+            return item in self._cache
+
     def default_expiry_condition(self, cache_entry: LRUCacheEntry) -> bool:
         """
         Check if cache entry has exceeded its expiry time.
