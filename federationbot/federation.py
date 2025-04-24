@@ -638,6 +638,13 @@ class FederationHandler:
         if isinstance(response, MatrixError):
             raise response
 
+        if response.http_code != 200:
+            raise MatrixError(
+                http_code=response.http_code,
+                errcode=response.json_response.get("errcode"),
+                error=response.json_response.get("error"),
+            )
+
         return MakeJoinResponse(**response.__dict__)
 
     async def get_room_head(
