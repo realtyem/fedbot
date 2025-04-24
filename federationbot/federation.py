@@ -368,7 +368,8 @@ class FederationHandler:
         try:
             pdu = await self.get_raw_pdu(origin_server, destination_server, event_id)
         except MatrixError as e:
-            return EventError(EventID(event_id), {"errcode": e.errcode, "error": e.error})
+            fed_handler_logger.debug("_get_event: %s: %s: %r", destination_server, event_id, e)
+            return EventError(EventID(event_id), {"errcode": e.errcode, "error": e.error or e.reason})
         if not pdu:
             # I'm not sure the circumstances in this, but was found in one instance. I did check the rest of the
             # response returned before passing thru get_raw_pdu(), and it had the other required fields
@@ -705,14 +706,15 @@ class FederationHandler:
             event = await self.get_event(origin_server, destination_server, event_id)
             if isinstance(event, EventError):
                 fed_handler_logger.debug(
-                    "get_room_head: %s: %s: %s: error while retrieving event: %s: %s",
+                    "get_room_head: %s: %s: %s: error while retrieving event: %s: %s\n%s",
                     destination_server,
                     room_id,
                     event_id,
                     event.errcode,
-                    event.error
+                    event.error,
+                    json.dumps(event._response),
                 )
-                # continue
+
             events_list.append(event)
 
         # Make the list a map for easier lookup in RoomHeadData

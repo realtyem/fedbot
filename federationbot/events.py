@@ -323,6 +323,7 @@ class EventBase:
 class EventError(EventBase):
     def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:  # noqa W0231
         # super().__init__(event_id, data)
+        self._response = data
         self.event_id = event_id
         self.error = data.get("error", "Unknown Error")
         self.errcode = data.get("errcode", "Unknown Error")
