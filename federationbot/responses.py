@@ -172,3 +172,15 @@ class RoomHeadData:
             self.newest_event.to_summary(include_glyphs=False)
             + f" | {self.auth_event_count * 'A'}:{self.prev_event_count * 'P'}"
         )
+
+    def print_detailed_lines(self) -> list[str]:
+        messages = ["Auth Events:"]
+        for event_id in self.make_join_response.auth_events:
+            messages.append(f"  {self.events_map[event_id].to_summary()}")
+
+        # The only reason we separate these is so they can have a title bit when rendered
+        messages += ["Prev Events:"]
+        for event_id in self.make_join_response.prev_events:
+            messages.append(f"  {self.events_map[event_id].to_summary()}")
+
+        return messages

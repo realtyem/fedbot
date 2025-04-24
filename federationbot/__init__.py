@@ -1605,7 +1605,61 @@ class FederationBot(RoomWalkCommand):
 
     @fed_command.subcommand(name="head", help="experiment for retrieving information about a room")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
-    async def head_command(self, command_event: MessageEvent, room_id_or_alias: str | None) -> None:
+    @command.argument(name="target_server", required=False)
+    async def head_command(
+        self, command_event: MessageEvent, room_id_or_alias: str | None, target_server: str | None
+    ) -> None:
+        if target_server:
+            await self._head_command_single(command_event, room_id_or_alias, target_server)
+        else:
+            await self._head_command(command_event, room_id_or_alias)
+
+    async def _head_command_single(
+        self, command_event: MessageEvent, room_id_or_alias: str | None, target_server: str
+    ) -> None:
+        """
+        Get room head information from a single server with more verbose display.
+
+        Retrieves information about the current head of a room's event graph.
+
+        Args:
+            command_event: The event that triggered the command
+            room_id_or_alias: Room ID or alias to get head for
+            target_server: If provided, just pull the data from this one server instead of the whole room
+        """
+        await command_event.mark_read()
+        origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+        if not origin_server:
+            return
+        room_data = await self.get_room_data(
+            origin_server,
+            target_server,
+            command_event,
+            room_id_or_alias,
+            get_servers_in_room=False,
+            use_origin_room_as_fallback=True,
+        )
+        if not room_data:
+            return
+
+        destination_server = target_server
+        list_of_message_ids: list[EventID] = []
+        room_head_data = await self.federation_handler.get_room_head(
+            origin_server, destination_server, room_data.room_id, self.client.mxid
+        )
+
+        list_of_buffered_messages = [json.dumps(room_head_data.make_join_response.json_response, indent=2)]
+        list_of_buffered_messages.extend(room_head_data.print_detailed_lines())
+        final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
+        for message in final_buffer_messages:
+            current_message = await command_event.respond(
+                make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True),
+            )
+            list_of_message_ids.extend([current_message])
+        for message_id in list_of_message_ids:
+            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+
+    async def _head_command(self, command_event: MessageEvent, room_id_or_alias: str | None) -> None:
         """
         Get room head information.
 
