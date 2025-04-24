@@ -210,6 +210,7 @@ class FederationBotCommandBase(Plugin):
         destination_server: str,
         command_event: MessageEvent,
         room_id_or_alias: str | None = None,
+        *,
         get_servers_in_room: bool = False,
         use_origin_room_as_fallback: bool = False,
     ) -> RoomConfigData | None:

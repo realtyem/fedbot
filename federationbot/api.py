@@ -78,6 +78,7 @@ class FederationApi:
         self,
         destination_server_name: str,
         path: str,
+        *,
         query_args: Optional[Sequence[Tuple[str, Any]]] = None,
         method: str = "GET",
         origin_server: Optional[str] = None,
@@ -266,6 +267,7 @@ class FederationApi:
         self,
         destination_server_name: str,
         path: str,
+        *,
         query_args: Optional[Sequence[Tuple[str, Any]]] = None,
         method: str = "GET",
         force_rediscover: bool = False,
@@ -634,6 +636,7 @@ class FederationApi:
         destination_server: str,
         room_id: str,
         event_id: str,
+        *,
         limit: str = "10",
     ) -> MatrixResponse:
 
@@ -743,6 +746,7 @@ class FederationApi:
         self,
         origin_server: str,
         destination_server: str,
+        *,
         include_all_networks: bool = False,
         limit: int = 10,
         since: Optional[str] = None,

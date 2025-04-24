@@ -158,6 +158,7 @@ class RoomWalkCommand(FederationBotCommandBase):
         pinned_message: EventID,
         header_lines: list[str],
         static_lines: list[str],
+        *,
         discovery_collection_of_event_ids: set[EventID] | None = None,
         room_depth: int | None = None,
         is_final_phase: bool = False,
@@ -394,7 +395,7 @@ class RoomWalkCommand(FederationBotCommandBase):
             pinned_message,
             header_lines,
             static_lines,
-            discovery_collection_of_event_ids,
-            room_depth,
+            discovery_collection_of_event_ids=discovery_collection_of_event_ids,
+            room_depth=room_depth,
             is_final_phase=True,
         )

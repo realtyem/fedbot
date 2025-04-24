@@ -66,15 +66,13 @@ class FederationHandler:
         await self.room_version_cache.stop()
         await self.api.shutdown()
 
-    async def get_server_keys(self, server_name: str, **kwargs) -> ServerVerifyKeys:
-        response = await self.api.get_server_keys(server_name=server_name, **kwargs)
+    async def get_server_keys(self, server_name: str) -> ServerVerifyKeys:
+        response = await self.api.get_server_keys(server_name=server_name)
 
         json_response = response.json_response
         return ServerVerifyKeys(json_response)
 
-    async def get_server_keys_from_notary(
-        self, fetch_server_name: str, from_server_name: str, **kwargs
-    ) -> ServerVerifyKeys:
+    async def get_server_keys_from_notary(self, fetch_server_name: str, from_server_name: str) -> ServerVerifyKeys:
         minimum_valid_until_ts = int(time.time() * 1000) + (30 * 60 * 1000)  # Add 30 minutes
 
         response = await self.api.get_server_notary_keys(
@@ -89,9 +87,7 @@ class FederationHandler:
 
         return server_verify_keys
 
-    async def get_server_key_by_id(
-        self, for_server_name: str, key_id_needed: str, **kwargs
-    ) -> Dict[KeyID, KeyContainer]:
+    async def get_server_key_by_id(self, for_server_name: str, key_id_needed: str) -> Dict[KeyID, KeyContainer]:
         key_id_formatted = KeyID(key_id_needed)
 
         cached_server_keys = self._server_keys_cache.get(for_server_name)
@@ -99,10 +95,10 @@ class FederationHandler:
             if key_id_formatted in cached_server_keys.verify_keys:
                 return cached_server_keys.verify_keys
 
-        server_verify_keys = await self.get_server_keys(for_server_name, **kwargs)
+        server_verify_keys = await self.get_server_keys(for_server_name)
 
         if key_id_formatted not in server_verify_keys.verify_keys:
-            server_verify_keys = await self.get_server_keys_from_notary(for_server_name, self.hosting_server, **kwargs)
+            server_verify_keys = await self.get_server_keys_from_notary(for_server_name, self.hosting_server)
 
         # At this point we know
         # 1. Wasn't in the cache before(or at least this one key id wasn't)
@@ -189,6 +185,7 @@ class FederationHandler:
         origin_server: str,
         destination_server: str,
         event_id: str,
+        *,
         inject_new_data: Optional[Dict[str, Any]] = None,
         keys_to_pop: Optional[str] = None,
     ) -> Dict[str, EventBase]:
@@ -517,6 +514,7 @@ class FederationHandler:
         self,
         origin_server: Optional[str],
         destination_server: Optional[str],
+        *,
         include_all_networks: bool = False,
         limit: int = 10,
         since: Optional[str] = None,
@@ -762,6 +760,7 @@ class FederationHandler:
         destination_server: str,
         room_id: str,
         start_event_id: str,
+        *,
         limit: int = 1,
     ) -> List[EventBase]:
         """
@@ -867,7 +866,7 @@ class FederationHandler:
         return hosts_ordered
 
     async def get_event_auth(
-        self, origin_server: str, destination_server: str, room_id: str, event_id: str, **kwargs
+        self, origin_server: str, destination_server: str, room_id: str, event_id: str
     ) -> List[EventBase]:
         response = await self.api.get_event_auth(
             origin_server,

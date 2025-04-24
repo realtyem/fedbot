@@ -420,7 +420,7 @@ class DelegationHandler:
 
         return host_port_tuples
 
-    async def make_well_known_request(self, host: str, diag_info: DiagnosticInfo, **kwargs) -> Optional[Dict[str, Any]]:
+    async def make_well_known_request(self, host: str, diag_info: DiagnosticInfo) -> Optional[Dict[str, Any]]:
         """
         Make the GET request to the well-known endpoint. Borrow the error handling code from FederationHandler
         Args:
@@ -469,8 +469,8 @@ class DelegationHandler:
         ip_address: str,
         port: int,
         diag_info: DiagnosticInfo,
+        *,
         server_result: ServerResult,
-        **kwargs,
     ) -> Tuple[bool, Tuple[str, int], Optional[Dict[str, Any]], float]:
         """
         Make the GET request to the federation version endpoint. Borrow the error handling code from FederationHandler
@@ -522,6 +522,7 @@ class DelegationHandler:
         hostname: str,
         path: str,
         diag_info: DiagnosticInfo,
+        *,
         server_result: Optional[ServerResult] = None,
         force_ip: Optional[str] = None,
         force_port: Optional[int] = None,
@@ -891,7 +892,6 @@ class DelegationHandler:
         self,
         server_name: str,
         diag_info: DiagnosticInfo = DiagnosticInfo(False),
-        **kwargs,
     ) -> ServerResult:
         """
         Pulls in the necessary information for discovering any delegation for a server, then does a check on the
@@ -911,9 +911,7 @@ class DelegationHandler:
             ip_address, port = ip_port_tuple
             test_task_list.append(
                 asyncio.create_task(
-                    self.make_version_request(
-                        server_name, ip_address, int(port), diag_info, server_result=result, **kwargs
-                    )
+                    self.make_version_request(server_name, ip_address, int(port), diag_info, server_result=result)
                 )
             )
 

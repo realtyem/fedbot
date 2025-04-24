@@ -3269,6 +3269,7 @@ class FederationBot(RoomWalkCommand):
     async def backfill_command(
         self,
         command_event: MessageEvent,
+        *,
         room_id_or_alias: str | None,
         event_id: str | None,
         limit: str | None = None,

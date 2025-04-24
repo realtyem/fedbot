@@ -236,6 +236,7 @@ class DataSet:
         vert_delimiter: str | None,
         horz_delimiter: str | None,
         separator: str | None,
+        *,
         justification: Justify | None,
         preliminary_data: list[str] | None,
     ) -> None:

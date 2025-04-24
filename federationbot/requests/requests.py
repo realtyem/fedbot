@@ -115,6 +115,7 @@ class FederationRequests:
         self,
         server_name: str,
         path: str,
+        *,
         method: str = "GET",
         query_args: Sequence[tuple[str, Any]] | None = None,
         content: dict[str, Any] | None = None,
@@ -173,7 +174,7 @@ class FederationRequests:
                     ip_address,
                     server_name,
                     path,
-                    method,
+                    method=method,
                     query_args=query_args,
                     content=content,
                     origin_server=origin_server,
@@ -293,6 +294,7 @@ class FederationRequests:
         ip_address_and_port: IpAddressAndPort,
         host_name: str,
         path: str,
+        *,
         method: str = "GET",
         query_args: Sequence[tuple[str, Any]] | None = None,
         content: dict[str, Any] | None = None,
@@ -432,6 +434,7 @@ def authorization_headers(
     destination_name: str,
     request_method: str,
     uri: str,
+    *,
     content: Union[str, dict[str, Any]] | None = None,
 ) -> str:
     # Extremely borrowed from Matrix spec docs, linked above. Spelunked a bit into
