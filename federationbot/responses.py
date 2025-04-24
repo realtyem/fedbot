@@ -163,10 +163,15 @@ class RoomHeadData:
         self.prev_event_count = len(make_join_response_obj.prev_events)
         newest_timestamp = 0
         self.events_map = events_map
+
         for event in events_map.values():
             if not isinstance(event, EventError) and event.origin_server_ts > newest_timestamp:
                 newest_timestamp = event.origin_server_ts
                 self.newest_event = event
+        # In some way I've not been able to figure out, the make_join response is able to collect event ID's but then
+        # the server doesn't actually give any of them out. Pass this through as a last resort to get info
+        if not getattr(self, "newest_event") or self.newest_event is None:
+            raise MatrixError(**make_join_response_obj.__dict__)
 
     def print_summary_line(self) -> str:
         # Don't include glyphs from the event being summarized, we want the glyphs for the join response
