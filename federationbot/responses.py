@@ -48,6 +48,7 @@ class MatrixResponse:
     """
 
     http_code: int = field(default=0)
+    headers: CIMultiDictProxy[str] = field(default=None)
     reason: str = field(default="")
     json_response: dict[str, Any] = field(default_factory=dict)
     diag_info: DiagnosticInfo | None = field(default=None)
@@ -59,7 +60,7 @@ class MatrixResponse:
     tracing_context: SimpleNamespace | None = field(default=None)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class MatrixError(MatrixResponse, Exception):
     """
     Exception class for Matrix federation errors.
@@ -67,6 +68,10 @@ class MatrixError(MatrixResponse, Exception):
     Combines MatrixResponse fields with Python's Exception class to allow
     raising federation errors while preserving response data.
     """
+
+    def __post_init__(self) -> None:
+        self.errcode = self.json_response.get("errcode")
+        self.error = self.json_response.get("error")
 
 
 @dataclass(kw_only=True)
@@ -81,8 +86,6 @@ class MatrixFederationResponse(MatrixResponse):
         http_code: HTTP status code from federation response
         reason: Status message from federation response
     """
-
-    headers: CIMultiDictProxy[str]
 
 
 @dataclass(slots=True, kw_only=True)
