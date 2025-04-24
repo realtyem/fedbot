@@ -336,8 +336,24 @@ class FederationHandler:
         if isinstance(response, MatrixError):
             raise response
 
+        if response.http_code != 200:
+            raise MatrixError(**response.__dict__)
+
         pdu_list: List[Dict[str, Any]] = response.json_response.get("pdus", [])
-        assert len(pdu_list) == 1, f"More than one PDU was retrieved: {event_id}"
+        if len(pdu_list) < 1:
+            # When retrieving and event, there should only be a single pdu in the list. Should never be more than one,
+            # and sometimes there are none. WHat makes this problematic is when the response returns a 200, then has no
+            # data. This case will be caught in get_event() below
+            fed_handler_logger.debug(
+                "get_raw_pdu: PDU list problem: %s: %s: code: %d", destination_server, event_id, response.http_code
+            )
+            fed_handler_logger.debug(
+                "get_raw_pdu: PDU list problem %s: %s:\n%s",
+                destination_server,
+                event_id,
+                json.dumps(response.json_response, indent=2),
+            )
+            return {}
         return pdu_list[0]
 
     async def get_event(self, origin_server: str, destination_server: str, event_id: str) -> EventBase:
