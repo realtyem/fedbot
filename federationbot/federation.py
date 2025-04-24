@@ -397,15 +397,13 @@ class FederationHandler:
             queue: asyncio.Queue[str],
         ) -> Tuple[str, EventBase]:
             worker_host = await queue.get()
-            returned_events = await self.get_event_from_server(
+            returned_event = await self.get_event(
                 origin_server=origin_server,
                 destination_server=worker_host,
                 event_id=event_id,
             )
-            inner_returned_event = returned_events.get(event_id)
-            assert inner_returned_event is not None
             queue.task_done()
-            return worker_host, inner_returned_event
+            return worker_host, returned_event
 
         # Create a collection of Task's, to run the coroutine in
         reference_task_key = self.task_controller.setup_task_set()
