@@ -539,12 +539,15 @@ class FederationHandler:
 
         except MatrixError:
             # whine about it
-            fed_handler_logger.warning("discover_room_version: Failed to make_join to room: %s", room_id)
+            fed_handler_logger.warning(
+                "discover_room_version: Failed to make_join to room: %s from %s", room_id, destination_server
+            )
 
         else:
             if response.http_code == 200:
                 room_version = response.room_version
-                self.room_version_cache.set(room_id, room_version)
+                if room_id not in self.room_version_cache:
+                    self.room_version_cache.set(room_id, room_version)
 
                 return room_version
 
@@ -560,16 +563,22 @@ class FederationHandler:
                 auth_event = await self.get_raw_pdu(origin_server, destination_server, auth_event_id)
                 if room_version := auth_event.get("content", {}).get("room_version"):
                     # Found it
-                    self.room_version_cache.set(room_id, room_version)
+                    if room_id not in self.room_version_cache:
+                        self.room_version_cache.set(room_id, room_version)
                     break
         except MatrixError as e:
             fed_handler_logger.warning(
-                "discover_room_version: Hit exception pulling last event in room: %s\n%r", room_id, e
+                "discover_room_version: Hit exception pulling last event in room: %s from %s\n%r",
+                room_id,
+                destination_server,
+                e,
             )
 
         else:
-            self.room_version_cache.set(room_id, room_version)
+            if room_id not in self.room_version_cache:
+                self.room_version_cache.set(room_id, room_version)
 
+        # We still don't have a room version, federation is playing a rough game. Maybe just pull state?
         assert room_version is not None, f"room_version was unexpectedly None for {room_id}"
         return room_version
 
