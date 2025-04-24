@@ -98,7 +98,7 @@ class FederationApi:
                 that the server_name is the actual hostname.
             path: The path to query
             query_args: Optional query arguments as a sequence of Tuples
-            method: GET, POST, etc
+            method: GET, POST, etc.
             origin_server: if authing this request, the server originating the request
             server_result: Allows access to server discovery data, like port, host
                 header, and sni data
@@ -226,7 +226,7 @@ class FederationApi:
             raise FedBotException(e.__class__.__name__, str(e.message)) from e
 
         except client_exceptions.ServerTimeoutError as e:
-            # ServerTimeoutError is asyncio.TimeoutError under it's hood
+            # ServerTimeoutError is asyncio.TimeoutError under its hood
             raise PluginTimeout(
                 e.__class__.__name__,
                 f"{e.__class__.__name__} after {SOCKET_TIMEOUT_SECONDS} seconds",
@@ -284,11 +284,10 @@ class FederationApi:
                 handled within
             path: The path component of the outgoing url
             query_args: the query component to send
-            method: The method to use for the request: GET, PUT, etc
+            method: The method to use for the request: GET, PUT, etc.
             force_rediscover: in case we need to bypass the cache to redo server
                 discovery
             diagnostics: Collect diagnostic data. Errors are always collected
-            timeout: Float of how many seconds before timeout
             origin_server: The server to send the request as, signing keys will be
                 required to be setup in the config files for authed requests
             content: for non-GET requests, the Dict that will be transformed into json
@@ -454,7 +453,6 @@ class FederationApi:
     async def get_server_version_new(
         self,
         server_name: str,
-        force_rediscover: bool = False,
         diagnostics: bool = False,
     ) -> MatrixResponse:
         response = await self.federation_transport.request(
@@ -470,7 +468,7 @@ class FederationApi:
 
         return response
 
-    async def get_server_keys(self, server_name: str, **kwargs) -> MatrixResponse:
+    async def get_server_keys(self, server_name: str) -> MatrixResponse:
         # response = await self.federation_request(
         #     server_name,
         #     "/_matrix/key/v2/server",
