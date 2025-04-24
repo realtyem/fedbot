@@ -163,4 +163,8 @@ class RoomHeadData:
                 self.newest_event = event
 
     def print_summary_line(self) -> str:
-        return self.newest_event.to_summary() + f" | {self.auth_event_count * 'A'}:{self.prev_event_count * 'P'}"
+        # Don't include glyphs from the event being summarized, we want the glyphs for the join response
+        return (
+            self.newest_event.to_summary(include_glyphs=False)
+            + f" | {self.auth_event_count * 'A'}:{self.prev_event_count * 'P'}"
+        )

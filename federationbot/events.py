@@ -159,8 +159,19 @@ class EventBase:
         summary += f"{dc_sender.pad(self.sender)} "
         return summary
 
-    def to_summary(self) -> str:
+    def to_summary(self, include_glyphs: bool = True) -> str:
+        """
+        Prints simple summary line about this event. Optionally include A and P markers to
+        indicate how many auth and prev events are attached
+        Args:
+            include_glyphs:
+
+        Returns:
+
+        """
         summary = f"{self.event_id} | {pretty_print_timestamp(self.origin_server_ts)}"
+        if include_glyphs:
+            summary += f" | {len(self.auth_events) * 'A'}:{len(self.prev_events) * 'P'}"
         return summary
 
     def to_extras_summary(self) -> str:
@@ -351,7 +362,7 @@ class EventError(EventBase):
         summary += f"{self.error}"
         return summary
 
-    def to_summary(self) -> str:
+    def to_summary(self, include_glyphs: bool = True) -> str:
         summary = f"{self.event_id} | {self.errcode} | {self.error}"
         return summary
 
