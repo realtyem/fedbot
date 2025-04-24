@@ -367,10 +367,19 @@ class FederationHandler:
         Returns:
 
         """
-        pdu = await self.get_raw_pdu(origin_server, destination_server, event_id)
+        try:
+            pdu = await self.get_raw_pdu(origin_server, destination_server, event_id)
+        except MatrixError as e:
+            return EventError(EventID(event_id), {"errcode": e.errcode, "error": e.error})
+        if not pdu:
+            # I'm not sure the circumstances in this, but was found in one instance. I did check the rest of the
+            # response returned before passing thru get_raw_pdu(), and it had the other required fields
+            return EventError(
+                EventID(event_id), {"errcode": "I_DONT_KNOW", "error": "HTTP returned 200, but no usable data"}
+            )
         room_id = pdu.get("room_id")
-        if room_id is None:
-            raise MatrixError(errcode=pdu.get("errcode"), error=pdu.get("error"))
+        assert room_id is not None, f"get_event: {destination_server}: {event_id}: no room ID found"
+
         room_version = await self.discover_room_version(origin_server, destination_server, room_id)
         return determine_what_kind_of_event(event_id=None, room_version=room_version, data_to_use=pdu)
 
