@@ -329,7 +329,7 @@ class ServerDiscoveryResolver:
                 if isinstance(cached_result, WellKnownDiagnosticResult):
                     diagnostics.log(f"    host and port: {cached_result.host}:{cached_result.port}")
                 elif isinstance(cached_result, WellKnownLookupFailure):
-                    logger.warning("get_well_known: %s found cached error:\n%r", server_name, cached_result)
+                    logger.debug("get_well_known: %s found cached error:\n%r", server_name, cached_result)
                     diagnostics.log(f"    code: {cached_result.status_code}, reason: {cached_result.reason}")
                 else:
                     assert isinstance(cached_result, NoWellKnown)
@@ -343,7 +343,7 @@ class ServerDiscoveryResolver:
         if isinstance(result, WellKnownDiagnosticResult):
             self._well_known_cache.set(server_name, result)
         elif isinstance(result, WellKnownLookupFailure):
-            logger.warning("get_well_known: %s received failure:\n%r", server_name, result)
+            logger.debug("get_well_known: %s received failure:\n%r", server_name, result)
             self._well_known_cache.set(server_name, result, 30 * 1000)
 
         return result
