@@ -6,7 +6,7 @@ import json
 import logging
 import time
 
-from mautrix.types import EventID
+from mautrix.types import EventID, RoomID
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
 
@@ -28,6 +28,7 @@ from federationbot.responses import (
     MatrixError,
     MatrixFederationResponse,
     MatrixResponse,
+    RoomHeadData,
     TimestampToEventResponse,
 )
 from federationbot.types import KeyContainer, RoomAlias, ServerVerifyKeys, SignatureVerifyResult
@@ -638,6 +639,45 @@ class FederationHandler:
             raise response
 
         return MakeJoinResponse(**response.__dict__)
+
+    async def get_room_head(
+        self, origin_server: str, destination_server: str, room_id: str | RoomID, user_id: str
+    ) -> RoomHeadData:
+        """
+        Pre-calculate HEAD data on the room requested
+        Args:
+            origin_server:
+            destination_server:
+            room_id:
+            user_id:
+
+        Returns:
+
+        """
+        make_join = await self.make_join_to_server(origin_server, destination_server, room_id, user_id)
+        if make_join.http_code != 200:
+            raise MatrixError(
+                http_code=make_join.http_code,
+                errcode=make_join.json_response.get("errcode"),
+                error=make_join.json_response.get("error"),
+            )
+
+        events_list = []
+        for event_id in make_join.prev_events:
+            event = await self.get_event(origin_server, destination_server, event_id)
+            if isinstance(event, EventError):
+                fed_handler_logger.debug(
+                    "get_room_head: %s: %s: %s: error while retrieving event\n%r",
+                    destination_server,
+                    room_id,
+                    event_id,
+                    event,
+                )
+                continue
+            events_list.append(event)
+
+        room_head = RoomHeadData(make_join, events_list)
+        return room_head
 
     async def get_last_event_id_in_room(
         self,

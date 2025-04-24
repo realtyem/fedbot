@@ -41,7 +41,7 @@ from federationbot.resolver import (
     WellKnownLookupFailure,
     WellKnownLookupResult,
 )
-from federationbot.responses import MakeJoinResponse, MatrixError, MatrixFederationResponse, MatrixResponse
+from federationbot.responses import MatrixError, MatrixFederationResponse, MatrixResponse, RoomHeadData
 from federationbot.utils.bitmap_progress import BitmapProgressBar, BitmapProgressBarStyle
 from federationbot.utils.colors import Colors
 from federationbot.utils.display import DisplayLineColumnConfig, Justify, pad
@@ -1605,7 +1605,7 @@ class FederationBot(RoomWalkCommand):
 
     @fed_command.subcommand(name="head", help="experiment for retrieving information about a room")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
-    async def head_command(self, command_event: MessageEvent, room_id_or_alias: str) -> None:
+    async def head_command(self, command_event: MessageEvent, room_id_or_alias: str | None) -> None:
         """
         Get room head information.
 
@@ -1630,129 +1630,80 @@ class FederationBot(RoomWalkCommand):
         )
         if not room_data:
             return
-        assert isinstance(room_data.list_of_servers_in_room, list), "List of servers was None, they must be escaping"
 
+        assert isinstance(room_data.list_of_servers_in_room, list), "List of servers was None, they must be escaping"
+        await command_event.respond(f"Found {len(room_data.list_of_servers_in_room)} servers")
         list_of_message_ids: list[EventID] = []
 
-        host_queue: asyncio.Queue[str] = asyncio.Queue()
-        for host in room_data.list_of_servers_in_room:
-            host_queue.put_nowait(host)
-
-        async def _head_task(
-            _queue: asyncio.Queue[str],
-        ) -> tuple[str, MakeJoinResponse | MatrixError]:
-            _host = await _queue.get()
+        async def _head_task(_host: str) -> tuple[str, RoomHeadData | MatrixError]:
             try:
-                join_response = await self.federation_handler.make_join_to_server(
+                join_response = await self.federation_handler.get_room_head(
                     origin_server,
                     _host,
                     room_data.room_id,
                     str(self.client.mxid),
                 )
             except MatrixError as _e:
-                # self.log.warning(f"_head_task: {_host}: {_e}")
-                _queue.task_done()
                 return _host, _e
 
-            # One way or the other, we return the response
-            _queue.task_done()
+            except Exception as _e:
+                self.log.warning("_head_task: %s: %r", _host, _e)
+                return _host, _e
+
             return _host, join_response
 
         reference_task_key = self.reaction_task_controller.setup_task_set()
+        start_time = time.time()
 
+        set_of_server_names = set(room_data.list_of_servers_in_room)
         # These are one-off tasks, not workers. Create as many as we have servers to check
-        self.reaction_task_controller.add_tasks(
-            reference_task_key,
-            _head_task,
-            host_queue,
-            limit=min(len(room_data.list_of_servers_in_room), MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST),
-        )
+        for host in room_data.list_of_servers_in_room:
+            self.reaction_task_controller.add_tasks(
+                reference_task_key,
+                _head_task,
+                host,
+                limit=1,
+            )
 
-        results: Sequence[tuple[str, MakeJoinResponse | MatrixError]] = (
+        results: Sequence[tuple[str, RoomHeadData | MatrixError]] = (
             await self.reaction_task_controller.get_task_results(reference_task_key, return_exceptions=False)
         )
 
         await self.reaction_task_controller.cancel(reference_task_key)
-
+        end_time = time.time()
         list_of_buffered_messages: list[str] = []
+        list_of_bad_responses: list[str] = []
 
         server_name_dc = DisplayLineColumnConfig("Server Name")
 
-        good_results_queue: asyncio.Queue[tuple[str, MakeJoinResponse]] = asyncio.Queue()
-        bad_results_queue: asyncio.Queue[tuple[str, MatrixError]] = asyncio.Queue()
+        # Preprocess the results for the column widths
+        for result in results:
+            _host_sort, _result_sort = result
+            server_name_dc.maybe_update_column_width(_host_sort)
+
         # Split the results
         for result in results:
             try:
                 _host_sort, _result_sort = result
-                server_name_dc.maybe_update_column_width(_host_sort)
-
+                set_of_server_names.discard(_host_sort)
                 if isinstance(_result_sort, MatrixError):
-                    bad_results_queue.put_nowait((_host_sort, _result_sort))
+                    list_of_bad_responses.extend(
+                        (f"{server_name_dc.pad(_host_sort)}: {_result_sort.http_code}, {_result_sort.reason}",)
+                    )
+
                 else:
-                    assert isinstance(_result_sort, MakeJoinResponse)
-                    good_results_queue.put_nowait((_host_sort, _result_sort))
+                    assert isinstance(_result_sort, RoomHeadData), f"while splitting results: {result}"
+                    list_of_buffered_messages.extend(
+                        (f"{server_name_dc.pad(_host_sort)}: {_result_sort.print_summary_line()}",)
+                    )
+
             except BaseException as e:
                 self.log.warning("Found an exception: %r", e)
 
-        async def _head_parsing_worker(_queue: asyncio.Queue[tuple[str, MakeJoinResponse]]) -> None:
-            _host, _result = _queue.get_nowait()
-            prev_events = _result.prev_events
-            # The process to follow:
-            # 1. retrieve all the prev_events
-            # 2. iterate through those to find the event with the latest timestamp
-            retrieved_prev_events = await self.federation_handler.get_events_from_server(
-                origin_server=origin_server,
-                destination_server=_host,
-                events_list=prev_events,
-            )
-
-            timestamp_from_newest = 0
-            event_from_newest = None
-            for (
-                retrieved_event_id,
-                retrieved_event,
-            ) in retrieved_prev_events.items():
-                # Save the initial map entry
-                assert isinstance(retrieved_event, Event)
-                if retrieved_event.origin_server_ts > timestamp_from_newest:
-                    timestamp_from_newest = retrieved_event.origin_server_ts
-                    event_from_newest = retrieved_event
-
-            assert event_from_newest is not None
-            glyph_auth_events = "".join(["A" for _ in event_from_newest.auth_events])
-            glyph_prev_events = "".join(["P" for _ in event_from_newest.prev_events])
-            list_of_buffered_messages.extend(
-                (
-                    f"{server_name_dc.pad(_host)}: {event_from_newest.event_id} | {pretty_print_timestamp(event_from_newest.origin_server_ts)} | {glyph_auth_events}:{glyph_prev_events}",
-                )
-            )
-            _queue.task_done()
-
-        async def _head_error_worker(_queue: asyncio.Queue[tuple[str, MatrixError]]) -> None:
-            _host_error, _result_error = _queue.get_nowait()
-            list_of_buffered_messages.extend(
-                (f"{server_name_dc.pad(_host_error)}: {_result_error.http_code}, {_result_error.reason}",)
-            )
-            _queue.task_done()
-
-        reference_task_key = self.reaction_task_controller.setup_task_set()
-
-        # These are one-off tasks, not workers. Create as many as we have servers to check
-        self.reaction_task_controller.add_tasks(
-            reference_task_key,
-            _head_parsing_worker,
-            good_results_queue,
-            limit=good_results_queue.qsize(),
+        list_of_buffered_messages.extend(list_of_bad_responses)
+        list_of_buffered_messages.append(
+            f"\nprocessing time: {(end_time - start_time):.3f}\nservers unaccounted for: {set_of_server_names}"
         )
-
-        self.reaction_task_controller.add_tasks(
-            reference_task_key,
-            _head_error_worker,
-            bad_results_queue,
-            limit=bad_results_queue.qsize(),
-        )
-        await self.reaction_task_controller.get_task_results(reference_task_key)
-        await self.reaction_task_controller.cancel(reference_task_key)
 
         final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
         for message in final_buffer_messages:

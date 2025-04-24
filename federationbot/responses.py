@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from multidict import CIMultiDictProxy
 
+from federationbot.events import EventBase
 from federationbot.resolver import Diagnostics, ServerDiscoveryBaseResult
 
 if TYPE_CHECKING:
@@ -140,3 +141,26 @@ class TimestampToEventResponse:
         origin_server_ts = matrix_response.json_response.get("origin_server_ts")
         assert isinstance(origin_server_ts, int)
         self.origin_server_ts = origin_server_ts
+
+
+@dataclass(slots=True, init=False)
+class RoomHeadData:
+    """
+    Object to contain the data at the very newest end of the room
+    """
+
+    newest_event: EventBase
+    auth_event_count: int
+    prev_event_count: int
+
+    def __init__(self, make_join_response_obj: MakeJoinResponse, events_list: list[EventBase]) -> None:
+        self.auth_event_count = len(make_join_response_obj.auth_events)
+        self.prev_event_count = len(make_join_response_obj.prev_events)
+        newest_timestamp = 0
+        for event in events_list:
+            if event.origin_server_ts > newest_timestamp:
+                newest_timestamp = event.origin_server_ts
+                self.newest_event = event
+
+    def print_summary_line(self) -> str:
+        return self.newest_event.to_summary() + f" | {self.auth_event_count * 'A'}:{self.prev_event_count * 'P'}"
