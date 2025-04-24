@@ -1687,7 +1687,6 @@ class FederationBot(RoomWalkCommand):
 
         assert isinstance(room_data.list_of_servers_in_room, list), "List of servers was None, they must be escaping"
         await command_event.respond(f"Found {len(room_data.list_of_servers_in_room)} servers")
-        list_of_message_ids: list[EventID] = []
 
         async def _head_task(_host: str) -> tuple[str, RoomHeadData | MatrixError]:
             try:
@@ -1764,9 +1763,7 @@ class FederationBot(RoomWalkCommand):
             current_message = await command_event.respond(
                 make_into_text_event(wrap_in_code_block_markdown(message), ignore_body=True),
             )
-            list_of_message_ids.extend([current_message])
-        for message_id in list_of_message_ids:
-            await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
+            await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
 
     # I think the command map should look a little like this:
     # (defaults will be marked with * )
