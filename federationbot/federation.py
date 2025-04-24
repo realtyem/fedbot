@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 import asyncio
+import itertools
 import json
 import logging
 import time
@@ -704,20 +705,26 @@ class FederationHandler:
             )
 
         events_list = []
-        for event_id in make_join.prev_events:
+        for event_id in itertools.chain(make_join.prev_events, make_join.auth_events):
             event = await self.get_event(origin_server, destination_server, event_id)
             if isinstance(event, EventError):
                 fed_handler_logger.debug(
-                    "get_room_head: %s: %s: %s: error while retrieving event\n%r",
+                    "get_room_head: %s: %s: %s: error while retrieving event: %s: %s",
                     destination_server,
                     room_id,
                     event_id,
-                    event,
+                    event.errcode,
+                    event.error
                 )
-                continue
+                # continue
             events_list.append(event)
 
-        room_head = RoomHeadData(make_join, events_list)
+        # Make the list a map for easier lookup in RoomHeadData
+        events_map: dict[str, EventBase] = {}
+        for event in events_list:
+            events_map[event.event_id] = event
+
+        room_head = RoomHeadData(make_join, events_map)
         return room_head
 
     async def get_last_event_id_in_room(

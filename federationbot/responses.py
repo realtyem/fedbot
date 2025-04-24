@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 from multidict import CIMultiDictProxy
 
-from federationbot.events import EventBase
+from federationbot.events import EventBase, EventError
 from federationbot.resolver import Diagnostics, ServerDiscoveryBaseResult
 
 if TYPE_CHECKING:
@@ -153,14 +153,16 @@ class RoomHeadData:
     newest_event: EventBase
     auth_event_count: int
     prev_event_count: int
+    events_map: dict[str, EventBase]
 
-    def __init__(self, make_join_response_obj: MakeJoinResponse, events_list: list[EventBase]) -> None:
+    def __init__(self, make_join_response_obj: MakeJoinResponse, events_map: dict[str, EventBase]) -> None:
         self.make_join_response = make_join_response_obj
         self.auth_event_count = len(make_join_response_obj.auth_events)
         self.prev_event_count = len(make_join_response_obj.prev_events)
         newest_timestamp = 0
-        for event in events_list:
-            if event.origin_server_ts > newest_timestamp:
+        self.events_map = events_map
+        for event in events_map.values():
+            if not isinstance(event, EventError) and event.origin_server_ts > newest_timestamp:
                 newest_timestamp = event.origin_server_ts
                 self.newest_event = event
 
