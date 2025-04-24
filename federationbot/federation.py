@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Collection, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 import asyncio
 import json
