@@ -8,10 +8,12 @@ from dns.name import from_text
 from dns.nameserver import Do53Nameserver, Nameserver
 from dns.rdataclass import IN
 from dns.rdatatype import AAAA, CNAME, SRV, A, RdataType
-from dns.resolver import NXDOMAIN, LRUCache, NoAnswer, NoNameservers
+from dns.resolver import NXDOMAIN, LifetimeTimeout, LRUCache, NoAnswer, NoNameservers
+import backoff
 import dns
 
 from federationbot.cache import TTLCache
+from federationbot.requests.backoff import backoff_dns_backoff_logging_handler, backoff_dns_giveup_logging_handler
 from federationbot.resolver import Diagnostics, DnsResult, ServerDiscoveryDnsResult, StatusEnum
 
 logger = logging.getLogger("dns")
@@ -88,16 +90,16 @@ class CachingDNSResolver:
         # The lifetime we can touch, make it longer to give some more time for slow DNS servers
         self.dns_resolver.lifetime = 10.0
 
-    # @backoff.on_exception(
-    #     backoff.expo,
-    #     (dns.exception.Timeout, dns.resolver.NoNameservers),
-    #     max_tries=1,
-    #     logger=None,
-    #     on_backoff=[backoff_dns_backoff_logging_handler],
-    #     on_giveup=[backoff_dns_giveup_logging_handler],
-    #     max_value=2.0,
-    #     base=1.0,
-    # )
+    @backoff.on_exception(
+        backoff.expo,
+        (LifetimeTimeout, dns.resolver.NoNameservers),
+        max_tries=1,
+        logger=None,
+        on_backoff=[backoff_dns_backoff_logging_handler],
+        on_giveup=[backoff_dns_giveup_logging_handler],
+        max_value=2.0,
+        base=1.0,
+    )
     async def query(
         self,
         server_name: str,
@@ -155,6 +157,9 @@ class CachingDNSResolver:
             if diagnostics.status.dns != StatusEnum.OK:
                 diagnostics.status.dns = StatusEnum.ERROR
                 diagnostics.log(f"  {e}")
+
+        except LifetimeTimeout:
+            raise
 
         except Exception as e:
             logger.error("%s: %r", server_name, e, exc_info=True)
