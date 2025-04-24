@@ -301,8 +301,9 @@ class FederationBotCommandBase(Plugin):
                 )
         else:
             try:
+                # We know that the bot is in the room, so this should work locally
                 ts_response = await self.federation_handler.get_last_event_id_in_room(
-                    origin_server, destination_server, room_id
+                    origin_server, origin_server, room_id
                 )
                 newest_event_id = ts_response.event_id
                 timestamp = ts_response.origin_server_ts
