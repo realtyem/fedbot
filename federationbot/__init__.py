@@ -1746,14 +1746,16 @@ class FederationBot(RoomWalkCommand):
                 _host_sort, _result_sort = result
                 set_of_server_names.discard(_host_sort)
                 if isinstance(_result_sort, MatrixError):
-                    list_of_bad_responses.extend(
-                        (f"{server_name_dc.pad(_host_sort)}: {_result_sort.http_code}, {_result_sort.reason}",)
+                    list_of_bad_responses.append(
+                        f"{server_name_dc.pad(_host_sort)}: {_result_sort.http_code}, {_result_sort.reason or _result_sort.error}"
                     )
 
                 else:
-                    assert isinstance(_result_sort, RoomHeadData), f"while splitting results: {result}"
-                    list_of_buffered_messages.extend(
-                        (f"{server_name_dc.pad(_host_sort)}: {_result_sort.print_summary_line()}",)
+                    assert isinstance(
+                        _result_sort, RoomHeadData
+                    ), f"while splitting results, _result_sort was not RoomHeadData: {_result_sort}"
+                    list_of_buffered_messages.append(
+                        f"{server_name_dc.pad(_host_sort)}: {_result_sort.print_summary_line()}"
                     )
 
             except BaseException as e:
