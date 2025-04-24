@@ -149,11 +149,13 @@ class RoomHeadData:
     Object to contain the data at the very newest end of the room
     """
 
+    make_join_response: MakeJoinResponse
     newest_event: EventBase
     auth_event_count: int
     prev_event_count: int
 
     def __init__(self, make_join_response_obj: MakeJoinResponse, events_list: list[EventBase]) -> None:
+        self.make_join_response = make_join_response_obj
         self.auth_event_count = len(make_join_response_obj.auth_events)
         self.prev_event_count = len(make_join_response_obj.prev_events)
         newest_timestamp = 0
