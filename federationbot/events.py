@@ -17,6 +17,7 @@ from federationbot.utils import (
     extract_max_value_len_from_dict,
     full_dict_copy,
 )
+from federationbot.utils.time import pretty_print_timestamp
 
 EVENT_ID = "Event ID"
 EVENT_TYPE = "Event Type"
@@ -156,6 +157,10 @@ class EventBase:
         # Unlike other places, we do pad the final space here, as there may be more
         # columns that can be added in subclasses.
         summary += f"{dc_sender.pad(self.sender)} "
+        return summary
+
+    def to_summary(self) -> str:
+        summary = f"{self.event_id} | {pretty_print_timestamp(self.origin_server_ts)}"
         return summary
 
     def to_extras_summary(self) -> str:
@@ -306,6 +311,7 @@ class EventBase:
 class EventError(EventBase):
     def __init__(self, event_id: EventID, data: Dict[str, Any]) -> None:  # noqa W0231
         # super().__init__(event_id, data)
+        self.event_id = event_id
         self.error = data.get("error", "Unknown Error")
         self.errcode = data.get("errcode", "Unknown Error")
 
@@ -337,12 +343,16 @@ class EventError(EventBase):
             at the end
         """
         # depth, event_id, event_type, sender
-        summary = f"{dc_depth.pad(str(self.depth))} "
+        summary = f"{dc_depth.pad('')} "
         summary += f"{dc_eid.pad(self.event_id)} "
         summary += f"{dc_etype.pad(self.errcode)} "
         # Unlike other places, we do pad the final space here, as there may be more
         # columns that can be added in subclasses.
         summary += f"{self.error}"
+        return summary
+
+    def to_summary(self) -> str:
+        summary = f"{self.event_id} | {self.errcode} | {self.error}"
         return summary
 
 
