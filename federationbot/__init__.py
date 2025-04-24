@@ -1761,6 +1761,8 @@ class FederationBot(RoomWalkCommand):
             except BaseException as e:
                 self.log.warning("Found an exception: %r", e)
 
+        list_of_buffered_messages = sorted(list_of_buffered_messages)
+        list_of_bad_responses = sorted(list_of_bad_responses)
         list_of_buffered_messages.extend(list_of_bad_responses)
         list_of_buffered_messages.append(
             f"\nprocessing time: {(end_time - start_time):.3f}\nservers unaccounted for: {set_of_server_names}"
