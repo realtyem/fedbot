@@ -2043,24 +2043,13 @@ class FederationBot(RoomWalkCommand):
         )
         list_of_message_ids: list[EventID] = [prerender_message]
 
-        # Collect all the Federation Responses as well as the EventBases.
-        # Errors can be found in the Responses.
-        returned_events = await self.federation_handler.get_event_from_server(
+        returned_event = await self.federation_handler.get_raw_pdu(
             origin_server=origin_server,
             destination_server=destination_server,
             event_id=event_id,
         )
 
-        buffered_message = ""
-        returned_event = returned_events.get(event_id)
-        if isinstance(returned_event, EventError):
-            buffered_message += f"received an error\n{returned_event.errcode}:{returned_event.error}"
-
-        else:
-            assert isinstance(returned_event, EventBase)
-            buffered_message += f"{returned_event.event_id}\n"
-            # EventBase.to_json() does not have a trailing new line, add one
-            buffered_message += returned_event.to_json() + "\n"
+        buffered_message = json.dumps(returned_event, indent=2) + "\n"
 
         # It is extremely unlikely that an Event will be larger than can be displayed.
         # Don't bother chunking the response.
