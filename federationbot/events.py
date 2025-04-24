@@ -172,6 +172,7 @@ class EventBase:
         summary = f"{self.event_id} | {pretty_print_timestamp(self.origin_server_ts)}"
         if include_glyphs:
             summary += f" | {len(self.auth_events) * 'A'}:{len(self.prev_events) * 'P'}"
+        summary += f" | {self.to_short_type_summary()}"
         return summary
 
     def to_extras_summary(self) -> str:
@@ -311,10 +312,10 @@ class EventBase:
 
         summary = ""
         for auth_event in self.auth_events:
-            summary += f"{dc.front_pad(auth_header)}: {auth_event}: {event_data_map.get(auth_event, '')}\n"
+            summary += f"{dc.front_pad(auth_header)}: {event_data_map.get(auth_event, '')}\n"
 
         for prev_event in self.prev_events:
-            summary += f"{dc.front_pad(prev_header)}: {prev_event}: {event_data_map.get(prev_event, '')}\n"
+            summary += f"{dc.front_pad(prev_header)}: {event_data_map.get(prev_event, '')}\n"
 
         return summary
 
@@ -325,9 +326,6 @@ class EventError(EventBase):
         self.event_id = event_id
         self.error = data.get("error", "Unknown Error")
         self.errcode = data.get("errcode", "Unknown Error")
-
-    def to_short_type_summary(self) -> str:
-        return f"{self.errcode} {self.error}"
 
     def to_line_summary(
         self,
@@ -998,11 +996,11 @@ class GenericStateEvent(StrippedStateEvent, Event):
         dc.maybe_update_column_width(17)
         summary = super().to_pretty_summary_footer(event_data_map, dc)
         for prev_state in self.prev_state:
-            summary += (
-                f"{dc.front_pad('<- Prev State')}: {prev_state}: {event_data_map.get(prev_state, 'Data Missing')}\n"
-            )
+            summary += f"{dc.front_pad('<- Prev State')}: {event_data_map.get(prev_state, 'Data Missing')}\n"
         if self.replaces_state:
-            summary += f"{dc.front_pad('-> Replaces State')}: {self.replaces_state}: {event_data_map.get(self.replaces_state, 'Data Missing')}\n"
+            summary += (
+                f"{dc.front_pad('-> Replaces State')}: {event_data_map.get(self.replaces_state, 'Data Missing')}\n"
+            )
 
         return summary
 

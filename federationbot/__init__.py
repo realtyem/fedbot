@@ -2162,7 +2162,7 @@ class FederationBot(RoomWalkCommand):
             for a_event_id in list_of_a_event_ids:
                 a_event_base = a_returned_events.get(a_event_id)
                 if a_event_base:
-                    a_event_data_map[a_event_id] = a_event_base.to_short_type_summary()
+                    a_event_data_map[a_event_id] = a_event_base.to_summary()
                     if isinstance(a_event_base, CreateRoomStateEvent):
                         found_room_version = a_event_base.room_version
 
@@ -2176,7 +2176,7 @@ class FederationBot(RoomWalkCommand):
             buffered_message += "\n"
             buffered_message += returned_event.to_pretty_summary_content()
             buffered_message += returned_event.to_pretty_summary_unrecognized()
-            buffered_message += returned_event.to_pretty_summary_footer(event_data_map=a_event_data_map)
+            buffered_message += returned_event.to_pretty_summary_footer(a_event_data_map)
 
         current_message = await command_event.respond(wrap_in_code_block_markdown(buffered_message))
         list_of_message_ids.extend([current_message])
