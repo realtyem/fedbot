@@ -48,8 +48,8 @@ class MatrixResponse:
         tracing_context: Request timing data for debugging
     """
 
+    headers: CIMultiDictProxy[str] | None = None
     http_code: int = field(default=0)
-    headers: CIMultiDictProxy[str] = field(default=None)
     reason: str = field(default="")
     json_response: dict[str, Any] = field(default_factory=dict)
     diag_info: DiagnosticInfo | None = field(default=None)
@@ -87,6 +87,8 @@ class MatrixFederationResponse(MatrixResponse):
         http_code: HTTP status code from federation response
         reason: Status message from federation response
     """
+
+    headers: CIMultiDictProxy[str] = field(init=True)
 
 
 @dataclass(slots=True, kw_only=True)
