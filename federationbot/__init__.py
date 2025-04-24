@@ -1644,12 +1644,18 @@ class FederationBot(RoomWalkCommand):
 
         destination_server = target_server
         list_of_message_ids: list[EventID] = []
-        room_head_data = await self.federation_handler.get_room_head(
-            origin_server, destination_server, room_data.room_id, self.client.mxid
-        )
+        list_of_buffered_messages: list[str] = []
+        try:
+            room_head_data = await self.federation_handler.get_room_head(
+                origin_server, destination_server, room_data.room_id, self.client.mxid
+            )
+        except MatrixError as e:
+            list_of_buffered_messages.append(f"{e.errcode}: {e.error}")
+            list_of_buffered_messages.append(f"{json.dumps(e.json_response, indent=2)}")
 
-        list_of_buffered_messages = [json.dumps(room_head_data.make_join_response.json_response, indent=2)]
-        list_of_buffered_messages.extend(room_head_data.print_detailed_lines())
+        else:
+            list_of_buffered_messages.append(json.dumps(room_head_data.make_join_response.json_response, indent=2))
+            list_of_buffered_messages.extend(room_head_data.print_detailed_lines())
         final_buffer_messages = combine_lines_to_fit_event(list_of_buffered_messages, None, True)
         for message in final_buffer_messages:
             current_message = await command_event.respond(
