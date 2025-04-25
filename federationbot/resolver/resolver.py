@@ -68,7 +68,7 @@ class ServerDiscoveryResolver:
 
     _had_well_known_cache: TTLCache[str, str]
     _well_known_cache: TTLCache[str, WellKnownLookupResult]
-    server_discovery_cache: TTLCache[str, ServerDiscoveryResult]
+    server_discovery_cache: TTLCache[str, ServerDiscoveryBaseResult]
     json_decoder: JSONDecoder
     exp_dns_resolver: CachingDNSResolver
 
@@ -100,23 +100,17 @@ class ServerDiscoveryResolver:
         # well known should have a rather long time on it by default, failures will have
         # a shorter time to prevent consistent "re-lookups"
         self._well_known_cache = TTLCache(ttl_default_ms=WELL_KNOWN_LOOKUP_GOOD_TTL_MS)
-        self.server_discovery_cache: TTLCache[str, ServerDiscoveryBaseResult] = TTLCache()
+        self.server_discovery_cache = TTLCache()
         self.exp_dns_resolver = CachingDNSResolver()
 
     async def discover_server(self, server_name: str, run_diagnostics: bool = False) -> ServerDiscoveryBaseResult:
-        logger.debug("Discovering server: %s", server_name)
         cached_server_result = self.server_discovery_cache.get(server_name)
         # We borrow from the intention that if run_diagnostics is True then force rediscovery
         if cached_server_result and not run_diagnostics:
-            logger.debug("Using cached response for: %s\n%r", server_name, cached_server_result)
             return cached_server_result
 
         server_result = await self._discover_server(server_name, run_diagnostics=run_diagnostics)
-        logger.debug("Server discovery complete for: %s\n%r", server_name, server_result)
-        self.server_discovery_cache.set(
-            server_name,
-            server_result,
-        )
+        self.server_discovery_cache.set(server_name, server_result)
         return server_result
 
     async def _discover_server(self, server_name: str, run_diagnostics: bool = False) -> ServerDiscoveryBaseResult:
