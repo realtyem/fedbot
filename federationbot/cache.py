@@ -223,7 +223,7 @@ class TTLCache(Generic[KT, VT]):
     def __getitem__(self, key: KT, _return_raw: bool = False) -> TTLCacheEntry[VT] | VT | None:
         with self._lock:
             if cache_entry := self._cache.get(key, None):
-                if cache_entry.ttl < self._time_cb():
+                if cache_entry.ttl < self._time_cb() * 1000:
                     self._cache.pop(key)
                 if _return_raw:
                     return cache_entry
