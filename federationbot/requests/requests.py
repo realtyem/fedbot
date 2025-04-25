@@ -139,8 +139,8 @@ class FederationRequests:
 
         """
         server_result = await self.server_discovery.discover_server(server_name, run_diagnostics=run_diagnostics)
-        logger.debug("request: %s: server result retrieved: %r", server_name, server_result)
         if isinstance(server_result, ServerDiscoveryErrorResult):
+            logger.debug("request: %s: server result retrieved: %r", server_name, server_result)
             return MatrixError(
                 reason=server_result.error,
                 diagnostics=server_result.diagnostics,
