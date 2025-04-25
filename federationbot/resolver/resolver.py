@@ -448,7 +448,7 @@ class ServerDiscoveryResolver:
                         text_result = await response.text()
                         content = self.json_decoder.decode(text_result)
                     except json.decoder.JSONDecodeError as e:
-                        logger.info(f"text_result: {len(text_result)} bytes")
+                        logger.info("text_result: %d bytes", len(text_result))
                         diagnostics.log(
                             f"    JSONDecodeError, work-around failed. Content length was: {len(text_result) if text_result else 0}"
                         )

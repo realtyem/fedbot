@@ -328,7 +328,7 @@ class FederationApi:
             )
 
         except (FedBotException, ServerDiscoveryDNSError) as e:
-            fedapi_logger.warning(f"Problem on {destination_server_name}: {e}")
+            fedapi_logger.warning("Problem on %s: %r", destination_server_name, e)
             # All the inner exceptions that can be raised are given a code of 0, representing an outside error
             if isinstance(e, FedBotException):
                 diag_info.error(str(e.long_exception))

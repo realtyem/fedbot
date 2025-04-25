@@ -199,7 +199,7 @@ class ServerDiscoveryBaseResult:
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class ServerDiscoveryResult(ServerDiscoveryBaseResult):
     """
     The fully resolved data for connecting to a Matrix federation server endpoint
@@ -216,7 +216,6 @@ class ServerDiscoveryResult(ServerDiscoveryBaseResult):
     host_header: str
     sni: str
     time_for_complete_delegation: float
-    # diagnostics: Diagnostics | None = None
 
 
 @dataclass(slots=True)
@@ -226,7 +225,6 @@ class ServerDiscoveryErrorResult(ServerDiscoveryBaseResult):
     """
 
     error: str
-    # diagnostics: Diagnostics | None = None
 
 
 @dataclass(slots=True)

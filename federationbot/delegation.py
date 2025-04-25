@@ -430,7 +430,7 @@ class DelegationHandler:
         Returns: A Dict[str, Any] of the JSON returned, or None
 
         """
-        status, request_time, content = await self.make_simple_request(
+        status, _, content = await self.make_simple_request(
             host,
             "/.well-known/matrix/server",
             diag_info,
