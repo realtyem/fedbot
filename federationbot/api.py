@@ -805,11 +805,12 @@ class FederationApi:
 
         if response.http_code != 200:
             fedapi_logger.debug(
-                "make_join: %s: got %d: %s %s",
+                "make_join: %s: got %d: %s %s %s",
                 destination_server,
                 response.http_code,
                 response.errcode,
-                response.error or response.reason or response.json_response,
+                response.error or response.reason,
+                response.json_response,
             )
 
         return response
