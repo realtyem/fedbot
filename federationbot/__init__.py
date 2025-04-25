@@ -4331,8 +4331,8 @@ class FederationBot(RoomWalkCommand):
                         )
                     )
                     servers_to_contact.discard(worker_server_name)
-                except Exception:
-                    # self.log.warning("discover worker error on %s: %r", worker_server_name, e, exc_info=True)
+                except Exception as e:
+                    self.log.warning("discover worker error on %s: %r", worker_server_name, e, exc_info=True)
                     pass
                 queue.task_done()
 
