@@ -1704,10 +1704,6 @@ class FederationBot(RoomWalkCommand):
             except MatrixError as _e:
                 return _host, _e
 
-            except Exception as _e:
-                self.log.warning("_head_task: %s: %r", _host, _e)
-                return _host, _e
-
             return _host, join_response
 
         reference_task_key = self.reaction_task_controller.setup_task_set()
