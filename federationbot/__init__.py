@@ -22,7 +22,6 @@ from unpaddedbase64 import encode_base64
 from federationbot.commands.room_walk import RoomWalkCommand
 from federationbot.constants import (
     BACKOFF_MULTIPLIER,
-    MAX_NUMBER_OF_SERVERS_FOR_CONCURRENT_REQUEST,
     MAX_NUMBER_OF_SERVERS_TO_ATTEMPT,
     NOT_IN_ROOM_ERROR,
     SECONDS_BETWEEN_EDITS,
