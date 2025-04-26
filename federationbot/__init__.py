@@ -2570,56 +2570,44 @@ class FederationBot(RoomWalkCommand):
         aliases=["versions"],
         help="Check a server in the room for version info",
     )
-    @command.argument(name="server_to_check", label="Server to check", required=True)
-    async def version_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
-        if not server_to_check:
-            await command_event.reply(
-                "**Usage**: !fed version <server_name>\n - Check a server in the room for version info",
-            )
-            return
+    @command.argument(name="room_or_server", label="Server to check", required=True)
+    async def version_command(self, command_event: MessageEvent, room_or_server: str) -> None:
+        """
+        Retrieves and displays information about the version of a server's software
 
+        Args:
+            command_event: The event that triggered the command
+            room_or_server: Server name or room ID/alias to test
+        """
+        list_of_servers_to_check: list[str] = []
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        list_of_servers_to_check = set()
-
-        # It may be that they are using their mxid as the server to check, parse that
-        maybe_user_mxid = is_mxid(server_to_check)
-        if maybe_user_mxid:
-            server_to_check = get_domain_from_id(maybe_user_mxid)
-
         # As an undocumented option, allow passing in a room_id to check an entire room.
-        # This can be rather long(and time consuming) so we'll place limits later.
-        maybe_room_id = is_room_id_or_alias(server_to_check)
-        if maybe_room_id:
-            origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
-            # Need to cancel server_to_check, but can't use None
-            server_to_check = ""
-            if not room_to_check:
+        if is_room_id_or_alias(room_or_server):
+            origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+            if origin_server is None:
+                return
+            destination_server = origin_server
+            room_data = await self.get_room_data(
+                origin_server,
+                destination_server,
+                command_event,
+                # We determined above that this is actually a room_id or alias
+                room_or_server,
+                get_servers_in_room=True,
+                use_origin_room_as_fallback=False,
+            )
+            if not room_data:
                 # Don't need to actually display an error, that's handled in the above
                 # function
                 return
-        else:
-            room_to_check = command_event.room_id
+            assert room_data.list_of_servers_in_room is not None
+            list_of_servers_to_check = room_data.list_of_servers_in_room
 
-        # If the room id was passed in, then this will turn into None
-        if not server_to_check:
-            # Get the members this bot knows about in this room
-            # TODO: try and find a way to not use the client API for this
-            try:
-                assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-
-            for member in joined_members:
-                list_of_servers_to_check.add(get_domain_from_id(member))
-
-        else:
-            list_of_servers_to_check.add(server_to_check)
+        # If the whole room was to be searched, this will already be filled in. Otherwise, there is our target
+        if not list_of_servers_to_check:
+            list_of_servers_to_check.append(room_or_server)
 
         number_of_servers = len(list_of_servers_to_check)
 
