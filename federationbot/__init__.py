@@ -2998,15 +2998,10 @@ class FederationBot(RoomWalkCommand):
     async def notary_server_keys_command(
         self,
         command_event: MessageEvent,
-        server_to_check: str | None,
+        server_to_check: str,
         notary_server_to_use: str | None,
     ) -> None:
-        if not server_to_check:
-            await command_event.reply(
-                "**Usage**: !fed notary_server_keys <server_name> [notary_to_ask]\n"
-                " - Check a server in the room for version info",
-            )
-            return
+
         await self._server_keys_from_notary(command_event, server_to_check, notary_server_to_use=notary_server_to_use)
 
     @fed_command.subcommand(name="notary_server_keys_raw")
@@ -3015,15 +3010,10 @@ class FederationBot(RoomWalkCommand):
     async def notary_server_keys_raw_command(
         self,
         command_event: MessageEvent,
-        server_to_check: str | None,
+        server_to_check: str,
         notary_server_to_use: str | None,
     ) -> None:
-        if not server_to_check:
-            await command_event.reply(
-                "**Usage**: !fed notary_server_keys <server_name> [notary_to_ask]\n"
-                " - Check a server in the room for version info",
-            )
-            return
+
         await self._server_keys_from_notary(
             command_event,
             server_to_check,
@@ -3050,61 +3040,40 @@ class FederationBot(RoomWalkCommand):
             notary_server_to_use: Notary server to query, defaults to sender's server
             display_raw: Whether to display raw JSON response
         """
+        list_of_servers_to_check: list[str] = []
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        # It may be that they are using their mxid as the server to check, parse that
-        maybe_user_mxid = is_mxid(server_to_check)
-        if maybe_user_mxid:
-            server_to_check = get_domain_from_id(maybe_user_mxid)
+        if not server_to_check:
+            server_to_check = str(command_event.room_id)
 
         # As an undocumented option, allow passing in a room_id to check an entire room.
-        # This can be rather long(and time consuming) so we'll place limits later.
-        maybe_room_id = is_room_id_or_alias(server_to_check)
-        if maybe_room_id:
-            origin_server = get_domain_from_id(self.client.mxid)
-            room_to_check, _ = await self.resolve_room_id_or_alias(maybe_room_id, command_event, origin_server)
-            # Need to cancel server_to_check, but can't use None
-            server_to_check = ""
-            if not room_to_check:
+        if is_room_id_or_alias(server_to_check):
+            origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+            if origin_server is None:
+                return
+            destination_server = origin_server
+            room_data = await self.get_room_data(
+                origin_server,
+                destination_server,
+                command_event,
+                # We determined above that this is actually a room_id or alias
+                server_to_check,
+                get_servers_in_room=True,
+                use_origin_room_as_fallback=False,
+            )
+            if not room_data:
                 # Don't need to actually display an error, that's handled in the above
                 # function
                 return
-        else:
-            room_to_check = command_event.room_id
+            assert room_data.list_of_servers_in_room is not None
+            list_of_servers_to_check = room_data.list_of_servers_in_room
 
-        list_of_servers_to_check = set()
-        # If the room id was passed in, then this will turn into None
-        if not server_to_check:
-            try:
-                assert isinstance(room_to_check, str)
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-
-            for member in joined_members:
-                list_of_servers_to_check.add(get_domain_from_id(member))
-
-        else:
-            list_of_servers_to_check.add(server_to_check)
+        # If the whole room was to be searched, this will already be filled in. Otherwise, there is our target
+        if not list_of_servers_to_check:
+            list_of_servers_to_check.append(server_to_check)
 
         number_of_servers = len(list_of_servers_to_check)
-        if number_of_servers > 1 and display_raw:
-            await command_event.respond(
-                "Only can see raw JSON data if a single server is selected(as the response would be super spammy).",
-            )
-            return
-
-        if number_of_servers > MAX_NUMBER_OF_SERVERS_TO_ATTEMPT:
-            await command_event.respond(
-                f"To many servers in this room: {number_of_servers}. Please select "
-                "a specific server instead.\n\n(This command can have a very large"
-                f" response. Max supported is {MAX_NUMBER_OF_SERVERS_TO_ATTEMPT})",
-            )
-            return
-
         if number_of_servers > 1 and display_raw:
             await command_event.respond(
                 "Only can see raw JSON data if a single server is selected(as the response would be super spammy).",
@@ -3118,10 +3087,10 @@ class FederationBot(RoomWalkCommand):
         if number_of_servers == 1:
             about_statement = f"about {list_of_servers_to_check} "
         prerender_message = await command_event.respond(
-            f"Retrieving data {about_statement}from federation for "
-            f"{number_of_servers} server"
-            f"{'s' if number_of_servers > 1 else ''}\n"
-            f"Using {notary_server_to_use}",
+            f"Retrieving data {about_statement}from {notary_server_to_use} for "
+            f"{number_of_servers} server{'s' if number_of_servers > 1 else ''}\n"
+            # Because we may or may not have processed the origin_server above
+            f"Using {self.federation_handler.hosting_server}",
         )
         list_of_message_ids: list[EventID] = [prerender_message]
 
