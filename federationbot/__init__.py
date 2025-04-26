@@ -3756,8 +3756,8 @@ class FederationBot(RoomWalkCommand):
         await command_event.respond(wrap_in_code_block_markdown(json.dumps(public_room_result.json_response, indent=4)))
 
     @fed_command.subcommand(name="publicrooms")
-    @command.argument(name="target_server", required=False)
-    async def publicrooms_subcommand(self, command_event: MessageEvent, target_server: str | None) -> None:
+    @command.argument(name="target_server", required=True)
+    async def publicrooms_subcommand(self, command_event: MessageEvent, target_server: str) -> None:
         """
         Get formatted public rooms list.
 
@@ -3768,9 +3768,6 @@ class FederationBot(RoomWalkCommand):
             target_server: Server to query public rooms from
         """
         await command_event.mark_read()
-        if not target_server:
-            await command_event.reply("I need a target server to look at")
-            return
 
         # DisplayConfig objects, per column
         alias_dc = DisplayLineColumnConfig("canonical_alias")
@@ -3812,25 +3809,15 @@ class FederationBot(RoomWalkCommand):
 
             chunks: list[dict[str, Any]] = public_room_result.json_response.get("chunk", [])
             for entry in chunks:
-                # self.log.info(f"chunk: {entry}")
-                alias = entry.get("canonical_alias", None)
-                room_id = entry.get("room_id", None)
-                name = entry.get("name", None)
-                num_joined_members = entry.get("num_joined_members", None)
-                join_rule = entry.get("join_rule", None)
-                world_readable = entry.get("world_readable", None)
-                guest_can_join = entry.get("guest_can_join", None)
-                avatar_url = entry.get("avatar_url", None)
-
-                alias_dc.maybe_update_column_width(alias)
-                room_id_dc.maybe_update_column_width(room_id)
-                name_dc.maybe_update_column_width(name)
+                alias_dc.maybe_update_column_width(entry.get("canonical_alias", None))
+                room_id_dc.maybe_update_column_width(entry.get("room_id", None))
+                name_dc.maybe_update_column_width(entry.get("name", None))
                 # This next one gives up an int, which means the column will be huge. string it
-                num_joined_members_dc.maybe_update_column_width(str(num_joined_members))
-                join_rule_dc.maybe_update_column_width(join_rule)
-                world_readable_dc.maybe_update_column_width(world_readable)
-                guest_can_join_dc.maybe_update_column_width(guest_can_join)
-                avatar_url_dc.maybe_update_column_width(avatar_url)
+                num_joined_members_dc.maybe_update_column_width(str(entry.get("num_joined_members", None)))
+                join_rule_dc.maybe_update_column_width(entry.get("join_rule", None))
+                world_readable_dc.maybe_update_column_width(entry.get("world_readable", None))
+                guest_can_join_dc.maybe_update_column_width(entry.get("guest_can_join", None))
+                avatar_url_dc.maybe_update_column_width(entry.get("avatar_url", None))
 
                 collected_chunks_fragments.append(entry)
             # TODO: after implementing auto-retry lose this
@@ -3838,25 +3825,15 @@ class FederationBot(RoomWalkCommand):
 
         list_of_buffered_lines = []
         for chunk in collected_chunks_fragments:
-            alias = chunk.get("canonical_alias", "")
-            room_id = chunk.get("room_id", "")
-            name = chunk.get("name", "")
-            num_joined_members = chunk.get("num_joined_members", "")
-            join_rule = chunk.get("join_rule", "")
-            world_readable = chunk.get("world_readable", "")
-            guest_can_join = chunk.get("guest_can_join", "")
-            avatar_url = chunk.get("avatar_url", "")
-            list_of_buffered_lines.extend(
-                [
-                    f"{room_id_dc.pad(room_id)}: "
-                    f"{alias_dc.pad(alias)} "
-                    f"{name_dc.pad(name)} "
-                    f"{num_joined_members_dc.pad(num_joined_members)} "
-                    f"{join_rule_dc.pad(join_rule)} "
-                    f"{guest_can_join_dc.pad(guest_can_join)} "
-                    f"{world_readable_dc.pad(world_readable)} "
-                    f"{avatar_url_dc.pad(avatar_url)}",
-                ]
+            list_of_buffered_lines.append(
+                f"{room_id_dc.pad(chunk.get('room_id', ''))}: "
+                f"{alias_dc.pad(chunk.get('canonical_alias', ''))} "
+                f"{name_dc.pad(chunk.get('name', ''))} "
+                f"{num_joined_members_dc.pad(chunk.get('num_joined_members', ''))} "
+                f"{join_rule_dc.pad(chunk.get('join_rule', ''))} "
+                f"{guest_can_join_dc.pad(chunk.get('guest_can_join', ''))} "
+                f"{world_readable_dc.pad(chunk.get('world_readable', ''))} "
+                f"{avatar_url_dc.pad(chunk.get('avatar_url', ''))}",
             )
 
         header_message = (
