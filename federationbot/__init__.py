@@ -3569,7 +3569,7 @@ class FederationBot(RoomWalkCommand):
     async def find_event_command(
         self,
         command_event: MessageEvent,
-        event_id: str | None,
+        event_id: str,
         room_id_or_alias: str,
     ) -> None:
         # Let the user know the bot is paying attention
@@ -3579,15 +3579,22 @@ class FederationBot(RoomWalkCommand):
         if not origin_server:
             return
 
-        room_id, _ = await self.resolve_room_id_or_alias(room_id_or_alias, command_event, origin_server)
-        if not room_id:
+        room_data = await self.get_room_data(
+            origin_server,
+            origin_server,
+            command_event,
+            room_id_or_alias,
+            get_servers_in_room=True,
+            use_origin_room_as_fallback=False,
+        )
+        if not room_data:
             # Don't need to actually display an error, that's handled in the above
             # function
             return
 
         prerender_message = await command_event.respond(
             f"Checking all hosts:\n"
-            f"* from Room: {room_id_or_alias or room_id}\n\n"
+            f"* from Room: {room_data.room_id}\n\n"
             f"for:\n"
             f"* Event ID: {event_id}\n"
             f"* Using {origin_server}\n\n"
@@ -3595,58 +3602,12 @@ class FederationBot(RoomWalkCommand):
         )
         list_of_message_ids: list[EventID] = [prerender_message]
 
-        # This will be assigned by now
-        assert event_id is not None
-
-        # Can not assume that the event_id supplied is in the room requested to search
-        # hosts of. Get the current hosts in the room
-        ts_response = await self.federation_handler.api.get_timestamp_to_event(
-            origin_server,
-            origin_server,
-            room_id,
-            int(time.time() * 1000),
-        )
-        if ts_response.http_code != 200:
-            host_list = []
-        else:
-            event_id_from_room_right_now: str | None = ts_response.json_response.get("event_id", None)
-            assert event_id_from_room_right_now is not None
-            self.log.debug("Timestamp to event responded with event_id: %r", event_id_from_room_right_now)
-            # Get all the hosts in the supplied room
-            host_list = await self.federation_handler.get_hosts_in_room_ordered(
-                origin_server,
-                origin_server,
-                room_id,
-                event_id_from_room_right_now,
-            )
-
-        use_ordered_list = True
-        if not host_list:
-            use_ordered_list = False
-            # Either the origin server doesn't have the state, or some other problem
-            # occurred. Fall back to the client api with current state. Obviously there
-            # are problems with this, but it will allow forward progress.
-            current_message = await command_event.respond(
-                "Failed getting hosts from State over federation, falling back to client API",
-            )
-            list_of_message_ids.extend([current_message])
-            try:
-                joined_members = await self.client.get_joined_members(RoomID(room_id))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
-                return
-
-            for member in joined_members:
-                host = get_domain_from_id(member)
-                if host not in host_list:
-                    host_list.extend([host])
-
         started_at = time.time()
+        assert isinstance(room_data.list_of_servers_in_room, list), "list of servers in room should be available"
         host_to_event_status_map = await self.federation_handler.find_event_on_servers(
             origin_server,
             event_id,
-            host_list,
+            room_data.list_of_servers_in_room,
         )
         total_time = time.time() - started_at
 
@@ -3657,29 +3618,20 @@ class FederationBot(RoomWalkCommand):
         for host in host_to_event_status_map:
             dc_host_config.maybe_update_column_width(len(host))
 
-        header_message = f"Hosts{'(in oldest order)' if use_ordered_list else ''} that found event '{event_id}'\n"
+        header_message = f"Hosts that found event '{event_id}'\n"
         list_of_result_data = []
         servers_had = 0
         servers_not_had = 0
-        for host in host_list:
+        for host in room_data.list_of_servers_in_room:
             result = host_to_event_status_map.get(host)
             buffered_message = ""
             if result:
                 if isinstance(result, EventError):
-                    errcode_result = ""
-                    if result.errcode is not None:
-                        try:
-                            errcode = int(result.errcode)
-                        except ValueError:
-                            errcode_result = dc_host_config.horizontal_separator + result.errcode
-                        else:
-                            errcode_result = dc_host_config.horizontal_separator + result.errcode if errcode > 0 else ""
                     buffered_message += (
                         f"{dc_host_config.pad(host)}"
                         f"{dc_host_config.horizontal_separator}"
                         f"{dc_result_config.pad('Fail')}"
                         # f"{dc_result_config.pad(add_color(bold('Fail'), foreground=Colors.WHITE, background=Colors.RED))}"
-                        f"{errcode_result}"
                         f"{dc_host_config.horizontal_separator}{result.error}"
                     )
                     servers_not_had += 1
