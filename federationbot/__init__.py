@@ -1789,22 +1789,7 @@ class FederationBot(RoomWalkCommand):
         help="Some simple diagnostics around federation server discovery",
     )
     @command.argument(name="server_to_check", label="Server To Check", required=True)
-    async def delegation_command(self, command_event: MessageEvent, server_to_check: str | None) -> None:
-        if not server_to_check:
-            # Only sub commands display the 'help' text field(for now at least). Tell
-            # them how it works.
-            await command_event.reply(
-                "**Usage**: !delegation <server_name>\n - Some simple diagnostics around federation server discovery",
-            )
-            return
-
-        await self._delegations(command_event, server_to_check)
-
-    async def _delegations(
-        self,
-        command_event: MessageEvent,
-        server_to_check: str,
-    ) -> None:
+    async def delegation_command(self, command_event: MessageEvent, server_to_check: str) -> None:
         """
         Check server delegation information.
 
