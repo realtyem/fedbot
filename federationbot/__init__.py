@@ -3725,12 +3725,12 @@ class FederationBot(RoomWalkCommand):
             await self.reaction_task_controller.add_cleanup_control(message_id, command_event.room_id)
 
     @fed_command.subcommand(name="publicrooms_raw")
-    @command.argument(name="target_server", required=False)
+    @command.argument(name="target_server", required=True)
     @command.argument(name="since", required=False)
     async def publicrooms_raw_subcommand(
         self,
         command_event: MessageEvent,
-        target_server: str | None,
+        target_server: str,
         since: str | None,
     ) -> None:
         """
@@ -3744,9 +3744,6 @@ class FederationBot(RoomWalkCommand):
             since: Optional pagination token
         """
         await command_event.mark_read()
-        if not target_server:
-            await command_event.reply("I need a target server to look at")
-            return
 
         public_room_result = await self.federation_handler.get_public_rooms_from_server(
             None,
