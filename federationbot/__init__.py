@@ -1784,47 +1784,6 @@ class FederationBot(RoomWalkCommand):
     #   - events  [room_id][how_many]   - retrieve the last how_many(or 10) events from
     #                                       room_id(or current room)
 
-    @fed_command.subcommand(name="summary", help="Print summary of the delegation portion of the spec")
-    async def summary(self, command_event: MessageEvent) -> None:
-        await command_event.mark_read()
-
-        current_message = cast(
-            "EventID",
-            await command_event.respond(
-                "Summary of how Delegation is processed for a Matrix homeserver.\n"
-                "The process to determine the ultimate final host:port is defined in "
-                "the [spec](https://spec.matrix.org/v1.9/server-server-api/#resolving-"
-                "server-names)\n"
-                + wrap_in_code_block_markdown(
-                    "Basically:\n"
-                    "1. If it's a literal IP, then use that either with the port supplied "
-                    "or 8448\n"
-                    "2. If it's a hostname with an explicit port, resolve with DNS to an "
-                    "A, AAAA or CNAME record\n"
-                    "3. If it's a hostname with no explicit port, request from\n"
-                    "   <server_name>/.well-known/matrix/server and parse the json. "
-                    "Anything\n"
-                    "   wrong, skip to step 4. Want "
-                    "<delegated_server_name>[:<delegated_port>]\n"
-                    "   3a. Same as 1 above, except don't just use 8448(step 3e)\n"
-                    "   3b. Same as 2 above.\n"
-                    "   3c. If no explicit port, check for a SRV record at\n"
-                    "       _matrix-fed._tcp.<delegated_server_name> to get the port "
-                    "number.\n"
-                    "       Resolve with A or AAAA(but not CNAME) record\n"
-                    "   3d. (deprecated) Check _matrix._tcp.<delegated_server_name> "
-                    "instead\n"
-                    "   3e. (there was no port, remember), resolve using provided "
-                    "delegated\n"
-                    "       hostname and use port 8448\n"
-                    "4. (no well-known) Check SRV record(same as 3c above)\n"
-                    "5. (deprecated) Check other SRV record(same as 3d above)\n"
-                    "6. Use the supplied server_name and try port 8448\n",
-                ),
-            ),
-        )
-        await self.reaction_task_controller.add_cleanup_control(current_message, command_event.room_id)
-
     @command.new(
         name="delegation",
         help="Some simple diagnostics around federation server discovery",
