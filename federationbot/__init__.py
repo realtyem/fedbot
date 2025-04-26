@@ -15,7 +15,7 @@ import time
 from canonicaljson import encode_canonical_json
 from maubot.handlers import command
 from mautrix.errors.request import MForbidden, MTooLarge
-from mautrix.types import EventID, Membership, RoomID
+from mautrix.types import EventID, RoomID
 from more_itertools import partition
 from unpaddedbase64 import encode_base64
 
@@ -2412,62 +2412,47 @@ class FederationBot(RoomWalkCommand):
         name="ping",
         help="Check a server(or room) for application response time",
     )
-    @command.argument(name="thing_to_test", label="Server or Room to test", required=False)
-    async def ping_command(self, command_event: MessageEvent, thing_to_test: str | None) -> None:
+    @command.argument(name="room_or_server", label="Server or Room to test", required=False)
+    async def ping_command(self, command_event: MessageEvent, room_or_server: str | None) -> None:
         """
         Check federation response time for a server or room's servers.
 
         Args:
             command_event: The event that triggered the command
-            thing_to_test: Server name or room ID/alias to test
-
-        Raises:
-            TypeError: If the event ID is not a string
+            room_or_server: Server name or room ID/alias to test
         """
+        list_of_servers_to_check: list[str] = []
         # Let the user know the bot is paying attention
         await command_event.mark_read()
 
-        list_of_servers_to_check = set()
+        if not room_or_server:
+            room_or_server = str(command_event.room_id)
 
-        room_to_check: str | None = str(command_event.room_id)
-
-        # Figure out what goes into list_of_servers_to_check
-        if thing_to_test:
-            # First, filter out if the thing passed in was a room. If it wasn't that means it was a server
-            if thing_to_test.startswith("#") or thing_to_test.startswith("!"):
-                if bool(is_room_id_or_alias(thing_to_test)):
-                    origin_server = get_domain_from_id(self.client.mxid)
-                    room_to_check, _ = await self.resolve_room_id_or_alias(thing_to_test, command_event, origin_server)
-
-                    if room_to_check is None:
-                        # This means they started with a room sigil, but it's not actually a room
-                        # or failed for another reason.
-                        # Don't need to actually display an error, that's handled in the above
-                        # function
-                        return
-
-            else:
-                # Assume whatever else they passed in must be a server
-                list_of_servers_to_check.add(thing_to_test)
-
-        if not list_of_servers_to_check:
-            # If nothing was passed in, or it wasn't a server name,
-            # then it must be a room or use the current room
-            # TODO: try and find a way to not use the client API for this
-            if not isinstance(room_to_check, str):
-                msg = "room_to_check must be a string"
-                raise TypeError(msg)
-            try:
-                joined_members = await self.client.get_joined_members(RoomID(room_to_check))
-
-            except MForbidden:
-                await command_event.respond(NOT_IN_ROOM_ERROR)
+        # As an undocumented option, allow passing in a room_id to check an entire room.
+        if is_room_id_or_alias(room_or_server):
+            origin_server = await self.get_origin_server_and_assert_key_exists(command_event)
+            if origin_server is None:
                 return
+            destination_server = origin_server
+            room_data = await self.get_room_data(
+                origin_server,
+                destination_server,
+                command_event,
+                # We determined above that this is actually a room_id or alias
+                room_or_server,
+                get_servers_in_room=True,
+                use_origin_room_as_fallback=False,
+            )
+            if not room_data:
+                # Don't need to actually display an error, that's handled in the above
+                # function
+                return
+            assert room_data.list_of_servers_in_room is not None
+            list_of_servers_to_check = room_data.list_of_servers_in_room
 
-            for member, status in joined_members.items():
-                # In case of members not being JOINed, just filter them out
-                if status.membership == Membership.JOIN:
-                    list_of_servers_to_check.add(get_domain_from_id(member))
+        # If the whole room was to be searched, this will already be filled in. Otherwise, there is our target
+        if not list_of_servers_to_check:
+            list_of_servers_to_check.append(room_or_server)
 
         number_of_servers = len(list_of_servers_to_check)
 
