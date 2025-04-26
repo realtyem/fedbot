@@ -1568,17 +1568,11 @@ class FederationBot(RoomWalkCommand):
         room_id = event.room_id
 
         if not room_version:
-            try:
-                # Try and catch the exception if the value returned was None
-                room_version = await self.federation_handler.discover_room_version(
-                    origin_server=origin_server,
-                    destination_server=origin_server,
-                    room_id=room_id,
-                )
-
-            except ValueError as e:
-                await command_event.reply(f"Error getting room version from room {room_id}: {str(e)}")
-                return
+            room_version = await self.federation_handler.discover_room_version(
+                origin_server=origin_server,
+                destination_server=origin_server,
+                room_id=room_id,
+            )
 
         assert room_version is not None
 
