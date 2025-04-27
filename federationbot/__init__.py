@@ -1080,13 +1080,13 @@ class FederationBot(RoomWalkCommand):
     )
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
     @command.argument(name="event_id", parser=is_event_id, required=True)
-    @command.argument(name="server_to_fix", required=False)
+    @command.argument(name="server_to_fix", required=True)
     async def repair_event_command(
         self,
         command_event: MessageEvent,
         room_id_or_alias: str,
         event_id: str,
-        server_to_fix: str | None = None,
+        server_to_fix: str,
     ) -> None:
         """
         Find an event and inject any necessary ancestors into the target server.
@@ -1100,6 +1100,13 @@ class FederationBot(RoomWalkCommand):
         6. Repeat until no more missing ancestors found
         7. Walk backwards through list sending events to target
 
+        Notes: Maybe make a change to always check the origin server first, as if it is present there we only need to
+            send that event and the server_to_fix will automatically try and pull the rest of the auth_events.
+
+            When the server_to_fix receives these events on their `/send` endpoint, it(or at least Synapse) will use the
+            authorization header to try and ask *that* server for the other events, even if they are not present.
+
+            This means the local server will be polled and if the events are not present the whole process will fail.
         Args:
             command_event: The event that triggered the command
             room_id_or_alias: Room ID or alias containing the event
@@ -1137,76 +1144,47 @@ class FederationBot(RoomWalkCommand):
             )
             return
 
-        # This does place a request, so need to use origin for auth
-        await command_event.respond("Resolving room alias(if it was one)")
-        room_id, list_of_room_alias_servers = await self.resolve_room_id_or_alias(
-            room_id_or_alias,
-            command_event,
-            origin_server,
+        await command_event.respond("Resolving room alias(if it was one) and retrieving list of hosts in room")
+        room_data = await self.get_room_data(
+            origin_server, destination_server, command_event, room_id_or_alias, get_servers_in_room=True
         )
-        if not room_id:
-            # The user facing error message was already sent
+        if room_data is None:
             return
-
-        # One way or another, we have a room id by now
-        if not room_id:
-            msg = "room_id must be set by this point"
-            raise ValueError(msg)
-
-        await command_event.respond(f"Collecting last event from room {room_id}")
-        # Try to use a server from the room alias response, but if there was none use something else
-        head_data = await self.federation_handler.make_join_to_server(
-            origin_server,
-            list_of_room_alias_servers[0] if list_of_room_alias_servers else destination_server,
-            room_id,
-            str(self.client.mxid),
-        )
-        # 2. Get the hosts in the room, test which ones are live and filter out the dead
-        await command_event.respond("Retrieving list of hosts in room")
-        host_list = await self.federation_handler.get_hosts_in_room_ordered(
-            origin_server,
-            destination_server,
-            room_id,
-            head_data.prev_events[0],
-        )
 
         good_host_list: list[str] = []
         # This will act as a prefetch to prime the server result cache, which can be
         # then checked directly
         await command_event.respond("Filtering out dead/unresponsive hosts")
-        await self._get_versions_from_servers(host_list)
-        for host in host_list:
-            server_result = self.federation_handler.api.server_discovery_cache.get(host, None)
-            if server_result and not server_result.unhealthy:
-                good_host_list.extend((host,))
-                # TODO: do we want to track the bad host list too?
+        assert isinstance(room_data.list_of_servers_in_room, list)
+        version_results = await self._get_versions_from_servers(room_data.list_of_servers_in_room)
+        for host in room_data.list_of_servers_in_room:
+            server_result = version_results.get(host)
+            if server_result and not isinstance(server_result, MatrixError):
+                good_host_list.append(host)
 
         # 3. Hunt for the event on those hosts, start at the top. Make a note when
         #   you've passed the 5th one that didn't have it.
         await command_event.respond("Hunting for event on list of good hosts")
 
-        room_version_of_found_event = head_data.room_version
-
         list_of_server_and_event_id_to_send = []
         event_ids_to_try_next: asyncio.Queue[str] = asyncio.Queue()
         event_ids_to_try_next.put_nowait(event_id)
-        not_done = True
-        while not_done:
+
+        while True:
             popped_event_id = await event_ids_to_try_next.get()
             # 4. Check the found Event for ancestor Events that are not on the target server
             server_to_event_result_map = await self.federation_handler.find_event_on_servers(
-                origin_server,
-                popped_event_id,
-                good_host_list,
+                origin_server, popped_event_id, good_host_list
             )
 
             await command_event.respond(f"Found event {popped_event_id} on {len(server_to_event_result_map)} servers")
             for event_base in server_to_event_result_map.values():
                 # But first, verify the events are valid
+                # TODO: what happens if it is not? Where is the handling for that?
+                #  Are we just hoping that one of them is?
                 if isinstance(event_base, Event):
                     await self.federation_handler.verify_signatures_and_annotate_event(
-                        event_base,
-                        room_version_of_found_event,
+                        event_base, room_data.room_version
                     )
 
             # count_of_how_many_servers_tried = 0
@@ -1214,7 +1192,7 @@ class FederationBot(RoomWalkCommand):
                 if isinstance(event_base, Event):
                     if event_base.signatures_verified:
                         # 5. Add to a List, so we can clearly walk backwards(filling them in order)
-                        list_of_server_and_event_id_to_send.append((event_base,))
+                        list_of_server_and_event_id_to_send.append(event_base)
                         # But, do we need more
                         for _prev_event_id in event_base.prev_events:
                             response_check_for_this_event = await self.federation_handler.get_event_from_server(
@@ -1241,7 +1219,7 @@ class FederationBot(RoomWalkCommand):
             # 6. Repeat from 3 until no more ancestor Events are found that are missing
             if event_ids_to_try_next.qsize() == 0:
                 # should be done
-                not_done = False
+                break
 
         # 7. Walk backwards through that list 'send'ing those events to the target
         # server. Check each result for errors, only do one at a time to wait for
@@ -1250,13 +1228,13 @@ class FederationBot(RoomWalkCommand):
 
         list_of_buffer_lines = [
             "Done for now, check logs\n",
-            f"found {len(host_list)} servers in that room\n",
+            f"found {len(room_data.list_of_servers_in_room)} servers in that room\n",
             f"found {len(good_host_list)} of good servers\n",
         ]
 
         # Need to do these in reverse, or the destination server will barf
         list_of_server_and_event_id_to_send.reverse()
-        for (event_base,) in list_of_server_and_event_id_to_send:
+        for event_base in list_of_server_and_event_id_to_send:
             if isinstance(event_base, Event):
                 response = await self.federation_handler.send_events_to_server(
                     origin_server,
@@ -1272,25 +1250,8 @@ class FederationBot(RoomWalkCommand):
             else:
                 self.log.info("Unexpectedly not sent %s", event_base)
 
-        # await command_event.respond(
-        #     f"Retrieving Hosts for \n"
-        #     f"* Room: {room_id_or_alias or room_id}\n"
-        #     f"* From {destination_server} using {origin_server}"
-        # )
-
         # Time to start rendering. Build the header lines first
-        header_message = "Placeholder header message\n"
-
-        # if limit:
-        #     # if limit is more than the number of hosts, fix it
-        #     limit = min(limit, len(host_list))
-        #     for host_number in range(0, limit):
-        #         list_of_buffer_lines.extend(
-        #             [f"{host_list[host_number:host_number+1]}\n"]
-        #         )
-        # else:
-        #     for host in host_list:
-        #         list_of_buffer_lines.extend([f"['{host}']\n"])
+        header_message = f"Attempting to send {event_id} and it's ancestors into {destination_server}\n\n"
 
         # Chunk the data as there may be a few 'pages' of it
         final_list_of_data = combine_lines_to_fit_event(list_of_buffer_lines, header_message)
