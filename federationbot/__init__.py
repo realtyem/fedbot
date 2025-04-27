@@ -1261,7 +1261,7 @@ class FederationBot(RoomWalkCommand):
                 make_into_text_event(wrap_in_code_block_markdown(chunk), ignore_body=True),
             )
 
-    @test_command.subcommand(name="room_hosts", help="List all hosts in a room, in order from earliest")
+    @test_command.subcommand(name="room_hosts", help="List all hosts in a room")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=False)
     @command.argument(name="limit", parser=is_int, required=False)
     @command.argument(name="server_to_request_from", required=False)
