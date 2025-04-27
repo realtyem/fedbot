@@ -234,10 +234,7 @@ class FederationBot(RoomWalkCommand):
         )
         await command_event.respond(stuff.json())
 
-    @test_command.subcommand(
-        name="alias",
-        help="test room alias from another server",
-    )
+    @test_command.subcommand(name="alias", help="Get raw room alias json from another server")
     @command.argument(name="room_id_or_alias", parser=is_room_id_or_alias, required=True)
     @command.argument(name="target_server", required=False)
     async def alias_subcommand(
@@ -258,10 +255,12 @@ class FederationBot(RoomWalkCommand):
         """
         origin_server = self.federation_handler.hosting_server
         destination_server = target_server or room_id_or_alias.split(":", maxsplit=1)[1]
-        self.log.warning("alias server: %s, alias: %s", destination_server, room_id_or_alias)
-        if room_id_or_alias.startswith("!"):
+
+        # The parser in the command should have caught this, but it may have bumped it to the target_server(unlikely)
+        if not room_id_or_alias.startswith("#"):
             await command_event.reply("I need a room alias not a room id")
             return
+
         stuff = await self.federation_handler.api.get_room_alias_from_directory(
             origin_server,
             destination_server,
