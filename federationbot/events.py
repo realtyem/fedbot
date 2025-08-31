@@ -1789,6 +1789,53 @@ class SpaceChildStateEvent(GenericStateEvent):
         return f"child: {self.state_key}"
 
 
+class PolicyRuleUserStateEvent(GenericStateEvent):
+    """
+    m.policy.rule.user
+    """
+
+    entity: str
+    reason: str
+    recommendation: str
+
+    def __init__(self, event_id: EventID, raw_data: Dict[str, Any]) -> None:
+        super().__init__(event_id, raw_data)
+        self.entity = self.content.pop("entity", "No 'entity' key found")
+        self.reason = self.content.pop("reason", "No 'reason' key found")
+        self.recommendation = self.content.pop("recommendation", "No 'recommendation' key found")
+
+    def to_pretty_summary(
+        self,
+        room_version: str,
+        dc: DisplayLineColumnConfig = DisplayLineColumnConfig(""),
+    ) -> str:
+        ent_header = "Entity"
+        reason_header = "Reason"
+        rec_header = "Recommendation"
+        # The biggest known header
+        dc.maybe_update_column_width(len(rec_header))
+        summary = super().to_pretty_summary(room_version, dc)
+        summary += dc.render_pretty_line(ent_header, self.entity)
+        summary += dc.render_pretty_line(reason_header, self.reason)
+        summary += dc.render_pretty_line(rec_header, self.recommendation)
+        return summary
+
+    def to_line_summary(
+        self,
+        dc_depth: DisplayLineColumnConfig = DisplayLineColumnConfig(EVENT_DEPTH),
+        dc_eid: DisplayLineColumnConfig = DisplayLineColumnConfig(EVENT_ID),
+        dc_etype: DisplayLineColumnConfig = DisplayLineColumnConfig(EVENT_TYPE),
+        dc_sender: DisplayLineColumnConfig = DisplayLineColumnConfig(EVENT_SENDER),
+    ) -> str:
+        summary = super().to_line_summary(dc_depth, dc_eid, dc_etype, dc_sender)
+        if self.state_key:
+            summary += self.to_extras_summary()
+        return summary
+
+    def to_extras_summary(self) -> str:
+        return f"reason={self.reason} recommendation={self.recommendation} entity={self.entity} "
+
+
 def determine_what_kind_of_event(
     event_id: Optional[EventID],
     room_version: Optional[str],
@@ -1835,6 +1882,8 @@ def determine_what_kind_of_event(
             return SpaceParentStateEvent(event_id, data_to_use)
         if event_type == "m.space.child":
             return SpaceChildStateEvent(event_id, data_to_use)
+        if event_type == "m.policy.rule.user":
+            return PolicyRuleUserStateEvent(event_id, data_to_use)
 
         return GenericStateEvent(event_id, data_to_use)
 
