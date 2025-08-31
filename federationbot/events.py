@@ -973,6 +973,9 @@ class StrippedStateEvent(EventBase):
         buffered_message += f"{dc.front_pad(state_key_header)}: {self.state_key}\n"
         return buffered_message
 
+    def to_short_type_summary(self) -> str:
+        return f"{self.event_type} sender={self.sender} state_key={self.state_key}"
+
 
 class GenericStateEvent(StrippedStateEvent, Event):
     """
