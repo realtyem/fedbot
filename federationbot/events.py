@@ -123,7 +123,10 @@ class EventBase:
             attributes, dc = template_item
             for each_attr in attributes:
                 if getattr(self, each_attr, False):
-                    summary += f"{dc.pad(getattr(self, each_attr))} "
+                    resolved_attr = getattr(self, each_attr)
+                    if each_attr == "origin_server_ts":
+                        resolved_attr = pretty_print_timestamp(resolved_attr)
+                    summary += f"{dc.pad(resolved_attr)} "
         return summary
 
     def to_line_summary(

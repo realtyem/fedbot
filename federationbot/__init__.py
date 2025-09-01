@@ -3161,6 +3161,7 @@ class FederationBot(RoomWalkCommand):
         dc_depth = DisplayLineColumnConfig("Depth")
         dc_eid = DisplayLineColumnConfig("Event ID", initial_size=44)
         dc_etype = DisplayLineColumnConfig("Event Type")
+        dc_ts = DisplayLineColumnConfig("Origin Server TS", initial_size=26)
         dc_sender = DisplayLineColumnConfig("Sender")
         dc_extras = DisplayLineColumnConfig("Extras")
 
@@ -3181,6 +3182,7 @@ class FederationBot(RoomWalkCommand):
         # Build the header line...
         header_message += f"{dc_depth.pad()} "
         header_message += f"{dc_eid.pad()} "
+        header_message += f"{dc_ts.pad()} "
         header_message += f"{dc_etype.pad()} "
         header_message += f"{dc_sender.pad()} "
         header_message += f"{dc_extras.pad()}\n"
@@ -3193,6 +3195,7 @@ class FederationBot(RoomWalkCommand):
         template_list = [
             (["depth"], dc_depth),
             (["event_id"], dc_eid),
+            (["origin_server_ts"], dc_ts),
             (["event_type"], dc_etype),
             (["sender"], dc_sender),
         ]
