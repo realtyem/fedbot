@@ -789,11 +789,11 @@ class FederationApi:
     ) -> MatrixResponse:
         # In an ideal world, this would expand correctly in aiohttp. In reality, it does not.
         # query_list={
-        #     "ver": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+        #     "ver": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
         # },
 
         query_list = []
-        for i in range(0, 11):
+        for i in range(0, 12):
             query_list.extend([("ver", f"{i + 1}")])
 
         response = await self.federation_transport.request(

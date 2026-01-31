@@ -39,8 +39,9 @@ def is_room_id(maybe_room_id: str) -> str | None:
     Returns:
         Room ID if valid, None otherwise
     """
-    if maybe_room_id.startswith("!") and ":" in maybe_room_id:
-        return maybe_room_id
+    if maybe_room_id.startswith("!"):
+        if ":" in maybe_room_id or len(maybe_room_id) == 44:
+            return maybe_room_id
 
     return None
 
