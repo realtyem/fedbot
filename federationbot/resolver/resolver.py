@@ -162,6 +162,8 @@ class ServerDiscoveryResolver:
                 time_for_complete_delegation=time.time() - time_start,
                 diagnostics=diag,
             )
+        else:
+            diag.log("  No port number found")
 
         # Step Three - Well known
         # well_known_resolved_results: list[ResolveResult] = []
@@ -221,6 +223,9 @@ class ServerDiscoveryResolver:
                     time_for_complete_delegation=time.time() - time_start,
                     diagnostics=diag,
                 )
+            else:
+                # The port was 0
+                diag.log("  No port found in well-known response")
 
             # Step 3.3 and 3.4, there was no port, resolve SRV records
             diag.log("Step 3.3(and 3.4) SRV query based on well known response")
